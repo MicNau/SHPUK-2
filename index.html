@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GLB Viewer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #f0f0f0;
+        }
+        
+        #container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+        }
+        
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-family: Arial, sans-serif;
+            font-size: 18px;
+            color: #333;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="canvas-container"></div>
+        <div id="loading">Loading model...</div>
+    </div>
+
+    <!-- Load Three.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.min.js"></script>
+    
+    <script>
+        // Main script
+        document.addEventListener('DOMContentLoaded', () => {
+            const container = document.getElementById('canvas-container');
+            const loadingElement = document.getElementById('loading');
+            
+            // Initialize scene
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xdddddd);
+            
+            // Initialize camera
+            const camera = new THREE.PerspectiveCamera(
+                75, 
+                window.innerWidth / window.innerHeight, 
+                0.1, 
+                1000
+            );
+            camera.position.set(0, 0, 5);
+            
+            // Initialize renderer
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+            
+            // Add lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1);
+            scene.add(directionalLight);
+            
+            // Add OrbitControls for mouse interaction
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 1;
+            controls.maxDistance = 100;
+            
+            // Load the GLB model
+            const loader = new THREE.GLTFLoader();
+            
+            loader.load(
+                'test.glb',
+                (gltf) => {
+                    // Add the loaded model to the scene
+                    scene.add(gltf.scene);
+                    
+                    // Adjust camera position based on the model size
+                    const box = new THREE.Box3().setFromObject(gltf.scene);
+                    const center = box.getCenter(new THREE.Vector3());
+                    const size = box.getSize(new THREE.Vector3()).length();
+                    
+                    camera.position.copy(center);
+                    camera.position.x += size * 1.5;
+                    camera.position.y += size * 0.5;
+                    camera.position.z += size * 1.5;
+                    camera.lookAt(center);
+                    
+                    // Update controls target to the model's center
+                    controls.target.copy(center);
+                    
+                    // Hide loading indicator
+                    loadingElement.style.display = 'none';
+                    
+                    console.log('Model loaded successfully');
+                },
+                (progress) => {
+                    console.log('Loading progress:', (progress.loaded / progress.total) * 100 + '%');
+                },
+                (error) => {
+                    console.error('Error loading model:', error);
+                    loadingElement.textContent = 'Error loading model. Please check the file.';
+                }
+            );
+            
+            // Handle window resize
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+            
+            // Animation loop
+            function animate() {
+                requestAnimationFrame(animate);
+                
+                // Update controls
+                controls.update();
+                
+                // Render the scene
+                renderer.render(scene, camera);
+            }
+            
+            animate();
+        });
+    </script>
+</body>
+</html>
