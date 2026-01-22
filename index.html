@@ -43,10 +43,10 @@
         <div id="loading">Loading model...</div>
     </div>
 
-    <!-- Load Three.js from CDN -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.min.js"></script>
+    <!-- Load Three.js locally -->
+    <script src="./js/three.min.js"></script>
+    <script src="./js/OrbitControls.js"></script>
+    <script src="./js/GLTFLoader.js"></script>
     
     <script>
         // Main script
@@ -92,39 +92,54 @@
             // Load the GLB model
             const loader = new THREE.GLTFLoader();
             
-            loader.load(
-                'test.glb',
-                (gltf) => {
-                    // Add the loaded model to the scene
-                    scene.add(gltf.scene);
-                    
-                    // Adjust camera position based on the model size
-                    const box = new THREE.Box3().setFromObject(gltf.scene);
-                    const center = box.getCenter(new THREE.Vector3());
-                    const size = box.getSize(new THREE.Vector3()).length();
-                    
-                    camera.position.copy(center);
-                    camera.position.x += size * 1.5;
-                    camera.position.y += size * 0.5;
-                    camera.position.z += size * 1.5;
-                    camera.lookAt(center);
-                    
-                    // Update controls target to the model's center
-                    controls.target.copy(center);
-                    
-                    // Hide loading indicator
-                    loadingElement.style.display = 'none';
-                    
-                    console.log('Model loaded successfully');
-                },
-                (progress) => {
-                    console.log('Loading progress:', (progress.loaded / progress.total) * 100 + '%');
-                },
-                (error) => {
-                    console.error('Error loading model:', error);
-                    loadingElement.textContent = 'Error loading model. Please check the file.';
-                }
-            );
+            // Add error handling for network issues
+fetch('test.glb')
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`Network response was not ok: ${response.status} ${response.statusText}`);
+        }
+        console.log('File fetched successfully, starting to load model...');
+        return response.arrayBuffer();
+    })
+    .then(arrayBuffer => {
+        loader.load(
+            URL.createObjectURL(new Blob([arrayBuffer])),
+            (gltf) => {
+                // Add the loaded model to the scene
+                scene.add(gltf.scene);
+                
+                // Adjust camera position based on the model size
+                const box = new THREE.Box3().setFromObject(gltf.scene);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3()).length();
+                
+                camera.position.copy(center);
+                camera.position.x += size * 1.5;
+                camera.position.y += size * 0.5;
+                camera.position.z += size * 1.5;
+                camera.lookAt(center);
+                
+                // Update controls target to the model's center
+                controls.target.copy(center);
+                
+                // Hide loading indicator
+                loadingElement.style.display = 'none';
+                
+                console.log('Model loaded successfully');
+            },
+            (progress) => {
+                console.log('Loading progress:', (progress.loaded / progress.total) * 100 + '%');
+            },
+            (error) => {
+                console.error('Error loading model:', error);
+                loadingElement.textContent = 'Error loading model. Please check the file.';
+            }
+        );
+    })
+    .catch(error => {
+        console.error('Fetch error:', error);
+        loadingElement.textContent = 'Error fetching model: ' + error.message;
+    });
             
             // Handle window resize
             window.addEventListener('resize', () => {
