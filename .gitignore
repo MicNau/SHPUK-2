@@ -1,1 +1,17 @@
-Nothing should be ignored since only source files (.html, .py) were added without any build artifacts, dependencies, or temporary files.
+```
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+```
