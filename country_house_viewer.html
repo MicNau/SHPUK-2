@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Country House 3D Viewer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #1a1a2e;
+    --panel: rgba(22, 22, 42, 0.92);
+    --border: rgba(255,255,255,0.08);
+    --accent: #e8a838;
+    --accent2: #c0392b;
+    --text: #e0ddd5;
+    --text-dim: #8a877f;
+    --slider-track: rgba(255,255,255,0.08);
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  #canvas-container {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 0;
+  }
+
+  canvas { display: block; }
+
+  /* Control Panel */
+  #panel {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    width: 320px;
+    background: var(--panel);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    z-index: 10;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  #panel.collapsed { transform: translateX(-280px); }
+  #panel.collapsed .panel-toggle { transform: rotate(180deg); }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .panel-header h2 {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+
+  .panel-toggle {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 18px;
+    transition: transform 0.3s ease, color 0.2s;
+    padding: 4px;
+  }
+  .panel-toggle:hover { color: var(--text); }
+
+  .panel-body {
+    padding: 16px 20px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+  }
+
+  .param-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .param-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+
+  .param-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 500;
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--slider-track);
+    outline: none;
+    cursor: pointer;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 3px solid var(--bg);
+    box-shadow: 0 0 8px rgba(232,168,56,0.4);
+    cursor: pointer;
+    transition: transform 0.15s;
+  }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 3px solid var(--bg);
+    cursor: pointer;
+  }
+
+  .info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+
+  .info-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .info-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  .section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+    margin-top: 4px;
+  }
+
+  /* Hint overlay */
+  #hint {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--panel);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 20px;
+    font-size: 12px;
+    color: var(--text-dim);
+    z-index: 10;
+    display: flex;
+    gap: 20px;
+    opacity: 1;
+    transition: opacity 1s ease 4s;
+    pointer-events: none;
+  }
+  #hint span { white-space: nowrap; }
+  #hint b { color: var(--text); font-weight: 500; }
+
+  .panel-body::-webkit-scrollbar { width: 4px; }
+  .panel-body::-webkit-scrollbar-track { background: transparent; }
+  .panel-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div id="panel">
+  <div class="panel-header">
+    <h2>🏠 Параметры дома</h2>
+    <button class="panel-toggle" onclick="togglePanel()">◀</button>
+  </div>
+  <div class="panel-body">
+    <div class="section-title">Размеры</div>
+
+    <div class="param-group">
+      <div class="param-label">
+        <span>Высота стены</span>
+        <span class="param-value" id="val-wall-height">3.0 м</span>
+      </div>
+      <input type="range" id="wall-height" min="2" max="6" step="0.1" value="3">
+    </div>
+
+    <div class="param-group">
+      <div class="param-label">
+        <span>Площадь дома</span>
+        <span class="param-value" id="val-area">40.0 м²</span>
+      </div>
+      <input type="range" id="area" min="15" max="200" step="1" value="40">
+    </div>
+
+    <div class="param-group">
+      <div class="param-label">
+        <span>Высота фундамента</span>
+        <span class="param-value" id="val-basement-height">0.8 м</span>
+      </div>
+      <input type="range" id="basement-height" min="0.2" max="2" step="0.1" value="0.8">
+    </div>
+
+    <div class="section-title">Информация</div>
+
+    <div class="info-row">
+      <span class="info-label">Длина</span>
+      <span class="info-val" id="info-length">8.0 м</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Ширина</span>
+      <span class="info-val" id="info-width">5.0 м</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Окна на длинной стене</span>
+      <span class="info-val" id="info-windows">3</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Общая высота</span>
+      <span class="info-val" id="info-total-height">5.8 м</span>
+    </div>
+  </div>
+</div>
+
+<div id="hint">
+  <span><b>ЛКМ</b> — вращение</span>
+  <span><b>ПКМ</b> — перемещение</span>
+  <span><b>Колёсико</b> — зум</span>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+
+// ============ SCENE SETUP ============
+const container = document.getElementById('canvas-container');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.outputEncoding = THREE.sRGBEncoding;
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 200);
+camera.position.set(15, 10, 15);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.target.set(4, 2, 2.5);
+controls.minDistance = 3;
+controls.maxDistance = 60;
+controls.maxPolarAngle = Math.PI / 2.05;
+
+// ============ PROCEDURAL HDR ENVIRONMENT ============
+function createProceduralEnvMap() {
+  // Create a small render target scene with a sky gradient + sun
+  const envScene = new THREE.Scene();
+  const envCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  // Custom sky shader
+  const skyShader = {
+    uniforms: {
+      sunPosition: { value: new THREE.Vector3(0.4, 0.35, 0.5).normalize() },
+      sunColor: { value: new THREE.Color(1.2, 1.05, 0.8) },
+      skyColorTop: { value: new THREE.Color(0.25, 0.45, 0.85) },
+      skyColorHorizon: { value: new THREE.Color(0.65, 0.78, 0.95) },
+      groundColor: { value: new THREE.Color(0.28, 0.4, 0.22) },
+      sunIntensity: { value: 32.0 },
+      sunSize: { value: 0.02 },
+    },
+    vertexShader: `
+      varying vec3 vWorldDir;
+      void main() {
+        // Map fullscreen quad positions to directions on a sphere
+        vWorldDir = normalize(vec3(position.xy * 2.0, 1.0));
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 sunPosition;
+      uniform vec3 sunColor;
+      uniform vec3 skyColorTop;
+      uniform vec3 skyColorHorizon;
+      uniform vec3 groundColor;
+      uniform float sunIntensity;
+      uniform float sunSize;
+      varying vec3 vWorldDir;
+
+      void main() {
+        vec3 dir = normalize(vWorldDir);
+        float elevation = dir.y;
+
+        // Sky gradient
+        vec3 sky = mix(skyColorHorizon, skyColorTop, smoothstep(0.0, 0.5, elevation));
+
+        // Ground hemisphere
+        vec3 ground = groundColor * 0.5;
+        vec3 color = mix(ground, sky, smoothstep(-0.05, 0.05, elevation));
+
+        // Sun disc
+        float sunAngle = acos(clamp(dot(dir, sunPosition), -1.0, 1.0));
+        float sunDisc = smoothstep(sunSize * 1.5, sunSize * 0.5, sunAngle);
+        color += sunColor * sunDisc * sunIntensity;
+
+        // Sun glow
+        float sunGlow = exp(-sunAngle * 3.0) * 1.5;
+        color += sunColor * sunGlow * 0.4;
+
+        // Horizon glow near sun azimuth
+        float horizonGlow = exp(-abs(elevation) * 8.0) * exp(-acos(clamp(dot(
+          normalize(vec3(dir.x, 0.0, dir.z)),
+          normalize(vec3(sunPosition.x, 0.0, sunPosition.z))
+        ), -1.0, 1.0)) * 2.0) * 0.5;
+        color += sunColor * horizonGlow * 0.3;
+
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `
+  };
+
+  // Render 6 faces of a cube map using the sky shader
+  const cubeRenderSize = 256;
+  const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(cubeRenderSize, {
+    format: THREE.RGBAFormat,
+    type: THREE.HalfFloatType
+  });
+
+  const cubeCamera = new THREE.CubeCamera(0.1, 100, cubeRenderTarget);
+
+  // Create a large sky sphere with the shader
+  const skyGeo = new THREE.SphereGeometry(50, 64, 32);
+  const skyMaterial = new THREE.ShaderMaterial({
+    uniforms: skyShader.uniforms,
+    vertexShader: `
+      varying vec3 vWorldDir;
+      void main() {
+        vWorldDir = normalize(position);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: skyShader.fragmentShader,
+    side: THREE.BackSide
+  });
+
+  const skySphere = new THREE.Mesh(skyGeo, skyMaterial);
+  envScene.add(skySphere);
+
+  cubeCamera.position.set(0, 0, 0);
+  cubeCamera.update(renderer, envScene);
+
+  // Use PMREMGenerator to create a proper environment map with irradiance
+  const pmremGenerator = new THREE.PMREMGenerator(renderer);
+  pmremGenerator.compileCubemapShader();
+  const envMap = pmremGenerator.fromCubemap(cubeRenderTarget.texture).texture;
+  pmremGenerator.dispose();
+  cubeRenderTarget.dispose();
+
+  return { envMap, skySphere, skyMaterial };
+}
+
+const { envMap, skySphere, skyMaterial } = createProceduralEnvMap();
+
+// Apply environment map to scene
+scene.environment = envMap;
+
+// Create a visible sky sphere for background
+const bgSkyGeo = new THREE.SphereGeometry(90, 64, 32);
+const bgSkyMat = new THREE.ShaderMaterial({
+  uniforms: skyMaterial.uniforms,
+  vertexShader: `
+    varying vec3 vWorldDir;
+    void main() {
+      vWorldDir = normalize(position);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: skyMaterial.fragmentShader,
+  side: THREE.BackSide,
+  depthWrite: false,
+});
+const bgSky = new THREE.Mesh(bgSkyGeo, bgSkyMat);
+scene.add(bgSky);
+
+scene.fog = new THREE.Fog(new THREE.Color(0.65, 0.78, 0.95), 40, 90);
+
+// Keep directional light for sharp shadows (env map provides ambient)
+const sunLight = new THREE.DirectionalLight(0xfff4e0, 1.0);
+sunLight.position.set(12, 20, 8);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(4096, 4096);
+sunLight.shadow.camera.left = -15;
+sunLight.shadow.camera.right = 15;
+sunLight.shadow.camera.top = 15;
+sunLight.shadow.camera.bottom = -15;
+sunLight.shadow.camera.near = 1;
+sunLight.shadow.camera.far = 50;
+sunLight.shadow.bias = -0.0003;
+sunLight.shadow.normalBias = 0.015;
+sunLight.shadow.radius = 3;
+scene.add(sunLight);
+
+// ============ GROUND ============
+const groundGeo = new THREE.PlaneGeometry(100, 100);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x4a7c3f, roughness: 0.95, metalness: 0, envMapIntensity: 0.3 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// ============ MATERIALS (with env map reflections) ============
+const wallMat = new THREE.MeshStandardMaterial({ color: 0xf5e6c8, roughness: 0.85, metalness: 0.02, envMapIntensity: 0.4 });
+const basementMat = new THREE.MeshStandardMaterial({ color: 0x8a8278, roughness: 0.9, metalness: 0.05, envMapIntensity: 0.3 });
+const roofMat = new THREE.MeshStandardMaterial({ color: 0x8b3a3a, roughness: 0.7, metalness: 0.1, side: THREE.DoubleSide, envMapIntensity: 0.5 });
+const windowMat = new THREE.MeshStandardMaterial({ color: 0x6baed6, roughness: 0.05, metalness: 0.5, transparent: true, opacity: 0.6, envMapIntensity: 1.2 });
+const windowFrameMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, metalness: 0.15, envMapIntensity: 0.6 });
+const doorMat = new THREE.MeshStandardMaterial({ color: 0x5c3a1e, roughness: 0.75, metalness: 0.05, envMapIntensity: 0.3 });
+
+// ============ HOUSE PARAMETERS ============
+const BASE_LENGTH = 8;
+const BASE_WIDTH = 5;
+const BASE_RATIO = BASE_LENGTH / BASE_WIDTH; // 1.6
+const BASE_AREA = BASE_LENGTH * BASE_WIDTH; // 40
+
+let params = {
+  wallHeight: 3,
+  area: 40,
+  basementHeight: 0.8
+};
+
+const WALL_THICKNESS = 0.2;
+const BASEMENT_HEIGHT = 0.8;
+const BASEMENT_EXTRA = 0.1;
+const WINDOW_WIDTH = 0.9;
+const WINDOW_HEIGHT = 1.2;
+const WINDOW_Y = 1;
+const DOOR_WIDTH = 1;
+const DOOR_HEIGHT = 2.2;
+
+let houseGroup = new THREE.Group();
+scene.add(houseGroup);
+
+function getDimensions(area) {
+  // Keep ratio length:width = 8:5 = 1.6
+  const w = Math.sqrt(area / BASE_RATIO);
+  const l = w * BASE_RATIO;
+  return { length: l, width: w };
+}
+
+function getWindowCount(wallLength) {
+  return Math.max(0, Math.round(wallLength / (WINDOW_WIDTH * 2.9)));
+}
+
+function getWindowIndent(wallLength, count) {
+  if (count <= 0) return wallLength;
+  return (wallLength - count * WINDOW_WIDTH) / (count + 1);
+}
+
+function createBox(sx, sy, sz) {
+  return new THREE.BoxGeometry(sx, sy, sz);
+}
+
+function buildHouse() {
+  // Clear previous
+  while (houseGroup.children.length > 0) {
+    const c = houseGroup.children[0];
+    houseGroup.remove(c);
+    if (c.geometry) c.geometry.dispose();
+  }
+
+  const { length, width } = getDimensions(params.area);
+  const wh = params.wallHeight;
+  const rh = 2; // fixed roof height
+  const wt = WALL_THICKNESS;
+  const bh = params.basementHeight;
+  const be = BASEMENT_EXTRA;
+
+  const windowCount = getWindowCount(length);
+  const windowIndent = getWindowIndent(length, windowCount);
+
+  // ---- Basement ----
+  const basementGeo = createBox(length + be * 2, bh, width + be * 2);
+  const basement = new THREE.Mesh(basementGeo, basementMat);
+  basement.position.set(length / 2, bh / 2, width / 2);
+  basement.castShadow = true;
+  basement.receiveShadow = true;
+  houseGroup.add(basement);
+
+  // ---- Helper: create wall with window holes using CSG-like approach via multiple boxes ----
+  function createWallWithWindows(wallLen, wallH, wallW, windows, isXWall) {
+    // We'll build the wall as a set of boxes around the windows
+    const group = new THREE.Group();
+
+    if (windows.length === 0) {
+      const g = createBox(wallLen, wallH, wallW);
+      const m = new THREE.Mesh(g, wallMat);
+      m.position.set(wallLen / 2, wallH / 2, wallW / 2);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      group.add(m);
+      return group;
+    }
+
+    // Sort windows by position
+    const sorted = [...windows].sort((a, b) => a.x - b.x);
+
+    // Build wall segments around windows
+    // Bottom strip (below all windows)
+    const bottomH = Math.min(...sorted.map(w => w.y));
+    if (bottomH > 0.01) {
+      const g = createBox(wallLen, bottomH, wallW);
+      const m = new THREE.Mesh(g, wallMat);
+      m.position.set(wallLen / 2, bottomH / 2, wallW / 2);
+      m.castShadow = true; m.receiveShadow = true;
+      group.add(m);
+    }
+
+    // Top strip (above all windows)
+    const topStart = Math.max(...sorted.map(w => w.y + w.h));
+    const topH = wallH - topStart;
+    if (topH > 0.01) {
+      const g = createBox(wallLen, topH, wallW);
+      const m = new THREE.Mesh(g, wallMat);
+      m.position.set(wallLen / 2, topStart + topH / 2, wallW / 2);
+      m.castShadow = true; m.receiveShadow = true;
+      group.add(m);
+    }
+
+    // Middle row: segments between windows
+    const midY = bottomH;
+    const midH = topStart - bottomH;
+
+    let prevEnd = 0;
+    for (const win of sorted) {
+      const segW = win.x - prevEnd;
+      if (segW > 0.01) {
+        const g = createBox(segW, midH, wallW);
+        const m = new THREE.Mesh(g, wallMat);
+        m.position.set(prevEnd + segW / 2, midY + midH / 2, wallW / 2);
+        m.castShadow = true; m.receiveShadow = true;
+        group.add(m);
+      }
+
+      // Window glass
+      const wg = createBox(win.w, win.h, wallW * 0.3);
+      const wm = new THREE.Mesh(wg, windowMat);
+      wm.position.set(win.x + win.w / 2, win.y + win.h / 2, wallW / 2);
+      group.add(wm);
+
+      // Window frame
+      const frameT = 0.04;
+      const frameD = wallW + 0.08;
+      // Top frame
+      const ft = createBox(win.w + frameT * 2, frameT, frameD);
+      const ftm = new THREE.Mesh(ft, windowFrameMat);
+      ftm.position.set(win.x + win.w / 2, win.y + win.h + frameT / 2, wallW / 2);
+      group.add(ftm);
+      // Bottom frame
+      const fb = createBox(win.w + frameT * 2, frameT, frameD);
+      const fbm = new THREE.Mesh(fb, windowFrameMat);
+      fbm.position.set(win.x + win.w / 2, win.y - frameT / 2, wallW / 2);
+      group.add(fbm);
+      // Left frame
+      const fl = createBox(frameT, win.h, frameD);
+      const flm = new THREE.Mesh(fl, windowFrameMat);
+      flm.position.set(win.x - frameT / 2, win.y + win.h / 2, wallW / 2);
+      group.add(flm);
+      // Right frame
+      const fr = createBox(frameT, win.h, frameD);
+      const frm = new THREE.Mesh(fr, windowFrameMat);
+      frm.position.set(win.x + win.w + frameT / 2, win.y + win.h / 2, wallW / 2);
+      group.add(frm);
+      // Cross in middle
+      const cx = createBox(win.w, frameT * 0.7, frameD * 0.7);
+      const cxm = new THREE.Mesh(cx, windowFrameMat);
+      cxm.position.set(win.x + win.w / 2, win.y + win.h / 2, wallW / 2);
+      group.add(cxm);
+      const cy = createBox(frameT * 0.7, win.h, frameD * 0.7);
+      const cym = new THREE.Mesh(cy, windowFrameMat);
+      cym.position.set(win.x + win.w / 2, win.y + win.h / 2, wallW / 2);
+      group.add(cym);
+
+      prevEnd = win.x + win.w;
+    }
+
+    // Last segment after last window
+    const lastSeg = wallLen - prevEnd;
+    if (lastSeg > 0.01) {
+      const g = createBox(lastSeg, midH, wallW);
+      const m = new THREE.Mesh(g, wallMat);
+      m.position.set(prevEnd + lastSeg / 2, midY + midH / 2, wallW / 2);
+      m.castShadow = true; m.receiveShadow = true;
+      group.add(m);
+    }
+
+    return group;
+  }
+
+  // ---- Left wall (z=0) ----
+  const leftWindows = [];
+  for (let i = 0; i < windowCount; i++) {
+    leftWindows.push({
+      x: windowIndent + WINDOW_WIDTH * i + windowIndent * i,
+      y: WINDOW_Y,
+      w: WINDOW_WIDTH,
+      h: WINDOW_HEIGHT
+    });
+  }
+  const leftWall = createWallWithWindows(length, wh, wt, leftWindows);
+  leftWall.position.set(0, bh, 0);
+  houseGroup.add(leftWall);
+
+  // ---- Right wall (z=width) ----
+  const rightWall = createWallWithWindows(length, wh, wt, leftWindows);
+  rightWall.position.set(0, bh, width - wt);
+  houseGroup.add(rightWall);
+
+  // ---- Helper: create wall along Z axis (for back/front walls) ----
+  // wallLen = extent along Z, wallThick = extent along X, wallH = height (Y)
+  // windows[].z = position along Z, windows[].y, .w (along Z), .h (along Y), .isDoor (optional)
+  function createZWall(wallLen, wallH, wallThick, windows, offsetX, offsetY, offsetZ) {
+    const group = new THREE.Group();
+    group.position.set(offsetX, offsetY, offsetZ);
+
+    if (windows.length === 0) {
+      const g = createBox(wallThick, wallH, wallLen);
+      const m = new THREE.Mesh(g, wallMat);
+      m.position.set(wallThick / 2, wallH / 2, wallLen / 2);
+      m.castShadow = true; m.receiveShadow = true;
+      group.add(m);
+      return group;
+    }
+
+    const sorted = [...windows].sort((a, b) => a.z - b.z);
+
+    // For each opening, clamp y to 0 minimum for wall building
+    const openings = sorted.map(w => ({
+      ...w,
+      yReal: Math.max(0, w.y),
+      hReal: w.isDoor ? (w.y < 0 ? w.h + w.y : w.h) : w.h
+    }));
+
+    // Top of highest opening
+    const topStart = Math.max(...openings.map(w => w.yReal + w.hReal));
+    const topH = wallH - topStart;
+
+    // Top strip (above all openings)
+    if (topH > 0.01) {
+      const g = createBox(wallThick, topH, wallLen);
+      const m = new THREE.Mesh(g, wallMat);
+      m.position.set(wallThick / 2, topStart + topH / 2, wallLen / 2);
+      m.castShadow = true; m.receiveShadow = true;
+      group.add(m);
+    }
+
+    // Build columns between openings, plus per-opening bottom/top fillers
+    let prevEnd = 0;
+
+    for (const win of openings) {
+      // Column before this opening
+      const segLen = win.z - prevEnd;
+      if (segLen > 0.01) {
+        const colH = topStart; // full height up to top strip
+        const g = createBox(wallThick, colH, segLen);
+        const m = new THREE.Mesh(g, wallMat);
+        m.position.set(wallThick / 2, colH / 2, prevEnd + segLen / 2);
+        m.castShadow = true; m.receiveShadow = true;
+        group.add(m);
+      }
+
+      // Bottom filler below this opening (e.g. under windows, not under doors)
+      if (win.yReal > 0.01) {
+        const g = createBox(wallThick, win.yReal, win.w);
+        const m = new THREE.Mesh(g, wallMat);
+        m.position.set(wallThick / 2, win.yReal / 2, win.z + win.w / 2);
+        m.castShadow = true; m.receiveShadow = true;
+        group.add(m);
+      }
+
+      // Filler between top of this opening and the top strip
+      const openingTop = win.yReal + win.hReal;
+      const fillerH = topStart - openingTop;
+      if (fillerH > 0.01) {
+        const g = createBox(wallThick, fillerH, win.w);
+        const m = new THREE.Mesh(g, wallMat);
+        m.position.set(wallThick / 2, openingTop + fillerH / 2, win.z + win.w / 2);
+        m.castShadow = true; m.receiveShadow = true;
+        group.add(m);
+      }
+
+      // Glass/door fill
+      const fillH = win.isDoor ? win.hReal : win.hReal;
+      const fillMat = win.isDoor ? doorMat : windowMat;
+      const wg = createBox(wallThick * 0.3, fillH, win.w);
+      const wm = new THREE.Mesh(wg, fillMat);
+      wm.position.set(wallThick / 2, win.yReal + fillH / 2, win.z + win.w / 2);
+      group.add(wm);
+
+      // Frame and cross — only for windows, not doors
+      if (!win.isDoor) {
+        const frameT = 0.04;
+        const frameD = wallThick + 0.08;
+        const ft = new THREE.Mesh(createBox(frameD, frameT, win.w + frameT * 2), windowFrameMat);
+        ft.position.set(wallThick / 2, win.yReal + win.hReal + frameT / 2, win.z + win.w / 2);
+        group.add(ft);
+        const fb = new THREE.Mesh(createBox(frameD, frameT, win.w + frameT * 2), windowFrameMat);
+        fb.position.set(wallThick / 2, win.yReal - frameT / 2, win.z + win.w / 2);
+        group.add(fb);
+        const fl = new THREE.Mesh(createBox(frameD, win.hReal, frameT), windowFrameMat);
+        fl.position.set(wallThick / 2, win.yReal + win.hReal / 2, win.z - frameT / 2);
+        group.add(fl);
+        const fr = new THREE.Mesh(createBox(frameD, win.hReal, frameT), windowFrameMat);
+        fr.position.set(wallThick / 2, win.yReal + win.hReal / 2, win.z + win.w + frameT / 2);
+        group.add(fr);
+        const cx = new THREE.Mesh(createBox(frameD * 0.7, frameT * 0.7, win.w), windowFrameMat);
+        cx.position.set(wallThick / 2, win.yReal + win.hReal / 2, win.z + win.w / 2);
+        group.add(cx);
+        const cy = new THREE.Mesh(createBox(frameD * 0.7, win.hReal, frameT * 0.7), windowFrameMat);
+        cy.position.set(wallThick / 2, win.yReal + win.hReal / 2, win.z + win.w / 2);
+        group.add(cy);
+      } else {
+        // Door frame — just sides and top
+        const frameT = 0.05;
+        const frameD = wallThick + 0.08;
+        const ft = new THREE.Mesh(createBox(frameD, frameT, win.w + frameT * 2), windowFrameMat);
+        ft.position.set(wallThick / 2, win.yReal + win.hReal + frameT / 2, win.z + win.w / 2);
+        group.add(ft);
+        const fl = new THREE.Mesh(createBox(frameD, win.hReal, frameT), windowFrameMat);
+        fl.position.set(wallThick / 2, win.yReal + win.hReal / 2, win.z - frameT / 2);
+        group.add(fl);
+        const fr = new THREE.Mesh(createBox(frameD, win.hReal, frameT), windowFrameMat);
+        fr.position.set(wallThick / 2, win.yReal + win.hReal / 2, win.z + win.w + frameT / 2);
+        group.add(fr);
+      }
+
+      prevEnd = win.z + win.w;
+    }
+
+    // Last column after last opening
+    const lastSeg = wallLen - prevEnd;
+    if (lastSeg > 0.01) {
+      const colH = topStart;
+      const g = createBox(wallThick, colH, lastSeg);
+      const m = new THREE.Mesh(g, wallMat);
+      m.position.set(wallThick / 2, colH / 2, prevEnd + lastSeg / 2);
+      m.castShadow = true; m.receiveShadow = true;
+      group.add(m);
+    }
+
+    return group;
+  }
+
+  // ---- Back wall (x=0, from z=wt to z=width-wt) ----
+  {
+    const bwLen = width - wt * 2;
+    const bwWins = [];
+    if (bwLen > 2) {
+      bwWins.push({ z: bwLen / 2 - WINDOW_WIDTH / 2, y: WINDOW_Y, w: WINDOW_WIDTH, h: WINDOW_HEIGHT });
+    }
+    const bw = createZWall(bwLen, wh, wt, bwWins, 0, bh, wt);
+    houseGroup.add(bw);
+  }
+
+  // ---- Front wall (x=length-wt, from z=wt to z=width-wt) ----
+  {
+    const fwLen = width - wt * 2;
+    const fwHoles = [];
+
+    // Door always present, centered
+    const doorZ = fwLen / 2 - DOOR_WIDTH / 2;
+    fwHoles.push({ z: doorZ, y: 0, w: DOOR_WIDTH, h: DOOR_HEIGHT, isDoor: true });
+
+    // Windows on front wall: only if enough space on each side of the door
+    const minGap = 0.3; // minimum wall between window and door
+    const spaceLeft = doorZ - minGap - WINDOW_WIDTH;
+    const spaceRight = fwLen - (doorZ + DOOR_WIDTH) - minGap - WINDOW_WIDTH;
+
+    if (spaceLeft >= minGap) {
+      const winZ = (doorZ - minGap - WINDOW_WIDTH) / 2 + (doorZ - minGap - WINDOW_WIDTH) / 2;
+      // center window in left section
+      const leftCenter = (doorZ - minGap) / 2 - WINDOW_WIDTH / 2;
+      if (leftCenter >= 0.1) {
+        fwHoles.push({ z: leftCenter, y: WINDOW_Y, w: WINDOW_WIDTH, h: WINDOW_HEIGHT });
+      }
+    }
+    if (spaceRight >= minGap) {
+      const rightStart = doorZ + DOOR_WIDTH + minGap;
+      const rightEnd = fwLen;
+      const rightCenter = (rightStart + rightEnd) / 2 - WINDOW_WIDTH / 2;
+      if (rightCenter + WINDOW_WIDTH <= fwLen - 0.1) {
+        fwHoles.push({ z: rightCenter, y: WINDOW_Y, w: WINDOW_WIDTH, h: WINDOW_HEIGHT });
+      }
+    }
+
+    const fw = createZWall(fwLen, wh, wt, fwHoles, length - wt, bh, wt);
+
+    houseGroup.add(fw);
+  }
+
+  // ---- Roof (triangular prism) — built directly with vertices, no rotation ----
+  {
+    const oh = 0.3; // overhang
+    const x0 = -oh, x1 = length + oh;
+    const z0 = -oh, z1 = width + oh;
+    const yBase = bh + wh;
+    const yPeak = bh + wh + rh;
+    const zMid = width / 2;
+
+    // Two slope faces + two triangle gable faces + bottom face
+    const vertices = new Float32Array([
+      // Left slope: two triangles
+      x0, yBase, z0,   x1, yBase, z0,   x1, yPeak, zMid,
+      x0, yBase, z0,   x1, yPeak, zMid, x0, yPeak, zMid,
+      // Right slope: two triangles
+      x0, yBase, z1,   x0, yPeak, zMid, x1, yPeak, zMid,
+      x0, yBase, z1,   x1, yPeak, zMid, x1, yBase, z1,
+      // Front gable (x=x1): triangle
+      x1, yBase, z0,   x1, yBase, z1,   x1, yPeak, zMid,
+      // Back gable (x=x0): triangle
+      x0, yBase, z1,   x0, yBase, z0,   x0, yPeak, zMid,
+      // Bottom face (normal pointing down): two triangles
+      x0, yBase, z0,   x0, yBase, z1,   x1, yBase, z1,
+      x0, yBase, z0,   x1, yBase, z1,   x1, yBase, z0,
+    ]);
+
+    const roofGeo = new THREE.BufferGeometry();
+    roofGeo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+    roofGeo.computeVertexNormals();
+
+    const roofMesh = new THREE.Mesh(roofGeo, roofMat);
+    roofMesh.castShadow = true;
+    roofMesh.receiveShadow = false;
+    houseGroup.add(roofMesh);
+  }
+
+  // ---- Update UI info ----
+  document.getElementById('info-length').textContent = length.toFixed(1) + ' м';
+  document.getElementById('info-width').textContent = width.toFixed(1) + ' м';
+  document.getElementById('info-windows').textContent = windowCount;
+  document.getElementById('info-total-height').textContent = (bh + wh + rh).toFixed(1) + ' м';
+
+  // Update controls target to center of house
+  controls.target.set(length / 2, (bh + wh) / 2, width / 2);
+}
+
+// ============ UI BINDINGS ============
+const sliderWallHeight = document.getElementById('wall-height');
+const sliderArea = document.getElementById('area');
+const sliderBasementHeight = document.getElementById('basement-height');
+
+function updateFromUI() {
+  params.wallHeight = parseFloat(sliderWallHeight.value);
+  params.area = parseFloat(sliderArea.value);
+  params.basementHeight = parseFloat(sliderBasementHeight.value);
+
+  document.getElementById('val-wall-height').textContent = params.wallHeight.toFixed(1) + ' м';
+  document.getElementById('val-area').textContent = params.area.toFixed(0) + ' м²';
+  document.getElementById('val-basement-height').textContent = params.basementHeight.toFixed(1) + ' м';
+
+  buildHouse();
+}
+
+sliderWallHeight.addEventListener('input', updateFromUI);
+sliderArea.addEventListener('input', updateFromUI);
+sliderBasementHeight.addEventListener('input', updateFromUI);
+
+// ============ PANEL TOGGLE ============
+function togglePanel() {
+  document.getElementById('panel').classList.toggle('collapsed');
+}
+
+// ============ ANIMATION LOOP ============
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// ============ RESIZE ============
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ============ INIT ============
+buildHouse();
+animate();
+
+// Fade out hints
+setTimeout(() => {
+  document.getElementById('hint').style.opacity = '0';
+  setTimeout(() => document.getElementById('hint').style.display = 'none', 1000);
+}, 6000);
+</script>
+</body>
+</html>
