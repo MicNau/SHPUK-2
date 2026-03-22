@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Конфигуратор дома</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <div class="prog-wrap">
+    <div class="prog-lbl" id="plbl">Шаг 1 из 10</div>
+    <div class="prog-bar"><div class="prog-fill" id="pfill" style="width:10%"></div></div>
+  </div>
+
+  <!-- 1: Тип дома -->
+  <div class="screen active" id="screen-1">
+    <div class="sh"><div class="st">Выберите тип дома:</div></div>
+    <div class="sb">
+      <div class="house-cards">
+        <div class="house-card" onclick="selHouse(this,'Одноэтажный дом')">
+          <div class="hcp"><div class="ic">🏠</div>Картинка с домом, описание</div>
+          <div class="hcl">Одноэтажный дом</div>
+        </div>
+        <div class="house-card" onclick="selHouse(this,'Двухэтажный дом')">
+          <div class="hcp"><div class="ic">🏡</div>Картинка с домом, описание</div>
+          <div class="hcl">Двухэтажный дом</div>
+        </div>
+        <div class="house-card" onclick="selHouse(this,'Дом с мансардой')">
+          <div class="hcp"><div class="ic">🏘</div>Картинка с домом, описание</div>
+          <div class="hcl">Дом с мансардой</div>
+        </div>
+        <div class="house-card" onclick="selHouse(this,'Участок без дома')">
+          <div class="hcp"><div class="ic">🌿</div>Пустой участок, без строений</div>
+          <div class="hcl">Участок без дома</div>
+        </div>
+        <label class="upload-card">
+          <input type="file" id="upload-input" accept="image/*">
+          <span>📷</span><span>Загрузите фото дома или участка</span>
+        </label>
+      </div>
+    </div>
+    <button class="btn-full" onclick="goTo(2)">ДАЛЬШЕ <span>→</span></button>
+  </div>
+
+  <!-- 2: Площадь -->
+  <div class="screen" id="screen-2">
+    <div class="sh"><div class="st">Задайте общую площадь дома:</div></div>
+    <div class="sb">
+      <div class="plan-box">📐 План дома</div>
+      <div class="p-row">
+        <div class="p-lbl">Общая площадь (кв.м):</div>
+        <input class="p-inp" type="number" id="v-area" value="120" min="20" max="1000">
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-back" onclick="goTo(1)">←</button>
+      <button class="btn-next" onclick="goTo(3)">ДАЛЬШЕ <span>→</span></button>
+    </div>
+  </div>
+
+  <!-- 3: Высота этажа -->
+  <div class="screen" id="screen-3">
+    <div class="sh"><div class="st">Задайте высоту этажа:</div></div>
+    <div class="sb">
+      <div class="plan-box">📏 Вид дома снаружи,<br>размер показан размерной линией</div>
+      <div class="p-row">
+        <div class="p-lbl">Высота этажа (см):</div>
+        <input class="p-inp" type="number" id="v-floor" value="400" min="240" max="600">
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-back" onclick="goTo(2)">←</button>
+      <button class="btn-next" onclick="goTo(4)">ДАЛЬШЕ <span>→</span></button>
+    </div>
+  </div>
+
+  <!-- 4: Фундамент -->
+  <div class="screen" id="screen-4">
+    <div class="sh"><div class="st">Задайте высоту фундамента:</div></div>
+    <div class="sb">
+      <div class="plan-box">🧱 Вид дома снаружи,<br>размер показан размерной линией</div>
+      <div class="p-row">
+        <div class="p-lbl">Фундамент (см):</div>
+        <input class="p-inp" type="number" id="v-found" value="80" min="0" max="300">
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-back" onclick="goTo(3)">←</button>
+      <button class="btn-next" onclick="goTo(5)">ДАЛЬШЕ <span>→</span></button>
+    </div>
+  </div>
+
+  <!-- 5: Что планируете -->
+  <div class="screen" id="screen-5">
+    <div class="sh">
+      <div class="st">Что планируете строить или улучшать:</div>
+      <div class="ss">(выберите одну или несколько позиций)</div>
+    </div>
+    <div class="sb">
+      <div class="checklist">
+        <div class="ci" onclick="tci(this)" data-id="terrace"><span class="ci-text">Терраса</span><div class="cb"></div></div>
+        <div class="ci" onclick="tci(this)" data-id="pool_terrace"><span class="ci-text">Терраса у бассейна</span><div class="cb"></div></div>
+        <div class="ci" onclick="tci(this)" data-id="paths"><span class="ci-text">Дорожки</span><div class="cb"></div></div>
+        <div class="ci" onclick="tci(this)" data-id="pier"><span class="ci-text">Причал</span><div class="cb"></div></div>
+        <div class="ci" onclick="tci(this)" data-id="porch"><span class="ci-text">Крыльцо</span><div class="cb"></div></div>
+        <div class="ci" onclick="tci(this)" data-id="railing"><span class="ci-text">Ограждение террасы</span><div class="cb"></div></div>
+        <div class="ci" onclick="tci(this)" data-id="fence"><span class="ci-text">Забор вокруг участка</span><div class="cb"></div></div>
+        <div class="ci" onclick="tci(this)" data-id="facade"><span class="ci-text">Отделка фасада</span><div class="cb"></div></div>
+        <div class="ci" onclick="tci(this)" data-id="beds"><span class="ci-text">Грядки</span><div class="cb"></div></div>
+        <div class="ci" onclick="tci(this)" data-id="furniture"><span class="ci-text">Садовая мебель</span><div class="cb"></div></div>
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-back" onclick="goTo(4)">←</button>
+      <button class="btn-next" onclick="goToConditional()">ДАЛЬШЕ <span>→</span></button>
+    </div>
+  </div>
+
+  <!-- 6: Терраса — точки -->
+  <div class="screen" id="screen-6">
+    <div class="sh"><div class="st" id="s6-title">Поставьте точки в углах террасы:</div></div>
+    <div class="sb">
+      <p class="cv-hint">Точки прилипают к сетке. Щипок — масштаб, тяните — перемещение</p>
+      <div class="cv-wrap" id="cw-terrace"><canvas id="cv-terrace"></canvas></div>
+      <div class="cv-acts">
+        <button class="btn-u" onclick="undoPt('terrace')">↩ Отменить</button>
+        <button class="btn-c" onclick="clrPts('terrace')">✕ Очистить</button>
+      </div>
+      <div class="tg" onclick="ttg(this)"><span class="tg-txt">Нужно ограждение</span><div class="tg-ind"></div></div>
+      <div class="tg" onclick="ttg(this)"><span class="tg-txt">Нужен навес</span><div class="tg-ind"></div></div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-back" onclick="goTo(5)">←</button>
+      <button class="btn-next" onclick="goToAfter6()">ДАЛЬШЕ <span>→</span></button>
+    </div>
+  </div>
+
+  <!-- 6b: Терраса у бассейна -->
+  <div class="screen" id="screen-6b">
+    <div class="sh"><div class="st">Поставьте точки террасы у бассейна:</div></div>
+    <div class="sb">
+      <p class="cv-hint">Нажмите на план чтобы отметить углы</p>
+      <div class="cv-wrap" id="cw-pool_terrace"><canvas id="cv-pool_terrace"></canvas></div>
+      <div class="cv-acts">
+        <button class="btn-u" onclick="undoPt('pool_terrace')">↩ Отменить</button>
+        <button class="btn-c" onclick="clrPts('pool_terrace')">✕ Очистить</button>
+      </div>
+      <div class="tg" onclick="ttg(this)"><span class="tg-txt">Нужно ограждение бассейна</span><div class="tg-ind"></div></div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-back" onclick="goToPrev('pool_terrace')">←</button>
+      <button class="btn-next" onclick="goToAfter('pool_terrace')">ДАЛЬШЕ <span>→</span></button>
+    </div>
+  </div>
+
+  <!-- 6c: Дорожки -->
+  <div class="screen" id="screen-6c">
+    <div class="sh"><div class="st">Обозначьте дорожки на плане:</div></div>
+    <div class="sb">
+      <p class="cv-hint">Нажимайте точки последовательно вдоль дорожки</p>
+      <div class="cv-wrap" id="cw-paths"><canvas id="cv-paths"></canvas></div>
+      <div class="cv-acts">
+        <button class="btn-u" onclick="undoPt('paths')">↩ Отменить</button>
+        <button class="btn-c" onclick="clrPts('paths')">✕ Очистить</button>
+      </div>
+      <div class="p-row" style="margin-top:4px;">
+        <div class="p-lbl">Ширина дорожки (см):</div>
+        <input class="p-inp" type="number" id="v-paths-width" value="120" min="60" max="300">
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-back" onclick="goToPrev('paths')">←</button>
+      <button class="btn-next" onclick="goToAfter('paths')">ДАЛЬШЕ <span>→</span></button>
+    </div>
+  </div>
+
+  <!-- 6d: Причал -->
+  <div class="screen" id="screen-6d">
+    <div class="sh"><div class="st">Поставьте точки в углах причала:</div></div>
+    <div class="sb">
+      <p class="cv-hint">Нажмите на план участка чтобы отметить форму причала</p>
+      <div class="cv-wrap" id="cw-pier"><canvas id="cv-pier"></canvas></div>
+      <div class="cv-acts">
+        <button class="btn-u" onclick="undoPt('pier')">↩ Отменить</button>
+        <button class="btn-c" onclick="clrPts('pier')">✕ Очистить</button>
+      </div>
+      <div class="tg" onclick="ttg(this)"><span class="tg-txt">Нужны перила причала</span><div class="tg-ind"></div></div>
+      <div class="tg" onclick="ttg(this)"><span class="tg-txt">Нужна крыша / навес</span><div class="tg-ind"></div></div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-back" onclick="goToPrev('pier')">←</button>
+      <button class="btn-next" onclick="goToAfter('pier')">ДАЛЬШЕ <span>→</span></button>
+    </div>
+  </div>
+
+  <!-- 7: Крыльцо -->
+  <div class="screen" id="screen-7">
+    <div class="sh"><div class="st">Укажите место и размер крыльца</div></div>
+    <div class="sb">
+      <p class="cv-hint">Перетащите крыльцо, потяните за угол чтобы изменить размер</p>
+      <div class="cv-wrap" id="cw-porch" style="cursor:default;"><canvas id="cv-porch"></canvas></div>
+      <div class="tg" onclick="ttg(this)"><span class="tg-txt">Нужны перила</span><div class="tg-ind"></div></div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-back" onclick="goToPrev('porch')">←</button>
+      <button class="btn-next" onclick="goToAfter('porch')">ДАЛЬШЕ <span>→</span></button>
+    </div>
+  </div>
+
+  <!-- 8: Забор -->
+  <div class="screen" id="screen-8">
+    <div class="sh"><div class="st">Поставьте точки в углах забора</div></div>
+    <div class="sb">
+      <p class="cv-hint">Точки прилипают к сетке (1 клетка = 1 м). Щипок — масштаб</p>
+      <div class="cv-wrap" id="cw-fence"><canvas id="cv-fence"></canvas></div>
+      <div class="cv-acts">
+        <button class="btn-u" onclick="undoPt('fence')">↩ Отменить</button>
+        <button class="btn-c" onclick="clrPts('fence')">✕ Очистить</button>
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-back" onclick="goToPrev('fence')">←</button>
+      <button class="btn-next" onclick="goToAfter('fence')">ДАЛЬШЕ <span>→</span></button>
+    </div>
+  </div>
+
+  <!-- 10: Материалы + 3D -->
+  <div class="screen" id="screen-10">
+    <div class="sh">
+      <div class="st" id="sec-title">Терраса</div>
+      <div class="ss">(разделы можно листать)</div>
+    </div>
+    <div class="sb">
+      <div class="sec-nav" id="sec-nav"></div>
+      <div id="cw-3d" class="cv-wrap" style="cursor:grab; touch-action:none; aspect-ratio:1;">
+        <div id="three-container" style="position:absolute;inset:0;width:100%;height:100%;"></div>
+        <div id="three-hint" style="position:absolute;bottom:6px;left:0;right:0;text-align:center;
+             font-size:10px;color:rgba(255,255,255,0.6);pointer-events:none;letter-spacing:.03em;">
+          ☝️ вращение · щипок — зум
+        </div>
+      </div>
+      <div class="sample-lbl" id="sample-lbl">Образцы:</div>
+      <div class="samples-grid" id="samples-grid"></div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-back" onclick="goBack10()">←</button>
+      <button class="btn-next" onclick="openCatalog()">КАТАЛОГ <span>›</span></button>
+      <button class="btn-icon" onclick="showSummary()">✓</button>
+    </div>
+  </div>
+
+  <!-- Каталог -->
+  <div class="screen" id="screen-catalog">
+    <div class="sh"><div class="st" id="cat-title">Террасная доска</div></div>
+    <div class="sb" id="cat-body"></div>
+    <div class="nav-row" id="cat-nav">
+      <button class="btn-back" id="cat-back-btn" onclick="goTo(10)">←</button>
+      <button class="btn-next" id="cat-action-btn" onclick="showCatalogResults()">ПОДОБРАТЬ <span>→</span></button>
+    </div>
+  </div>
+
+  <!-- Итог -->
+  <div class="screen" id="screen-summary">
+    <div class="sh"><div class="st">Ваш проект:</div></div>
+    <div class="sb"><div id="sum-body"></div></div>
+    <button class="btn-full" onclick="alert('Заявка отправлена! 🎉')">ОТПРАВИТЬ ЗАЯВКУ <span>→</span></button>
+  </div>
+</div>
+
+<!-- CDN: Three.js r128 + дополнения -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<!-- HDRI-загрузчики (нужны для кнопки «Загрузить HDRI») -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/RGBELoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/EXRLoader.js"></script>
+
+<!-- Приложение: порядок важен -->
+<script src="state.js"></script>
+<script src="nav.js"></script>
+<script src="canvas.js"></script>
+
+<!--
+  3D-визуализация: подключите ОДНУ из двух версий в зависимости от платформы.
+  Десктоп (по умолчанию):  instanced трава + объёмные кусты + деревья
+  Мобиль:                  billboard-спрайты, нет тяжёлой травы
+  Серверный вариант: определять на бэкенде и отдавать нужный файл через шаблон.
+  Клиентский вариант (ниже): JS-детектор подключает нужный скрипт динамически.
+-->
+<script>
+(function () {
+  const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+                || window.innerWidth < 768;
+  const src = isMobile ? 'viewer3d-mobile.js' : 'viewer3d-desktop.js';
+  // Сначала core, потом версионный файл
+  function loadScript(s, cb) {
+    const el = document.createElement('script');
+    el.src = s; el.onload = cb;
+    document.head.appendChild(el);
+  }
+  loadScript('viewer3d-core.js', () => loadScript(src, () => {}));
+})();
+</script>
+
+<script src="catalog.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>
