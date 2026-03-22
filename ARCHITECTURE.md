@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — Конфигуратор загородного дома
 
-## Статус: фронтенд разбит на файлы, 3D-визуализация улучшена, бэкенд не начат
+## Статус: фронтенд разбит на файлы, PBR-визуализация работает, бэкенд не начат
 
 ---
 
@@ -8,16 +8,26 @@
 
 ```
 /frontend
-  index.html              # разметка + динамический выбор viewer3d-*.js
+  index.html              # разметка + JS-детектор платформы, подключает viewer3d-*
   styles.css              # все стили
   state.js                # S, SECS, SEC_SCREEN, CATALOG_COLORS, PRICE_TIERS, STUB_RESULTS
   nav.js                  # goTo, updProg, getStepOrder и навигационные хелперы
   canvas.js               # pan/zoom движок, snap-canvas, крыльцо (drag+resize)
-  viewer3d-core.js        # init3dCanvas, HDRI-загрузчик, PBR-текстуры, buildHouse3d
-  viewer3d-desktop.js     # антураж десктоп: InstancedMesh трава + шейдер, кусты, деревья
-  viewer3d-mobile.js      # антураж мобиль: billboard-спрайты, плоские пятна травы
+  viewer3d-core.js        # сцена, HDRI, PBR-материалы, buildScene3d, все 3D-строители
+  viewer3d-desktop.js     # антураж десктоп: спрайты кустов/деревьев PNG
+  viewer3d-mobile.js      # антураж мобиль: спрайты кустов/деревьев PNG
   catalog.js              # каталог, фильтры, результаты, selMat
-  ui.js                   # шаг 10: секции, образцы, итог
+  ui.js                   # шаг 10: секции, образцы, примерка, итог
+
+  assets/                 # текстуры и HDRI (подхватываются автоматически по имени)
+    README.md             # описание соглашения по именам файлов
+    environment.hdr       # HDRI карта окружения (опционально)
+    wall_diff.jpg / wall_norm.jpg / wall_roug.jpg
+    roof_diff.jpg / roof_norm.jpg / roof_roug.jpg
+    base_diff.jpg / base_norm.jpg
+    deck_diff.jpg / deck_norm.jpg / deck_roug.jpg
+    ground_diff.jpg / ground_norm.jpg
+    bush_a.png / bush_b.png / tree_a.png / tree_b.png
 
 /backend                  # ещё не создан
   main.py
@@ -36,7 +46,7 @@ README.md
 Three.js r128 → OrbitControls → RGBELoader → EXRLoader
 state.js → nav.js → canvas.js
 → [JS-детектор] → viewer3d-core.js → viewer3d-desktop.js | viewer3d-mobile.js
-catalog.js → ui.js
+ui.js → catalog.js
 ```
 
 Детектор платформы в `index.html` (клиентский):
@@ -44,7 +54,7 @@ catalog.js → ui.js
 const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
               || window.innerWidth < 768;
 ```
-При появлении бэкенда: заменить на серверный выбор файла через шаблон FastAPI (`Jinja2`).
+При появлении бэкенда: заменить на серверный выбор через шаблон FastAPI (Jinja2).
 
 ---
 
@@ -61,15 +71,16 @@ const S = {
     pier:         [{x,y}, ...],
     fence:        [{x,y}, ...],
   },
-  porch: { x, y, w, h },         // нормализованные координаты 0..1
-  mats: {},                       // выбранные материалы по секции
-  samples: [{ id, name }],        // накопленные образцы (не заменяют друг друга)
-  curSec: 0,
-  catColors: Set,
-  catPrice: null,
+  porch:        { x, y, w, h },  // нормализованные координаты 0..1
+  mats:         {},               // выбранные материалы по секции
+  samples:      [{ id, name, color }], // накопленные образцы
+  activeSample: null,             // текущий образец для примерки
+  curSec:       0,
+  catColors:    Set,
+  catPrice:     null,
   catShowResults: false,
 };
-let step = 1;                     // текущий шаг (число или 'catalog' | 'summary')
+let step = 1; // текущий шаг (число или 'catalog' | 'summary')
 ```
 
 ---
@@ -78,76 +89,73 @@ let step = 1;                     // текущий шаг (число или 'c
 
 ### viewer3d-core.js — общий код обеих версий
 
-- `init3dCanvas()` — инициализация renderer, scene, camera, OrbitControls, освещение, земля
-- `_injectHdriButton()` — добавляет кнопку «Загрузить HDRI» в `.sh` шага 10
-- `_onHdriFile()` — читает `.hdr` / `.exr`, строит PMREM, применяет `scene.environment`
-- `getHouseMats()` — возвращает PBR-материалы с процедурными текстурами (см. ниже)
-- `buildHouse3d()` — параметрическая модель дома: цоколь, стены с окнами, крыша, терраса
-- `_buildProceduralSky()` — ShaderMaterial небо с солнечным ореолом (до загрузки HDRI)
-- `resizeThree()` — адаптация при изменении размера окна
+**Инициализация:**
+- `init3dCanvas(slotId)` — создаёт renderer, scene, camera, OrbitControls, освещение, землю. При повторном вызове перемещает renderer в новый слот (`moveThreeTo`).
+- `_autoLoadHdri()` — при старте пробует загрузить `assets/environment.hdr`. Нашёл → PMREMGenerator → `scene.environment`, скрывает процедурное небо.
+- `_injectHdriButton()` — кнопка ручной загрузки `.hdr`/`.exr` на шаге 10.
 
-Хуки для версионных файлов:
-- `_buildEntourage(scene)` — вызывается один раз при инициализации
-- `_onAnimFrame(t)` — вызывается каждый кадр (анимация травы на десктопе)
+**Загрузка текстур:**
+- `_loadTex(filename, repeat)` — albedo, sRGBEncoding, с кэшом и placeholder.
+- `_loadNorm(filename, repeat)` — normal map, LinearEncoding.
+- `_loadData(filename, repeat)` — roughness/AO, LinearEncoding.
+- Земля загружается отдельным загрузчиком без placeholder (избегаем `Object.assign` по uuid).
 
-### viewer3d-desktop.js
+**UV-проекция:**
+- `_applyBoxUV(mesh, tileSize, groupOffset)` — кубическая UV-проекция, вычисляется на CPU из локальных позиций вершин + суммарного смещения групп-родителей. Не использует `onBeforeCompile` (несовместимо с r128 без `worldSpaceNormals`).
+- `_wallUVHelper(grp, grpOff)` — рекурсивно обходит группу стен, передаёт накопленный offset. Вызывается после `parent.add()` когда все позиции групп уже установлены.
 
-| Функция | Описание |
-|---------|----------|
-| `_buildDesktopGrass(scene)` | 14 000 стеблей через `InstancedMesh`. Шейдер ветра через `mat.onBeforeCompile` — синусоидальное покачивание нарастает к верхушке (квадратичная зависимость от `uv.y`). Градиент цвета корень→верхушка в `fragmentShader`. |
-| `_buildDesktopBushes(scene)` | 14 кустов: 2–3 цилиндра-ствола + 5–9 сфер-листьев трёх оттенков зелёного. |
-| `_buildDesktopTrees(scene)` | 10 деревьев: цилиндр-ствол + 2–3 слоя конусов-кроны. |
+**Геометрия:**
+- `buildScene3d()` — главный строитель: дом, терраса, крыльцо, дорожки, забор, перила.
+- `buildHouseMeshes()` — стены с окнами/дверью, цоколь, двускатная крыша с UV.
+- `buildTerrace3d()` — настил из досок + лаги + опоры по полигону.
+- `buildPorch3d()` — площадка + ступени с автоопределением направления.
+- `buildPaths3d()`, `buildFence3d()`, `buildRailing3d()`.
+- `_buildProceduralSky()` — ShaderMaterial небо с солнечным ореолом (до HDRI).
 
-### viewer3d-mobile.js
+**Хуки для версионных файлов:**
+- `_buildEntourage(scene)` — вызывается при инициализации.
+- `_onAnimFrame(t)` — каждый кадр.
 
-| Функция | Описание |
-|---------|----------|
-| `_buildMobileBushes(scene)` | 12 `THREE.Sprite` с canvas-текстурой куста. 2 материала → 2 draw calls. |
-| `_buildMobileTrees(scene)` | 10 `THREE.Sprite` с canvas-текстурой дерева. 2 материала → 2 draw calls. |
-| `_buildMobileGrassPatches(scene)` | 200 крестов из плоских `Mesh` (PlaneGeometry) с canvas-текстурой пучка травы. |
+### viewer3d-desktop.js и viewer3d-mobile.js
+
+Обе версии содержат только `_buildEntourage` со спрайтами кустов и деревьев.
+InstancedMesh-трава выключена. Спрайты: `alphaTest: 0.12`, `depthWrite: false`,
+`toneMapped: false`, `color: 0xb8b8b8`. При отсутствии PNG — процедурные fallback.
 
 ### PBR материалы (viewer3d-core.js → getHouseMats)
 
-| Материал | Тип | Карты |
-|----------|-----|-------|
-| `wall` — штукатурка | MeshStandardMaterial | map (шум, тёплый белый) + normalMap (случайный) + roughnessMap |
-| `base` — цоколь | MeshStandardMaterial | map (кирпичная кладка с вариацией) |
-| `roof` — крыша | MeshStandardMaterial | map (черепица 32×20 пикс.) + roughnessMap |
-| `glass` — стекло | **MeshPhysicalMaterial** | transmission 0.88, ior 1.46, reflectivity 0.88 |
-| `frame` — рамы | MeshStandardMaterial | metalness 0.28, roughness 0.28 |
-| `door` — дверь | MeshStandardMaterial | цвет #4a2e18 |
-| `deck` — ДПК | MeshStandardMaterial | map (доски с вельветом, repeat 1×6) |
+| Материал | Тип | Текстуры из assets/ | UV |
+|----------|-----|---------------------|----|
+| `wall` — штукатурка | MeshStandardMaterial | wall_diff/norm/roug | кубическая, 2 м/тайл |
+| `base` — цоколь | MeshStandardMaterial | base_diff/norm | кубическая, 1 м/тайл |
+| `roof` — крыша | MeshStandardMaterial | roof_diff/norm/roug | по скату, 8 м/тайл |
+| `glass` — стекло | **MeshPhysicalMaterial** | — | transmission 0.88, ior 1.46 |
+| `frame` — рамы | MeshStandardMaterial | — | metalness 0.28 |
+| `door` — дверь | MeshStandardMaterial | — | цвет #5c3a1e |
+| `deck` — ДПК настил | MeshStandardMaterial | deck_diff/norm/roug | геометрические UV досок |
+| `ground` — земля | MeshStandardMaterial | ground_diff/norm | repeat 72×72 |
 
 Все материалы получают `envMap` автоматически при загрузке HDRI.
+Базовый `color` земли сбрасывается на белый при загрузке текстуры.
+
+### Соглашение по именам файлов assets/
+
+Подробная таблица с размерами и источниками в `assets/README.md`.
+Рекомендованные источники: polyhaven.com (CC0), ambientcg.com.
 
 ---
 
 ## JSON-контракт (планируемый)
 
-Что конфигуратор отправляет на бэкенд (`POST /api/calculate`):
+`POST /api/calculate` — запрос:
 
 ```json
 {
-  "project": {
-    "house_type": "Одноэтажный дом",
-    "area": 120,
-    "floor_height": 300
-  },
+  "project": { "house_type": "Одноэтажный дом", "area": 120, "floor_height": 300 },
   "constructions": {
-    "terrace": {
-      "enabled": true,
-      "area_m2": 24.5,
-      "perimeter_m": 20.0,
-      "has_railing": true,
-      "has_roof": false
-    },
-    "porch": {
-      "enabled": true,
-      "width_m": 2.4,
-      "depth_m": 1.5,
-      "has_railing": false
-    },
-    "fence":        { "enabled": true,  "perimeter_m": 48.0 },
+    "terrace":      { "enabled": true, "area_m2": 24.5, "perimeter_m": 20.0, "has_railing": true },
+    "porch":        { "enabled": true, "width_m": 2.4, "depth_m": 1.5 },
+    "fence":        { "enabled": true, "perimeter_m": 48.0 },
     "paths":        { "enabled": false },
     "pier":         { "enabled": false },
     "pool_terrace": { "enabled": false }
@@ -158,22 +166,15 @@ let step = 1;                     // текущий шаг (число или 'c
 }
 ```
 
-Что бэкенд возвращает:
+Ответ:
 
 ```json
 {
   "summary": {
     "total_rub": 187400,
     "items": [
-      {
-        "construction": "terrace",
-        "label": "Терраса",
-        "material": "AIWOODek Premium 140×22",
-        "area_m2": 24.5,
-        "price_per_m2": 2400,
-        "qty_boards": 148,
-        "subtotal_rub": 58800
-      }
+      { "construction": "terrace", "label": "Терраса", "material": "AIWOODek Premium 140×22",
+        "area_m2": 24.5, "price_per_m2": 2400, "qty_boards": 148, "subtotal_rub": 58800 }
     ]
   }
 }
@@ -186,15 +187,10 @@ let step = 1;                     // текущий шаг (число или 'c
 | Метод | URL | Описание |
 |-------|-----|----------|
 | `POST` | `/api/calculate` | Принимает конфигурацию, возвращает смету |
-| `GET`  | `/api/catalog` | Список материалов с фильтрами |
+| `GET`  | `/api/catalog` | Список материалов (`section`, `price_tier`, `colors`) |
 | `GET`  | `/api/catalog/{id}` | Один товар |
 | `POST` | `/api/projects` | Сохранить проект |
 | `GET`  | `/api/projects/{id}` | Загрузить проект |
-
-Query-параметры для `/api/catalog`:
-- `section=terrace`
-- `price_tier=balanced`
-- `colors=natural,grey`
 
 ---
 
@@ -202,25 +198,14 @@ Query-параметры для `/api/catalog`:
 
 ```sql
 CREATE TABLE products (
-  id           SERIAL PRIMARY KEY,
-  brand        VARCHAR(100),
-  name         VARCHAR(200),
-  section      VARCHAR(50),
-  price_rub    INTEGER,
-  price_tier   VARCHAR(20),   -- 'budget' | 'balanced' | 'premium' | 'mpk'
-  colors       TEXT[],
-  width_mm     INTEGER,
-  thickness_mm INTEGER,
-  length_mm    INTEGER,
-  description  TEXT,
-  url          VARCHAR(500)
+  id SERIAL PRIMARY KEY, brand VARCHAR(100), name VARCHAR(200),
+  section VARCHAR(50), price_rub INTEGER, price_tier VARCHAR(20),
+  colors TEXT[], width_mm INTEGER, thickness_mm INTEGER, length_mm INTEGER,
+  description TEXT, url VARCHAR(500)
 );
-
 CREATE TABLE projects (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  created_at    TIMESTAMP DEFAULT now(),
-  config_json   JSONB,
-  estimate_json JSONB
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(), created_at TIMESTAMP DEFAULT now(),
+  config_json JSONB, estimate_json JSONB
 );
 ```
 
@@ -228,7 +213,7 @@ CREATE TABLE projects (
 
 ## Расчётный модуль (логика, ещё не реализован)
 
-- **Площадь настила** → из canvas (формула Гаусса по точкам полигона)
+- **Площадь настила** → формула Гаусса по точкам полигона из canvas
 - **Количество досок** = `ceil(area / (board_width_m * board_length_m)) * 1.1`
 - **Погонаж лаг** = `area / 0.4` (шаг 400 мм)
 - **Крепёж** = `qty_boards * 8` (8 клипс на доску)
@@ -245,11 +230,14 @@ CREATE TABLE projects (
 | Vanilla JS, без фреймворков | Нет сборки, быстрая итерация, достаточно для прототипа |
 | Three.js r128 | Стабильная версия, всё необходимое есть на CDN |
 | Разбивка на файлы без бандлера | Простота развёртывания, nginx отдаёт статику напрямую |
-| viewer3d-core + desktop/mobile | Общая логика один раз, антураж — отдельно под каждую платформу |
+| viewer3d-core + desktop/mobile | Общая логика один раз, антураж отдельно под каждую платформу |
 | IS_MOBILE через UA + innerWidth | Достаточно для прототипа; при бэкенде заменить на серверный выбор |
-| RGBELoader/EXRLoader через CDN | Статическое подключение надёжнее динамического `loadScript` |
-| onBeforeCompile для травы | Позволяет добавить шейдер ветра к MeshLambertMaterial без потери instancing |
-| MeshPhysicalMaterial для стекла | transmission + ior дают реалистичное преломление без дополнительных проходов |
+| RGBELoader/EXRLoader через CDN статически | Надёжнее динамического loadScript |
+| CPU box-UV вместо onBeforeCompile | onBeforeCompile с worldpos_vertex несовместим с r128; CPU надёжнее |
+| Отдельный загрузчик для ground | Object.assign копирует uuid текстуры, ломает GL-кэш рендерера |
+| color:white при загрузке ground | Базовый цвет умножается на диффуз → пересвет без сброса |
+| alphaTest + toneMapped:false для спрайтов | Убирает белую обводку PNG и пересвет от ACESFilmic |
+| MeshPhysicalMaterial для стекла | transmission + ior дают реалистичное преломление |
+| Туман отключён | Мешает восприятию участка на типичных дистанциях камеры |
 | Образцы накапливаются, не заменяют | UX: клиент хочет сравнивать несколько материалов |
-| Фасад убран из навигации | Упрощение UX по запросу клиента |
 | FastAPI для бэкенда | Python удобен для расчётного модуля, быстрый старт |
