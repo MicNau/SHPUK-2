@@ -1,304 +1,334 @@
-// ══════════════════════════════════════════════
 // CANVAS.JS — pan/zoom движок, snap-canvas, крыльцо
-// Зависимости: state.js (S, CV, GRID, HANDLE_R, porchDrag, porchDragStart)
+// Зависимости: state.js
+
+// PAN/ZOOM ENGINE
 // ══════════════════════════════════════════════
-
 const CV = {};
-const GRID = 16;
+const GRID = 32;
 
-// ── Pan/zoom состояние ───────────────────────
 function mkCvState() {
-  return {
-    scale: 1, ox: 0, oy: 0,
-    minScale: 0.5, maxScale: 4,
-    dragging: false, lastX: 0, lastY: 0,
-    pinching: false, lastDist: 0,
-  };
+  return { scale:1, ox:0, oy:0, minScale:0.5, maxScale:4,
+           dragging:false, lastX:0, lastY:0, pinching:false, lastDist:0 };
 }
 
 function applyTransform(ctx, cx, W, H) {
-  ctx.clearRect(0, 0, W, H);
-  ctx.save();
-  ctx.translate(cx.ox, cx.oy);
-  ctx.scale(cx.scale, cx.scale);
+  ctx.clearRect(0,0,W,H); ctx.save();
+  ctx.translate(cx.ox, cx.oy); ctx.scale(cx.scale, cx.scale);
 }
 
-// ── Общий pan/zoom обработчик ────────────────
 function attachPanZoom(el, cvName, onRedraw) {
   const cx = CV[cvName];
-
-  el.addEventListener('touchstart', e => {
-    if (e.touches.length === 2) {
-      cx.pinching = true; cx.dragging = false;
-      cx.lastDist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY);
-    } else if (e.touches.length === 1 && !cx.pinching) {
-      cx.dragging = true;
-      cx.lastX = e.touches[0].clientX;
-      cx.lastY = e.touches[0].clientY;
+  el.addEventListener('touchstart', e=>{
+    if (e.touches.length===2) {
+      cx.pinching=true; cx.dragging=false;
+      cx.lastDist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,
+                              e.touches[0].clientY-e.touches[1].clientY);
+    } else if (e.touches.length===1 && !cx.pinching) {
+      cx.dragging=true; cx.lastX=e.touches[0].clientX; cx.lastY=e.touches[0].clientY;
     }
-  }, {passive: true});
-
-  el.addEventListener('touchmove', e => {
-    if (cx.pinching && e.touches.length === 2) {
-      const dist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY);
-      const ratio = dist / cx.lastDist; cx.lastDist = dist;
-      const mid = {
-        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
-        y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
-      };
-      const r = el.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-      const mx = (mid.x - r.left) * dpr, my = (mid.y - r.top) * dpr;
-      const ns = Math.min(cx.maxScale, Math.max(cx.minScale, cx.scale * ratio));
-      cx.ox = mx - (mx - cx.ox) * (ns / cx.scale);
-      cx.oy = my - (my - cx.oy) * (ns / cx.scale);
-      cx.scale = ns;
+  },{passive:true});
+  el.addEventListener('touchmove', e=>{
+    if (cx.pinching && e.touches.length===2) {
+      const dist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,
+                             e.touches[0].clientY-e.touches[1].clientY);
+      const ratio=dist/cx.lastDist; cx.lastDist=dist;
+      const mid={ x:(e.touches[0].clientX+e.touches[1].clientX)/2,
+                  y:(e.touches[0].clientY+e.touches[1].clientY)/2 };
+      const r=el.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+      const mx=(mid.x-r.left)*dpr, my=(mid.y-r.top)*dpr;
+      const ns=Math.min(cx.maxScale,Math.max(cx.minScale,cx.scale*ratio));
+      cx.ox=mx-(mx-cx.ox)*(ns/cx.scale); cx.oy=my-(my-cx.oy)*(ns/cx.scale); cx.scale=ns;
       onRedraw();
-    } else if (cx.dragging && e.touches.length === 1 && !cx.pinching) {
-      const dpr = window.devicePixelRatio || 1;
-      cx.ox += (e.touches[0].clientX - cx.lastX) * dpr;
-      cx.oy += (e.touches[0].clientY - cx.lastY) * dpr;
-      cx.lastX = e.touches[0].clientX;
-      cx.lastY = e.touches[0].clientY;
+    } else if (cx.dragging && e.touches.length===1 && !cx.pinching) {
+      const dpr=window.devicePixelRatio||1;
+      cx.ox+=(e.touches[0].clientX-cx.lastX)*dpr;
+      cx.oy+=(e.touches[0].clientY-cx.lastY)*dpr;
+      cx.lastX=e.touches[0].clientX; cx.lastY=e.touches[0].clientY;
       onRedraw();
     }
     e.preventDefault();
-  }, {passive: false});
-
-  el.addEventListener('touchend', e => {
-    if (e.touches.length < 2) cx.pinching = false;
-    if (e.touches.length === 0) cx.dragging = false;
-  }, {passive: true});
-
-  el.addEventListener('wheel', e => {
+  },{passive:false});
+  el.addEventListener('touchend', e=>{
+    if (e.touches.length<2) cx.pinching=false;
+    if (e.touches.length===0) cx.dragging=false;
+  },{passive:true});
+  el.addEventListener('wheel', e=>{
     e.preventDefault();
-    const r = el.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-    const mx = (e.clientX - r.left) * dpr, my = (e.clientY - r.top) * dpr;
-    const f = e.deltaY < 0 ? 1.15 : 0.87;
-    const ns = Math.min(cx.maxScale, Math.max(cx.minScale, cx.scale * f));
-    cx.ox = mx - (mx - cx.ox) * (ns / cx.scale);
-    cx.oy = my - (my - cx.oy) * (ns / cx.scale);
-    cx.scale = ns;
+    const r=el.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+    const mx=(e.clientX-r.left)*dpr, my=(e.clientY-r.top)*dpr;
+    const f=e.deltaY<0?1.15:0.87;
+    const ns=Math.min(cx.maxScale,Math.max(cx.minScale,cx.scale*f));
+    cx.ox=mx-(mx-cx.ox)*(ns/cx.scale); cx.oy=my-(my-cx.oy)*(ns/cx.scale); cx.scale=ns;
     onRedraw();
-  }, {passive: false});
+  },{passive:false});
 }
 
 // ══════════════════════════════════════════════
-// SNAP-CANVAS (терраса, pool, pier, fence, paths)
+// SNAP-CANVAS (терраса, pool, pier, fence, paths-точки)
 // ══════════════════════════════════════════════
 function initSnapCanvas(name) {
-  const wrap = document.getElementById('cw-' + name);
-  const cv   = document.getElementById('cv-' + name);
-  const dpr  = window.devicePixelRatio || 1;
-  const sz   = wrap.offsetWidth;
-  cv.width   = sz * dpr;
-  cv.height  = sz * dpr;
-  cv.style.width  = sz + 'px';
-  cv.style.height = sz + 'px';
-  CV[name] = mkCvState();
+  const wrap=document.getElementById('cw-'+name);
+  const cv=document.getElementById('cv-'+name);
+  const dpr=window.devicePixelRatio||1, sz=wrap.offsetWidth;
+  cv.width=sz*dpr; cv.height=sz*dpr;
+  cv.style.width=sz+'px'; cv.style.height=sz+'px';
+  CV[name]=mkCvState();
 
-  drawSnapCanvas(name);
-
-  // Заменяем canvas чтобы сбросить все старые слушатели
-  const newCv = cv.cloneNode(true);
+  // Клонируем и заменяем — сбрасываем все старые слушатели
+  const newCv=cv.cloneNode(false);
+  newCv.width=sz*dpr; newCv.height=sz*dpr;
+  newCv.style.width=sz+'px'; newCv.style.height=sz+'px';
   wrap.replaceChild(newCv, cv);
 
-  attachPanZoom(wrap, name, () => drawSnapCanvas(name));
+  // Рисуем уже после того как новый canvas в DOM
+  drawSnapCanvas(name);
 
-  // Клик — добавить точку со snap к сетке
-  wrap.addEventListener('click', e => {
+  attachPanZoom(wrap, name, ()=>drawSnapCanvas(name));
+
+  // Клик — добавить точку с snap
+  wrap.addEventListener('click', e=>{
     if (CV[name].pinching) return;
-    const cvEl = document.getElementById('cv-' + name); if (!cvEl) return;
-    const r  = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-    const sx = (e.clientX - r.left) * dpr;
-    const sy = (e.clientY - r.top)  * dpr;
-    const cx = CV[name];
-    const wx = (sx - cx.ox) / cx.scale;
-    const wy = (sy - cx.oy) / cx.scale;
-    const W  = cvEl.width;
-    const gridStep = W / GRID;
-    S.pts[name].push({
-      x: Math.round(wx / gridStep) * gridStep / W,
-      y: Math.round(wy / gridStep) * gridStep / W,
-    });
+    const cvEl=document.getElementById('cv-'+name); if (!cvEl) return;
+    const r=wrap.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+    const sx=(e.clientX-r.left)*dpr, sy=(e.clientY-r.top)*dpr;
+    const cx=CV[name];
+    const wx=(sx-cx.ox)/cx.scale, wy=(sy-cx.oy)/cx.scale;
+    const W=cvEl.width, step=W/GRID;
+    S.pts[name].push({ x:Math.round(wx/step)*step/W, y:Math.round(wy/step)*step/W });
     drawSnapCanvas(name);
   });
 }
 
-function drawSnapCanvas(name) {
-  const cvEl = document.getElementById('cv-' + name); if (!cvEl) return;
-  const ctx  = cvEl.getContext('2d');
-  const W    = cvEl.width, H = cvEl.height;
-  const cx   = CV[name] || {scale: 1, ox: 0, oy: 0};
-  const pts  = S.pts[name] || [];
+// Вычислить прямоугольник дома на canvas в нормализованных координатах 0..1
+// На основе реальных параметров площади. Canvas = GRID×GRID м сетка.
+function getHouseRectNorm() {
+  const area = parseFloat(document.getElementById('v-area')?.value || 120);
+  const RATIO = 1.6;
+  const houseW = Math.sqrt(area / RATIO); // ширина (по Z / по Y canvas)
+  const houseL = houseW * RATIO;          // длина (по X)
+  const gridSize = GRID;
+  // Центрируем дом на canvas
+  const nx = (gridSize - houseL) / 2 / gridSize;
+  const ny = (gridSize - houseW) / 2 / gridSize;
+  const nw = houseL / gridSize;
+  const nh = houseW / gridSize;
+  return { nx, ny, nw, nh, houseL, houseW };
+}
 
-  applyTransform(ctx, cx, W, H);
+// Рисование ранее заданных объектов как фон на canvas-шагах
+// excludeName — текущая секция (не рисуем её повторно, она рисуется как основной слой)
+function drawPreviousLayers(ctx, W, H, cx, excludeName) {
+  const sc = cx.scale || 1;
 
-  ctx.fillStyle = '#d9d9d9';
-  ctx.fillRect(0, 0, W, H);
+  // 1. Дом
+  if (S.houseType !== 'Участок без дома') {
+    const hr = getHouseRectNorm();
+    const hx=hr.nx*W, hy=hr.ny*H, hw=hr.nw*W, hh=hr.nh*H;
+    ctx.strokeStyle='#555'; ctx.lineWidth=2.5/sc; ctx.setLineDash([]);
+    ctx.strokeRect(hx,hy,hw,hh);
+    ctx.fillStyle='rgba(0,0,0,.06)'; ctx.fillRect(hx,hy,hw,hh);
+    // Штриховка
+    ctx.save();
+    ctx.beginPath(); ctx.rect(hx,hy,hw,hh); ctx.clip();
+    ctx.strokeStyle='rgba(0,0,0,.08)'; ctx.lineWidth=1/sc;
+    for (let d = -Math.max(hw,hh); d < Math.max(hw,hh)*2; d += 8/sc) {
+      ctx.beginPath(); ctx.moveTo(hx+d, hy); ctx.lineTo(hx+d-hh, hy+hh); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.fillStyle='#666'; ctx.font=`bold ${13/sc}px Roboto`; ctx.textAlign='center';
+    ctx.fillText('ДОМ', hx+hw/2, hy+hh/2+5/sc);
+    ctx.fillStyle='#888'; ctx.font=`${10/sc}px Roboto`;
+    ctx.fillText(hr.houseL.toFixed(1)+'м', hx+hw/2, hy-6/sc);
+    ctx.save(); ctx.translate(hx-6/sc, hy+hh/2);
+    ctx.rotate(-Math.PI/2); ctx.textAlign='center';
+    ctx.fillText(hr.houseW.toFixed(1)+'м', 0, 0); ctx.restore();
+  }
 
-  // Сетка
-  const gridStep = W / GRID;
-  ctx.fillStyle = name === 'fence' ? '#999' : '#bbb';
-  for (let r = 0; r <= GRID; r++) {
-    for (let c = 0; c <= GRID; c++) {
-      ctx.beginPath();
-      ctx.arc(c * gridStep, r * gridStep, 3 / cx.scale, 0, Math.PI * 2);
-      ctx.fill();
+  // Цвета для фоновых слоёв
+  const layerStyles = {
+    terrace:      { fill:'rgba(0,150,80,.12)',  stroke:'rgba(0,150,80,.5)',  label:'Терраса' },
+    pool_terrace: { fill:'rgba(0,80,200,.10)',  stroke:'rgba(0,80,200,.5)',  label:'Терр. бассейна' },
+    pier:         { fill:'rgba(26,122,204,.10)',stroke:'rgba(26,122,204,.5)',label:'Причал' },
+    fence:        { fill:'none',                stroke:'rgba(0,0,0,.3)',     label:'Забор' },
+  };
+
+  // 2. Полигоны: terrace, pool_terrace, pier, fence
+  for (const [secId, style] of Object.entries(layerStyles)) {
+    if (secId === excludeName) continue;
+    const tp = S.pts[secId];
+    if (!tp || tp.length < 2) continue;
+    ctx.beginPath(); ctx.moveTo(tp[0].x*W, tp[0].y*H);
+    for (let i=1; i<tp.length; i++) ctx.lineTo(tp[i].x*W, tp[i].y*H);
+    if (tp.length > 2 && secId !== 'fence') ctx.closePath();
+    else if (secId === 'fence' && tp.length > 2) ctx.closePath();
+    if (style.fill !== 'none') { ctx.fillStyle=style.fill; ctx.fill(); }
+    ctx.strokeStyle=style.stroke; ctx.lineWidth=2/sc;
+    ctx.setLineDash([6/sc,3/sc]); ctx.stroke(); ctx.setLineDash([]);
+    // Подпись
+    const centX = tp.reduce((s,p)=>s+p.x,0)/tp.length*W;
+    const centY = tp.reduce((s,p)=>s+p.y,0)/tp.length*H;
+    ctx.fillStyle=style.stroke; ctx.font=`${10/sc}px Roboto`; ctx.textAlign='center';
+    ctx.fillText(style.label, centX, centY);
+  }
+
+  // 3. Дорожки — рисуем как полосу указанной ширины
+  if (excludeName !== 'paths') {
+    const pp = S.pts.paths;
+    if (pp && pp.length >= 2) {
+      const pathWidthCm = parseFloat(document.getElementById('v-paths-width')?.value || 120);
+      const pathHalfW = (pathWidthCm / 100) / GRID * W / 2; // половина ширины в пикселях canvas
+      ctx.strokeStyle='rgba(51,102,0,.3)'; ctx.lineWidth=pathHalfW*2; ctx.lineCap='round'; ctx.lineJoin='round';
+      ctx.beginPath(); ctx.moveTo(pp[0].x*W, pp[0].y*H);
+      for (let i=1; i<pp.length; i++) ctx.lineTo(pp[i].x*W, pp[i].y*H);
+      ctx.stroke();
+      ctx.lineWidth=2/sc; // reset
+      // Подпись
+      const mid = pp[Math.floor(pp.length/2)];
+      ctx.fillStyle='rgba(51,102,0,.6)'; ctx.font=`${10/sc}px Roboto`; ctx.textAlign='center';
+      ctx.fillText('Дорожка', mid.x*W, mid.y*H - pathHalfW - 4/sc);
     }
   }
-  if (name === 'fence') {
-    ctx.fillStyle = '#888';
-    ctx.font = `${11 / cx.scale}px Roboto`;
-    ctx.textAlign = 'center';
-    for (let i = 1; i <= GRID; i++)
-      ctx.fillText(i + 'м', i * gridStep, H - 4 / cx.scale);
+
+  // 4. Крыльцо (только если уже настроено — т.е. текущий шаг идёт ПОСЛЕ крыльца в порядке)
+  // Новый порядок: terrace → porch → paths → fence → pool_terrace → pier
+  const configOrder = ['terrace','porch','paths','fence','pool_terrace','pier'];
+  const porchOrdIdx = configOrder.indexOf('porch');
+  const curOrdIdx = configOrder.indexOf(excludeName);
+  const porchDone = (curOrdIdx >= 0 && porchOrdIdx >= 0 && curOrdIdx > porchOrdIdx);
+  if (excludeName !== 'porch' && S.sections.includes('porch') && porchDone) {
+    const p = S.porch;
+    const px=p.x*W, py=p.y*H, pw=p.w*W, ph=p.h*H;
+    ctx.fillStyle='rgba(0,100,220,.10)'; ctx.fillRect(px,py,pw,ph);
+    ctx.strokeStyle='rgba(0,100,220,.4)'; ctx.lineWidth=2/sc;
+    ctx.setLineDash([4/sc,2/sc]); ctx.strokeRect(px,py,pw,ph); ctx.setLineDash([]);
+    ctx.fillStyle='rgba(0,100,220,.5)'; ctx.font=`${10/sc}px Roboto`; ctx.textAlign='center';
+    ctx.fillText('Крыльцо', px+pw/2, py+ph/2+4/sc);
+  }
+}
+
+function drawSnapCanvas(name) {
+  const cvEl=document.getElementById('cv-'+name); if (!cvEl) return;
+  const ctx=cvEl.getContext('2d'), W=cvEl.width, H=cvEl.height;
+  const cx=CV[name]||{scale:1,ox:0,oy:0};
+  const pts=S.pts[name]||[];
+  applyTransform(ctx,cx,W,H);
+
+  ctx.fillStyle='#d9d9d9'; ctx.fillRect(0,0,W,H);
+
+  // Сетка
+  const step=W/GRID;
+  ctx.fillStyle='#bbb';
+  for(let r=0;r<=GRID;r++) for(let c=0;c<=GRID;c++) {
+    ctx.beginPath(); ctx.arc(c*step,r*step,2/cx.scale,0,Math.PI*2); ctx.fill();
   }
 
-  // Фон террасы на шаге крыльца (name === 'porch' здесь не бывает,
-  // но оставлено на случай расширения)
-  if (name === 'porch' && S.pts.terrace && S.pts.terrace.length > 2) {
-    _drawTerraceGhost(ctx, W, H, cx);
-  }
+  // Метки метров (каждые 5м)
+  ctx.fillStyle='#999'; ctx.font=`${9/cx.scale}px Roboto`; ctx.textAlign='center';
+  for(let i=5;i<=GRID;i+=5) ctx.fillText(i+'м', i*step, H-3/cx.scale);
 
-  // Контур дома / участка
-  if (!['fence', 'paths'].includes(name)) {
-    const hx = 0.15 * W, hy = 0.15 * H, hw = 0.7 * W, hh = 0.7 * H;
-    ctx.strokeStyle = '#777';
-    ctx.lineWidth = 2.5 / cx.scale;
-    ctx.setLineDash([]);
-    ctx.strokeRect(hx, hy, hw, hh);
-    ctx.fillStyle = 'rgba(0,0,0,.04)';
-    ctx.fillRect(hx, hy, hw, hh);
-    ctx.fillStyle = '#999';
-    ctx.font = `${14 / cx.scale}px Roboto`;
-    ctx.textAlign = 'center';
-    const labels = {
-      terrace: 'Дом', pool_terrace: 'Бассейн / Дом',
-      pier: 'Участок у воды', fence: 'Участок',
-    };
-    ctx.fillText(labels[name] || 'Дом', W / 2, H / 2);
-  }
+  // Ранее заданные объекты (дом, терраса, дорожки, крыльцо и т.д.)
+  drawPreviousLayers(ctx, W, H, cx, name);
 
-  // Подсказка если нет точек
+  // Подсказка (если ещё нет точек)
   if (!pts.length) {
-    ctx.fillStyle = '#aaa';
-    ctx.font = `${13 / cx.scale}px Roboto`;
-    ctx.textAlign = 'center';
-    const hints = {
-      terrace: 'Нажмите чтобы поставить угол',
-      pool_terrace: 'Нажмите чтобы поставить угол',
-      pier: 'Нажмите чтобы поставить угол',
-      fence: 'Нажмите чтобы поставить угол',
-      paths: 'Нажмите точки вдоль дорожки',
-    };
-    ctx.fillText(hints[name] || 'Нажмите чтобы поставить точку', W / 2, H * 0.85);
-    ctx.restore();
-    return;
+    ctx.fillStyle='#aaa'; ctx.font=`${13/cx.scale}px Roboto`; ctx.textAlign='center';
+    const hint={terrace:'Нажмите чтобы поставить угол',pool_terrace:'Нажмите чтобы поставить угол',
+                 pier:'Нажмите чтобы поставить угол',fence:'Нажмите чтобы поставить угол',
+                 paths:'Нажмите точки вдоль дорожки'};
+    ctx.fillText(hint[name]||'Нажмите чтобы поставить точку', W/2, H*0.92);
   }
 
-  // Контур фигуры
-  const color = {
-    terrace: '#000', pool_terrace: '#0050CC',
-    pier: '#1a7acc', paths: '#336600', fence: '#000',
-  }[name] || '#000';
+  // Контур текущей секции
+  if (pts.length > 0) {
+    const color = {terrace:'#000',pool_terrace:'#0050CC',pier:'#1a7acc',paths:'#336600',fence:'#000'}[name]||'#000';
 
-  ctx.beginPath();
-  ctx.moveTo(pts[0].x * W, pts[0].y * H);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x * W, pts[i].y * H);
-  if (name !== 'paths' && pts.length > 2) {
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(0,0,0,.08)';
-    ctx.fill();
+    if (name === 'paths') {
+      // Дорожки — рисуем широкой полосой
+      const pathWidthCm = parseFloat(document.getElementById('v-paths-width')?.value || 120);
+      const pathW = (pathWidthCm / 100) / GRID * W;
+      // Полоса
+      ctx.strokeStyle='rgba(51,102,0,.25)'; ctx.lineWidth=pathW; ctx.lineCap='round'; ctx.lineJoin='round';
+      ctx.beginPath(); ctx.moveTo(pts[0].x*W, pts[0].y*H);
+      for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x*W, pts[i].y*H);
+      ctx.stroke();
+      // Центральная линия
+      ctx.strokeStyle=color; ctx.lineWidth=2/cx.scale; ctx.lineCap='butt';
+      ctx.setLineDash([6/cx.scale,3/cx.scale]);
+      ctx.beginPath(); ctx.moveTo(pts[0].x*W, pts[0].y*H);
+      for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x*W, pts[i].y*H);
+      ctx.stroke(); ctx.setLineDash([]);
+    } else {
+      // Полигоны
+      ctx.beginPath(); ctx.moveTo(pts[0].x*W,pts[0].y*H);
+      for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x*W,pts[i].y*H);
+      if(pts.length>2) { ctx.closePath(); ctx.fillStyle='rgba(0,0,0,.08)'; ctx.fill(); }
+      ctx.strokeStyle=color; ctx.lineWidth=2.5/cx.scale; ctx.stroke();
+    }
+
+    // Точки
+    pts.forEach((p,i)=>{
+      ctx.beginPath(); ctx.arc(p.x*W,p.y*H,8/cx.scale,0,Math.PI*2);
+      ctx.fillStyle='#fff'; ctx.fill();
+      ctx.strokeStyle=color; ctx.lineWidth=2.5/cx.scale; ctx.stroke();
+      ctx.fillStyle=color; ctx.font=`bold ${10/cx.scale}px Roboto`; ctx.textAlign='center';
+      ctx.fillText(i+1,p.x*W,p.y*H+4/cx.scale);
+    });
   }
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2.5 / cx.scale;
-  ctx.stroke();
-
-  // Точки с номерами
-  pts.forEach((p, i) => {
-    ctx.beginPath();
-    ctx.arc(p.x * W, p.y * H, 8 / cx.scale, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff'; ctx.fill();
-    ctx.strokeStyle = color; ctx.lineWidth = 2.5 / cx.scale; ctx.stroke();
-    ctx.fillStyle = color;
-    ctx.font = `bold ${10 / cx.scale}px Roboto`;
-    ctx.textAlign = 'center';
-    ctx.fillText(i + 1, p.x * W, p.y * H + 4 / cx.scale);
-  });
 
   ctx.restore();
 }
 
 function undoPt(n) { S.pts[n].pop(); drawSnapCanvas(n); }
-function clrPts(n) { S.pts[n] = []; drawSnapCanvas(n); }
+function clrPts(n) { S.pts[n]=[]; drawSnapCanvas(n); }
 
-// Дорожки используют тот же snap-canvas
+// Для дорожек - тот же snap-canvas, уже обрабатывается выше
 function initPathsCanvas() { initSnapCanvas('paths'); }
 
-// ── Внутренняя утилита: призрак террасы ──────
-function _drawTerraceGhost(ctx, W, H, cx) {
-  const tp = S.pts.terrace;
-  ctx.beginPath();
-  ctx.moveTo(tp[0].x * W, tp[0].y * H);
-  for (let i = 1; i < tp.length; i++) ctx.lineTo(tp[i].x * W, tp[i].y * H);
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(0,150,80,.12)'; ctx.fill();
-  ctx.strokeStyle = 'rgba(0,150,80,.5)';
-  ctx.lineWidth = 2 / cx.scale;
-  ctx.setLineDash([6 / cx.scale, 3 / cx.scale]); ctx.stroke(); ctx.setLineDash([]);
-  ctx.fillStyle = 'rgba(0,150,80,.6)';
-  ctx.font = `${11 / cx.scale}px Roboto`;
-  ctx.textAlign = 'center';
-  const tx = tp.reduce((s, p) => s + p.x, 0) / tp.length * W;
-  const ty = tp.reduce((s, p) => s + p.y, 0) / tp.length * H;
-  ctx.fillText('Терраса', tx, ty);
-}
-
 // ══════════════════════════════════════════════
-// КРЫЛЬЦО: drag + resize
+// КРЫЛЬЦО: drag+resize С ПОКАЗОМ ТЕРРАСЫ В ФОНЕ
 // ══════════════════════════════════════════════
-const HANDLE_R = 18;
-let porchDrag = null, porchDragStart = null;
+const HANDLE_R=18;
+let porchDrag=null, porchDragStart=null;
 
 function initPorchCanvas() {
-  const wrap = document.getElementById('cw-porch');
-  const cv   = document.getElementById('cv-porch');
-  const dpr  = window.devicePixelRatio || 1;
-  const sz   = wrap.offsetWidth;
-  cv.width   = sz * dpr;
-  cv.height  = sz * dpr;
-  cv.style.width  = sz + 'px';
-  cv.style.height = sz + 'px';
-  CV['porch'] = mkCvState();
+  const wrap=document.getElementById('cw-porch');
+  const cv=document.getElementById('cv-porch');
+  const dpr=window.devicePixelRatio||1, sz=wrap.offsetWidth;
+  cv.width=sz*dpr; cv.height=sz*dpr;
+  cv.style.width=sz+'px'; cv.style.height=sz+'px';
+  CV['porch']=mkCvState();
+  const newCv=cv.cloneNode(false);
+  newCv.width=sz*dpr; newCv.height=sz*dpr;
+  newCv.style.width=sz+'px'; newCv.style.height=sz+'px';
+  wrap.replaceChild(newCv, cv);
+
+  // Рисуем уже после того как новый canvas в DOM
   drawPorchCanvas();
 
-  const newCv = cv.cloneNode(true);
-  wrap.replaceChild(newCv, cv);
   attachPorchEvents(wrap);
 }
 
+// Единый обработчик событий крыльца — чтобы не было конфликта pan vs drag
 function attachPorchEvents(wrap) {
   const cx = CV['porch'];
-  let touchId = null;
+  let touchId = null;     // id пальца, тащящего крыльцо
   let pinchActive = false;
 
   const getWorld = (clientX, clientY) => {
     const cvEl = document.getElementById('cv-porch');
-    const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio||1;
     return {
-      x: ((clientX - r.left) * dpr - cx.ox) / cx.scale,
-      y: ((clientY - r.top)  * dpr - cx.oy) / cx.scale,
+      x: ((clientX - r.left)*dpr - cx.ox) / cx.scale,
+      y: ((clientY - r.top )*dpr - cx.oy) / cx.scale,
       W: cvEl.width,
     };
   };
 
-  wrap.addEventListener('touchstart', e => {
+  // ── TOUCH ──────────────────────────────────────────────────────────
+  wrap.addEventListener('touchstart', e=>{
     e.preventDefault();
     if (e.touches.length === 2) {
+      // Два пальца → только zoom, drag сбрасываем
       pinchActive = true; porchDrag = null; touchId = null;
       cx.lastDist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
@@ -307,17 +337,19 @@ function attachPorchEvents(wrap) {
     }
     if (e.touches.length === 1 && !pinchActive) {
       const t = e.touches[0];
-      const {x, y, W} = getWorld(t.clientX, t.clientY);
-      const hit = hitPorchHandle(x, y, W);
+      const {x,y,W} = getWorld(t.clientX, t.clientY);
+      const hit = hitPorchHandle(x,y,W);
       if (hit) {
         porchDrag = hit;
-        porchDragStart = {mx: x, my: y, ...S.porch};
+        porchDragStart = {mx:x, my:y, ...S.porch};
         touchId = t.identifier;
       }
+      // Если не в крыльцо — ничего (pan специально отключён,
+      // чтобы первое касание всегда захватывало крыльцо)
     }
-  }, {passive: false});
+  },{passive:false});
 
-  wrap.addEventListener('touchmove', e => {
+  wrap.addEventListener('touchmove', e=>{
     e.preventDefault();
     if (pinchActive && e.touches.length === 2) {
       const dist = Math.hypot(
@@ -325,138 +357,108 @@ function attachPorchEvents(wrap) {
         e.touches[0].clientY - e.touches[1].clientY);
       const ratio = dist / cx.lastDist; cx.lastDist = dist;
       const mid = {
-        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
-        y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+        x: (e.touches[0].clientX + e.touches[1].clientX)/2,
+        y: (e.touches[0].clientY + e.touches[1].clientY)/2,
       };
-      const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-      const mx = (mid.x - r.left) * dpr, my = (mid.y - r.top) * dpr;
-      const ns = Math.min(cx.maxScale, Math.max(cx.minScale, cx.scale * ratio));
-      cx.ox = mx - (mx - cx.ox) * (ns / cx.scale);
-      cx.oy = my - (my - cx.oy) * (ns / cx.scale);
-      cx.scale = ns;
-      drawPorchCanvas();
-      return;
+      const r=wrap.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+      const mx=(mid.x-r.left)*dpr, my=(mid.y-r.top)*dpr;
+      const ns=Math.min(cx.maxScale, Math.max(cx.minScale, cx.scale*ratio));
+      cx.ox=mx-(mx-cx.ox)*(ns/cx.scale); cx.oy=my-(my-cx.oy)*(ns/cx.scale); cx.scale=ns;
+      drawPorchCanvas(); return;
     }
     if (porchDrag && touchId !== null) {
-      const t = [...e.touches].find(t => t.identifier === touchId); if (!t) return;
-      const {x, y, W} = getWorld(t.clientX, t.clientY);
-      applyPorchDrag(x, y, W);
+      const t = [...e.touches].find(t=>t.identifier===touchId); if (!t) return;
+      const {x,y,W} = getWorld(t.clientX, t.clientY);
+      applyPorchDrag(x,y,W);
     }
-  }, {passive: false});
+  },{passive:false});
 
-  wrap.addEventListener('touchend', e => {
+  wrap.addEventListener('touchend', e=>{
     if (e.touches.length < 2) pinchActive = false;
-    if (e.touches.length === 0) { porchDrag = null; porchDragStart = null; touchId = null; }
-  }, {passive: true});
+    if (e.touches.length === 0) { porchDrag=null; porchDragStart=null; touchId=null; }
+  },{passive:true});
 
-  wrap.addEventListener('mousedown', e => {
-    const {x, y, W} = getWorld(e.clientX, e.clientY);
-    const hit = hitPorchHandle(x, y, W);
+  // ── МЫШЬ ───────────────────────────────────────────────────────────
+  wrap.addEventListener('mousedown', e=>{
+    const {x,y,W} = getWorld(e.clientX, e.clientY);
+    const hit = hitPorchHandle(x,y,W);
     if (hit) {
-      porchDrag = hit;
-      porchDragStart = {mx: x, my: y, ...S.porch};
-      wrap.style.cursor = hit === 'move' ? 'move' : 'nwse-resize';
+      porchDrag=hit; porchDragStart={mx:x,my:y,...S.porch};
+      wrap.style.cursor = hit==='move'?'move':'nwse-resize';
     }
   });
-
-  document.addEventListener('mousemove', e => {
+  document.addEventListener('mousemove', e=>{
     if (!porchDrag) return;
-    const {x, y, W} = getWorld(e.clientX, e.clientY);
-    applyPorchDrag(x, y, W);
+    const {x,y,W} = getWorld(e.clientX, e.clientY); applyPorchDrag(x,y,W);
   });
+  document.addEventListener('mouseup', ()=>{ porchDrag=null; porchDragStart=null; wrap.style.cursor='default'; });
 
-  document.addEventListener('mouseup', () => {
-    porchDrag = null; porchDragStart = null;
-    wrap.style.cursor = 'default';
-  });
-
-  wrap.addEventListener('wheel', e => {
+  // Колесо → zoom
+  wrap.addEventListener('wheel', e=>{
     e.preventDefault();
-    const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-    const mx = (e.clientX - r.left) * dpr, my = (e.clientY - r.top) * dpr;
-    const f  = e.deltaY < 0 ? 1.15 : 0.87;
-    const ns = Math.min(cx.maxScale, Math.max(cx.minScale, cx.scale * f));
-    cx.ox = mx - (mx - cx.ox) * (ns / cx.scale);
-    cx.oy = my - (my - cx.oy) * (ns / cx.scale);
-    cx.scale = ns;
+    const r=wrap.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+    const mx=(e.clientX-r.left)*dpr, my=(e.clientY-r.top)*dpr;
+    const f=e.deltaY<0?1.15:0.87;
+    const ns=Math.min(cx.maxScale,Math.max(cx.minScale,cx.scale*f));
+    cx.ox=mx-(mx-cx.ox)*(ns/cx.scale); cx.oy=my-(my-cx.oy)*(ns/cx.scale); cx.scale=ns;
     drawPorchCanvas();
-  }, {passive: false});
+  },{passive:false});
 }
 
 function getPorchRect(W) {
-  const p = S.porch;
-  return {x: p.x * W, y: p.y * W, w: p.w * W, h: p.h * W};
+  const p=S.porch; return {x:p.x*W,y:p.y*W,w:p.w*W,h:p.h*W};
 }
-
-function hitPorchHandle(wx, wy, W) {
-  const {x, y, w, h} = getPorchRect(W), R = HANDLE_R * 2;
-  for (const [id, hx, hy] of [['nw',x,y],['ne',x+w,y],['sw',x,y+h],['se',x+w,y+h]])
-    if (Math.abs(wx - hx) < R && Math.abs(wy - hy) < R) return id;
-  if (wx >= x && wx <= x + w && wy >= y && wy <= y + h) return 'move';
+function hitPorchHandle(wx,wy,W) {
+  const {x,y,w,h}=getPorchRect(W), R=HANDLE_R*2;
+  for(const [id,cx,cy] of [['nw',x,y],['ne',x+w,y],['sw',x,y+h],['se',x+w,y+h]])
+    if(Math.abs(wx-cx)<R && Math.abs(wy-cy)<R) return id;
+  if(wx>=x&&wx<=x+w&&wy>=y&&wy<=y+h) return 'move';
   return null;
 }
-
-function applyPorchDrag(wx, wy, W) {
-  const ds = porchDragStart;
-  const dx = (wx - ds.mx) / W, dy = (wy - ds.my) / W;
-  const mn = 0.05, p = S.porch;
-  if (porchDrag === 'move') {
-    p.x = Math.max(0, Math.min(1 - ds.w, ds.x + dx));
-    p.y = Math.max(0, Math.min(1 - ds.h, ds.y + dy));
-  } else if (porchDrag === 'se') { p.w = Math.max(mn, ds.w + dx); p.h = Math.max(mn, ds.h + dy); }
-  else if (porchDrag === 'sw') { const nw = Math.max(mn, ds.w - dx); p.x = ds.x + ds.w - nw; p.w = nw; p.h = Math.max(mn, ds.h + dy); }
-  else if (porchDrag === 'ne') { p.w = Math.max(mn, ds.w + dx); const nh = Math.max(mn, ds.h - dy); p.y = ds.y + ds.h - nh; p.h = nh; }
-  else if (porchDrag === 'nw') {
-    const nw2 = Math.max(mn, ds.w - dx); p.x = ds.x + ds.w - nw2; p.w = nw2;
-    const nh2 = Math.max(mn, ds.h - dy); p.y = ds.y + ds.h - nh2; p.h = nh2;
-  }
+function applyPorchDrag(wx,wy,W) {
+  const ds=porchDragStart, dx=(wx-ds.mx)/W, dy=(wy-ds.my)/W, mn=0.05, p=S.porch;
+  if(porchDrag==='move'){ p.x=Math.max(0,Math.min(1-ds.w,ds.x+dx)); p.y=Math.max(0,Math.min(1-ds.h,ds.y+dy)); }
+  else if(porchDrag==='se'){ p.w=Math.max(mn,ds.w+dx); p.h=Math.max(mn,ds.h+dy); }
+  else if(porchDrag==='sw'){ const nw=Math.max(mn,ds.w-dx); p.x=ds.x+ds.w-nw; p.w=nw; p.h=Math.max(mn,ds.h+dy); }
+  else if(porchDrag==='ne'){ p.w=Math.max(mn,ds.w+dx); const nh=Math.max(mn,ds.h-dy); p.y=ds.y+ds.h-nh; p.h=nh; }
+  else if(porchDrag==='nw'){ const nw2=Math.max(mn,ds.w-dx); p.x=ds.x+ds.w-nw2; p.w=nw2; const nh2=Math.max(mn,ds.h-dy); p.y=ds.y+ds.h-nh2; p.h=nh2; }
   drawPorchCanvas();
 }
 
 function drawPorchCanvas() {
-  const cvEl = document.getElementById('cv-porch'); if (!cvEl) return;
-  const ctx  = cvEl.getContext('2d');
-  const W    = cvEl.width, H = cvEl.height;
-  const cx   = CV['porch'] || {scale: 1, ox: 0, oy: 0};
+  const cvEl=document.getElementById('cv-porch'); if (!cvEl) return;
+  const ctx=cvEl.getContext('2d'), W=cvEl.width, H=cvEl.height;
+  const cx=CV['porch']||{scale:1,ox:0,oy:0};
+  applyTransform(ctx,cx,W,H);
 
-  applyTransform(ctx, cx, W, H);
-  ctx.fillStyle = '#d9d9d9'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle='#d9d9d9'; ctx.fillRect(0,0,W,H);
 
   // Сетка
-  const gridStep = W / GRID;
-  ctx.fillStyle = '#bbb';
-  for (let r = 0; r <= GRID; r++)
-    for (let c = 0; c <= GRID; c++) {
-      ctx.beginPath(); ctx.arc(c * gridStep, r * gridStep, 3 / cx.scale, 0, Math.PI * 2); ctx.fill();
-    }
-
-  // Дом
-  const hx = 0.15 * W, hy = 0.15 * W, hw = 0.7 * W, hh = 0.7 * W;
-  ctx.strokeStyle = '#666'; ctx.lineWidth = 3 / cx.scale; ctx.setLineDash([]);
-  ctx.strokeRect(hx, hy, hw, hh);
-  ctx.fillStyle = 'rgba(0,0,0,.04)'; ctx.fillRect(hx, hy, hw, hh);
-  ctx.fillStyle = '#888'; ctx.font = `${13 / cx.scale}px Roboto`; ctx.textAlign = 'center';
-  ctx.fillText('Дом', W / 2, H / 2);
-
-  // Терраса-призрак
-  if (S.pts.terrace && S.pts.terrace.length > 2) {
-    _drawTerraceGhost(ctx, W, H, cx);
+  const step=W/GRID; ctx.fillStyle='#bbb';
+  for(let r=0;r<=GRID;r++) for(let c=0;c<=GRID;c++) {
+    ctx.beginPath(); ctx.arc(c*step,r*step,2/cx.scale,0,Math.PI*2); ctx.fill();
   }
+  // Метки метров
+  ctx.fillStyle='#999'; ctx.font=`${9/cx.scale}px Roboto`; ctx.textAlign='center';
+  for(let i=5;i<=GRID;i+=5) ctx.fillText(i+'м', i*step, H-3/cx.scale);
+
+  // Ранее заданные объекты (дом, терраса, дорожки и т.д.)
+  drawPreviousLayers(ctx, W, H, cx, 'porch');
 
   // Крыльцо
-  const {x, y, w, h} = getPorchRect(W);
-  ctx.fillStyle = 'rgba(0,100,220,.18)'; ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = '#0064DC'; ctx.lineWidth = 2.5 / cx.scale; ctx.strokeRect(x, y, w, h);
-  ctx.fillStyle = '#0064DC';
-  ctx.font = `bold ${11 / cx.scale}px Roboto`; ctx.textAlign = 'center';
-  ctx.fillText('Крыльцо', x + w / 2, y + h / 2 + 4 / cx.scale);
+  const {x,y,w,h}=getPorchRect(W);
+  ctx.fillStyle='rgba(0,100,220,.18)'; ctx.fillRect(x,y,w,h);
+  ctx.strokeStyle='#0064DC'; ctx.lineWidth=2.5/cx.scale; ctx.strokeRect(x,y,w,h);
+  ctx.fillStyle='#0064DC'; ctx.font=`bold ${11/cx.scale}px Roboto`; ctx.textAlign='center';
+  ctx.fillText('Крыльцо',x+w/2,y+h/2+4/cx.scale);
 
   // Ручки
-  [[x, y], [x + w, y], [x, y + h], [x + w, y + h]].forEach(([hpx, hpy]) => {
-    ctx.beginPath(); ctx.arc(hpx, hpy, HANDLE_R / cx.scale, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff'; ctx.fill();
-    ctx.strokeStyle = '#0064DC'; ctx.lineWidth = 2 / cx.scale; ctx.stroke();
+  [[x,y],[x+w,y],[x,y+h],[x+w,y+h]].forEach(([hpx,hpy])=>{
+    ctx.beginPath(); ctx.arc(hpx,hpy,HANDLE_R/cx.scale,0,Math.PI*2);
+    ctx.fillStyle='#fff'; ctx.fill();
+    ctx.strokeStyle='#0064DC'; ctx.lineWidth=2/cx.scale; ctx.stroke();
   });
-
   ctx.restore();
 }
+
+// ══════════════════════════════════════════════

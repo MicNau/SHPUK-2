@@ -1,21 +1,23 @@
-// ══════════════════════════════════════════════
-// STATE.JS — глобальное состояние и константы
-// ══════════════════════════════════════════════
+// STATE.JS — глобальное состояние, константы каталога
+// Зависимости: нет
 
+// ══════════════════════════════════════════════
+// ДАННЫЕ
+// ══════════════════════════════════════════════
 const SECS = [
-  {id:'terrace',      lbl:'Терраса',            req:'terrace'},
-  {id:'pool_terrace', lbl:'Терраса у бассейна',  req:'pool_terrace'},
-  {id:'paths',        lbl:'Дорожки',             req:'paths'},
-  {id:'pier',         lbl:'Причал',              req:'pier'},
-  {id:'porch',        lbl:'Крыльцо',             req:'porch'},
-  {id:'railing',      lbl:'Ограждение',          req:'railing'},
-  {id:'fence',        lbl:'Забор',               req:'fence'},
-  {id:'facade',       lbl:'Фасад',               req:'facade'},
-  {id:'beds',         lbl:'Грядки',              req:'beds'},
-  {id:'furniture',    lbl:'Мебель',              req:'furniture'},
+  {id:'terrace',      lbl:'Терраса',           req:'terrace'},
+  {id:'porch',        lbl:'Крыльцо',            req:'porch'},
+  {id:'paths',        lbl:'Дорожки',            req:'paths'},
+  {id:'fence',        lbl:'Забор',              req:'fence'},
+  {id:'facade',       lbl:'Фасад',              req:'facade'},
+  {id:'beds',         lbl:'Грядки',             req:'beds'},
+  {id:'furniture',    lbl:'Мебель',             req:'furniture'},
+  {id:'pool_terrace', lbl:'Терраса у бассейна', req:'pool_terrace'},
+  {id:'pier',         lbl:'Причал',             req:'pier'},
 ];
 
-// Порядок шагов конфигурации — ключ: id секции, значение: id экрана
+// Порядок шагов конфигурации (до шага 10)
+// Ключ — id секции, значение — id экрана
 const SEC_SCREEN = {
   terrace:      '6',
   pool_terrace: '6b',
@@ -23,9 +25,10 @@ const SEC_SCREEN = {
   pier:         '6d',
   porch:        '7',
   fence:        '8',
+  // facade убран — сразу переходит к шагу 10
 };
 
-// 16 цветов для фильтра каталога
+// 16 цветов для фильтра
 const CATALOG_COLORS = [
   {id:'c1',  hex:'#5C3317', label:'Тёмный дуб'},
   {id:'c2',  hex:'#8B6331', label:'Светлый дуб'},
@@ -46,13 +49,13 @@ const CATALOG_COLORS = [
 ];
 
 const PRICE_TIERS = [
-  {id:'budget',   lbl:'Бюджетно',            sub:'до 2 000 ₽/м²'},
-  {id:'balanced', lbl:'Сбалансировано',       sub:'2 000 – 5 000 ₽/м²'},
-  {id:'premium',  lbl:'Премиальное качество', sub:'от 5 000 ₽/м²'},
-  {id:'mpk',      lbl:'Доска из МПК',         sub:'от 10 000 ₽/м²'},
+  {id:'budget',    lbl:'Бюджетно',             sub:'до 2 000 ₽/м²'},
+  {id:'balanced',  lbl:'Сбалансировано',        sub:'2 000 – 5 000 ₽/м²'},
+  {id:'premium',   lbl:'Премиальное качество',  sub:'от 5 000 ₽/м²'},
+  {id:'mpk',       lbl:'Доска из МПК',          sub:'от 10 000 ₽/м²'},
 ];
 
-// Заглушка каталога (заменится на GET /api/catalog)
+// Позиции из каталога outdoor-mebel.ru — Доска ДПК универсальная
 const STUB_RESULTS = [
   {
     id:1, ic:'🟫',
@@ -60,6 +63,7 @@ const STUB_RESULTS = [
     short:'ДПК, двусторонняя, вельвет/гладкая, 5 цветов',
     detail:'Доска ДПК бренда TalverWood. Состав: 60% древесная мука, 40% полимер. Размер: 150×25×4000 мм. Поверхность с двух сторон: вельвет + гладкая. Цвета: тик, венге, серый, кофе, белый. Гарантия 10 лет.',
     price:'от 1 850 ₽/м²',
+    color:'#8B6331',
     url:'https://outdoor-mebel.ru/catalog/terrasnaya_doska_iz_dpk/doska_dpk_universalnaya/talverwood',
   },
   {
@@ -68,6 +72,7 @@ const STUB_RESULTS = [
     short:'ДПК, полнотелая, скрытый крепёж, 8 цветов',
     detail:'Террасная доска AIWOODek Premium. Полнотелый профиль — повышенная жёсткость. Размер: 140×22×4000 мм. Система скрытого крепежа в комплекте. Фактура: натуральное дерево. Цвета: 8 вариантов от светлого дуба до антрацита.',
     price:'от 2 400 ₽/м²',
+    color:'#704214',
     url:'https://outdoor-mebel.ru/catalog/terrasnaya_doska_iz_dpk/doska_dpk_universalnaya/terrasnaya_doska_aiwood',
   },
   {
@@ -76,6 +81,7 @@ const STUB_RESULTS = [
     short:'ДПК, широкая, коэкструзия, морозостойкая',
     detail:'Доска NauticPrime серии Prestige. Технология коэкструзии — защитный полимерный слой снаружи. Ширина 163 мм — меньше стыков. Устойчива к морозу до −50°C и УФ-излучению. Не требует покраски весь срок службы (25 лет).',
     price:'от 3 700 ₽/м²',
+    color:'#5C3317',
     url:'https://outdoor-mebel.ru/catalog/terrasnaya_doska_iz_dpk/doska_dpk_universalnaya/nauticprime',
   },
   {
@@ -84,23 +90,28 @@ const STUB_RESULTS = [
     short:'ДПК, лёгкая полая, бюджетный сегмент',
     detail:'Доска POLIVAN серии Eco Line. Полый профиль — снижает вес и стоимость настила. Размер: 120×28×3000 мм. Простой монтаж на лаги с шагом 300–400 мм. Оптимальный выбор для дачных террас и беседок.',
     price:'от 1 350 ₽/м²',
+    color:'#D2B48C',
     url:'https://outdoor-mebel.ru/catalog/terrasnaya_doska_iz_dpk/doska_dpk_universalnaya/polivan',
   },
 ];
 
-// ── Состояние приложения ──────────────────────
+// ══════════════════════════════════════════════
+// СОСТОЯНИЕ
+// ══════════════════════════════════════════════
 const S = {
   houseType: null,
   sections: [],
   pts: { terrace:[], pool_terrace:[], paths:[], pier:[], fence:[] },
   porch: { x:0.3, y:0.3, w:0.2, h:0.12 },
   mats: {},
-  samples: [],       // [{id, name}] — накопленные образцы
+  samples: [],    // [{id, name, color}] — накопленные образцы
+  activeSample: null, // {id, name, color} — текущий выбранный для примерки
   curSec: 0,
   catColors: new Set(),
   catPrice: null,
   catShowResults: false,
 };
+const TOTAL = 10;
+let step = 1;
 
-const TOTAL = 10;   // всего шагов для прогресс-бара
-let step = 1;       // текущий шаг (число или строка: 'catalog', 'summary')
+// ══════════════════════════════════════════════

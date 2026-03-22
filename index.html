@@ -30,6 +30,7 @@
           <div class="hcp"><div class="ic">🏘</div>Картинка с домом, описание</div>
           <div class="hcl">Дом с мансардой</div>
         </div>
+        <!-- НОВОЕ: Участок без дома -->
         <div class="house-card" onclick="selHouse(this,'Участок без дома')">
           <div class="hcp"><div class="ic">🌿</div>Пустой участок, без строений</div>
           <div class="hcl">Участок без дома</div>
@@ -47,11 +48,9 @@
   <div class="screen" id="screen-2">
     <div class="sh"><div class="st">Задайте общую площадь дома:</div></div>
     <div class="sb">
-      <div class="plan-box">📐 План дома</div>
-      <div class="p-row">
-        <div class="p-lbl">Общая площадь (кв.м):</div>
-        <input class="p-inp" type="number" id="v-area" value="120" min="20" max="1000">
-      </div>
+      <div class="view3d-slot" id="slot-2"></div>
+      <div class="p-row"><div class="p-lbl">Общая площадь (кв.м):</div>
+        <input class="p-inp" type="number" id="v-area" value="120" min="20" max="1000" oninput="onParamChange()"></div>
     </div>
     <div class="nav-row">
       <button class="btn-back" onclick="goTo(1)">←</button>
@@ -63,11 +62,9 @@
   <div class="screen" id="screen-3">
     <div class="sh"><div class="st">Задайте высоту этажа:</div></div>
     <div class="sb">
-      <div class="plan-box">📏 Вид дома снаружи,<br>размер показан размерной линией</div>
-      <div class="p-row">
-        <div class="p-lbl">Высота этажа (см):</div>
-        <input class="p-inp" type="number" id="v-floor" value="400" min="240" max="600">
-      </div>
+      <div class="view3d-slot" id="slot-3"></div>
+      <div class="p-row"><div class="p-lbl">Высота этажа (см):</div>
+        <input class="p-inp" type="number" id="v-floor" value="400" min="240" max="600" oninput="onParamChange()"></div>
     </div>
     <div class="nav-row">
       <button class="btn-back" onclick="goTo(2)">←</button>
@@ -79,11 +76,9 @@
   <div class="screen" id="screen-4">
     <div class="sh"><div class="st">Задайте высоту фундамента:</div></div>
     <div class="sb">
-      <div class="plan-box">🧱 Вид дома снаружи,<br>размер показан размерной линией</div>
-      <div class="p-row">
-        <div class="p-lbl">Фундамент (см):</div>
-        <input class="p-inp" type="number" id="v-found" value="80" min="0" max="300">
-      </div>
+      <div class="view3d-slot" id="slot-4"></div>
+      <div class="p-row"><div class="p-lbl">Фундамент (см):</div>
+        <input class="p-inp" type="number" id="v-found" value="80" min="0" max="300" oninput="onParamChange()"></div>
     </div>
     <div class="nav-row">
       <button class="btn-back" onclick="goTo(3)">←</button>
@@ -100,15 +95,14 @@
     <div class="sb">
       <div class="checklist">
         <div class="ci" onclick="tci(this)" data-id="terrace"><span class="ci-text">Терраса</span><div class="cb"></div></div>
-        <div class="ci" onclick="tci(this)" data-id="pool_terrace"><span class="ci-text">Терраса у бассейна</span><div class="cb"></div></div>
-        <div class="ci" onclick="tci(this)" data-id="paths"><span class="ci-text">Дорожки</span><div class="cb"></div></div>
-        <div class="ci" onclick="tci(this)" data-id="pier"><span class="ci-text">Причал</span><div class="cb"></div></div>
         <div class="ci" onclick="tci(this)" data-id="porch"><span class="ci-text">Крыльцо</span><div class="cb"></div></div>
-        <div class="ci" onclick="tci(this)" data-id="railing"><span class="ci-text">Ограждение террасы</span><div class="cb"></div></div>
+        <div class="ci" onclick="tci(this)" data-id="paths"><span class="ci-text">Дорожки</span><div class="cb"></div></div>
         <div class="ci" onclick="tci(this)" data-id="fence"><span class="ci-text">Забор вокруг участка</span><div class="cb"></div></div>
         <div class="ci" onclick="tci(this)" data-id="facade"><span class="ci-text">Отделка фасада</span><div class="cb"></div></div>
         <div class="ci" onclick="tci(this)" data-id="beds"><span class="ci-text">Грядки</span><div class="cb"></div></div>
         <div class="ci" onclick="tci(this)" data-id="furniture"><span class="ci-text">Садовая мебель</span><div class="cb"></div></div>
+        <div class="ci" onclick="tci(this)" data-id="pool_terrace"><span class="ci-text">Терраса у бассейна</span><div class="cb"></div></div>
+        <div class="ci" onclick="tci(this)" data-id="pier"><span class="ci-text">Причал</span><div class="cb"></div></div>
       </div>
     </div>
     <div class="nav-row">
@@ -127,8 +121,8 @@
         <button class="btn-u" onclick="undoPt('terrace')">↩ Отменить</button>
         <button class="btn-c" onclick="clrPts('terrace')">✕ Очистить</button>
       </div>
-      <div class="tg" onclick="ttg(this)"><span class="tg-txt">Нужно ограждение</span><div class="tg-ind"></div></div>
-      <div class="tg" onclick="ttg(this)"><span class="tg-txt">Нужен навес</span><div class="tg-ind"></div></div>
+      <div class="tg" onclick="ttg(this)" data-id="terrace-railing"><span class="tg-txt">Нужно ограждение</span><div class="tg-ind"></div></div>
+      <div class="tg" onclick="ttg(this)" data-id="terrace-roof"><span class="tg-txt">Нужен навес</span><div class="tg-ind"></div></div>
     </div>
     <div class="nav-row">
       <button class="btn-back" onclick="goTo(5)">←</button>
@@ -136,7 +130,7 @@
     </div>
   </div>
 
-  <!-- 6b: Терраса у бассейна -->
+  <!-- 6b: Терраса у бассейна — точки -->
   <div class="screen" id="screen-6b">
     <div class="sh"><div class="st">Поставьте точки террасы у бассейна:</div></div>
     <div class="sb">
@@ -154,7 +148,7 @@
     </div>
   </div>
 
-  <!-- 6c: Дорожки -->
+  <!-- 6c: Дорожки — точки -->
   <div class="screen" id="screen-6c">
     <div class="sh"><div class="st">Обозначьте дорожки на плане:</div></div>
     <div class="sb">
@@ -175,7 +169,7 @@
     </div>
   </div>
 
-  <!-- 6d: Причал -->
+  <!-- 6d: Причал — точки -->
   <div class="screen" id="screen-6d">
     <div class="sh"><div class="st">Поставьте точки в углах причала:</div></div>
     <div class="sb">
@@ -194,7 +188,7 @@
     </div>
   </div>
 
-  <!-- 7: Крыльцо -->
+  <!-- 7: Крыльцо — drag+resize -->
   <div class="screen" id="screen-7">
     <div class="sh"><div class="st">Укажите место и размер крыльца</div></div>
     <div class="sb">
@@ -208,7 +202,7 @@
     </div>
   </div>
 
-  <!-- 8: Забор -->
+  <!-- 8: Забор — точки -->
   <div class="screen" id="screen-8">
     <div class="sh"><div class="st">Поставьте точки в углах забора</div></div>
     <div class="sb">
@@ -225,7 +219,7 @@
     </div>
   </div>
 
-  <!-- 10: Материалы + 3D -->
+  <!-- 10: Материалы -->
   <div class="screen" id="screen-10">
     <div class="sh">
       <div class="st" id="sec-title">Терраса</div>
@@ -233,10 +227,9 @@
     </div>
     <div class="sb">
       <div class="sec-nav" id="sec-nav"></div>
-      <div id="cw-3d" class="cv-wrap" style="cursor:grab; touch-action:none; aspect-ratio:1;">
-        <div id="three-container" style="position:absolute;inset:0;width:100%;height:100%;"></div>
+      <div class="view3d-slot" id="three-container" style="cursor:grab; touch-action:none;">
         <div id="three-hint" style="position:absolute;bottom:6px;left:0;right:0;text-align:center;
-             font-size:10px;color:rgba(255,255,255,0.6);pointer-events:none;letter-spacing:.03em;">
+             font-size:10px;color:rgba(255,255,255,0.6);pointer-events:none;letter-spacing:.03em;z-index:1;">
           ☝️ вращение · щипок — зум
         </div>
       </div>
@@ -250,10 +243,12 @@
     </div>
   </div>
 
-  <!-- Каталог -->
+  <!-- Каталог: ТОЛЬКО террасная доска с фильтрами -->
   <div class="screen" id="screen-catalog">
     <div class="sh"><div class="st" id="cat-title">Террасная доска</div></div>
-    <div class="sb" id="cat-body"></div>
+    <div class="sb" id="cat-body">
+      <!-- Рендерится динамически: либо фильтры, либо результаты -->
+    </div>
     <div class="nav-row" id="cat-nav">
       <button class="btn-back" id="cat-back-btn" onclick="goTo(10)">←</button>
       <button class="btn-next" id="cat-action-btn" onclick="showCatalogResults()">ПОДОБРАТЬ <span>→</span></button>
@@ -268,41 +263,16 @@
   </div>
 </div>
 
-<!-- CDN: Three.js r128 + дополнения -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<!-- HDRI-загрузчики (нужны для кнопки «Загрузить HDRI») -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/RGBELoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/EXRLoader.js"></script>
-
-<!-- Приложение: порядок важен -->
+<!-- Порядок важен: state → nav → canvas → viewer3d → ui → catalog -->
 <script src="state.js"></script>
 <script src="nav.js"></script>
 <script src="canvas.js"></script>
-
-<!--
-  3D-визуализация: подключите ОДНУ из двух версий в зависимости от платформы.
-  Десктоп (по умолчанию):  instanced трава + объёмные кусты + деревья
-  Мобиль:                  billboard-спрайты, нет тяжёлой травы
-  Серверный вариант: определять на бэкенде и отдавать нужный файл через шаблон.
-  Клиентский вариант (ниже): JS-детектор подключает нужный скрипт динамически.
--->
-<script>
-(function () {
-  const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-                || window.innerWidth < 768;
-  const src = isMobile ? 'viewer3d-mobile.js' : 'viewer3d-desktop.js';
-  // Сначала core, потом версионный файл
-  function loadScript(s, cb) {
-    const el = document.createElement('script');
-    el.src = s; el.onload = cb;
-    document.head.appendChild(el);
-  }
-  loadScript('viewer3d-core.js', () => loadScript(src, () => {}));
-})();
-</script>
-
-<script src="catalog.js"></script>
+<script src="viewer3d.js"></script>
 <script src="ui.js"></script>
+<script src="catalog.js"></script>
 </body>
 </html>
