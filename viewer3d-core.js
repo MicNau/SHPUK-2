@@ -338,8 +338,7 @@ function getHouseMats() {
   wall.normalMap    = _loadNorm('wall_norm.jpg', 1);
   wall.normalScale  = new THREE.Vector2(0.5, 0.5);
   wall.roughnessMap = _loadData('wall_roug.jpg', 1);
-  // Кубическая проекция UV: 1 тайл = 2м
-  _applyBoxUV(wall, 2.0);
+  // UV назначаются на меш через _applyBoxUV(mesh, 2.0) в buildHouseMeshes
 
   // Цоколь
   const base = new THREE.MeshStandardMaterial({
@@ -351,8 +350,7 @@ function getHouseMats() {
   });
   base.map       = _loadTex('base_diff.jpg', 1);
   base.normalMap = _loadNorm('base_norm.jpg', 1);
-  // Кубическая проекция UV: 1 тайл = 1м
-  _applyBoxUV(base, 1.0);
+  // UV назначаются на меш через _applyBoxUV(mesh, 1.0) в buildHouseMeshes
 
   // Крыша
   const roof = new THREE.MeshStandardMaterial({
@@ -428,95 +426,85 @@ function _makeGroundMat() {
     roughness: 0.93,
     metalness: 0.0,
   });
-  // Текстуры загружаются асинхронно — загружаем после init
+  // Текстуры земли — загружаем напрямую без placeholder-кэша
+  const groundLoader = new THREE.TextureLoader();
+  const _applyGroundTex = (filename, isColor, slot) => {
+    groundLoader.load(ASSETS + filename, (tex) => {
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(72, 72);
+      tex.encoding = isColor ? THREE.sRGBEncoding : THREE.LinearEncoding;
+      tex.needsUpdate = true;
+      if (threeState && threeState.groundMesh) {
+        threeState.groundMesh.material[slot] = tex;
+        if (slot === 'normalMap')
+          threeState.groundMesh.material.normalScale = new THREE.Vector2(0.3, 0.3);
+        threeState.groundMesh.material.needsUpdate = true;
+      }
+    }, undefined, () => {});
+  };
   setTimeout(() => {
-    if (!threeState) return;
-    const diff = _loadTex('ground_diff.jpg', 72);
-    const norm = _loadNorm('ground_norm.jpg', 72);
-    if (threeState.groundMesh) {
-      threeState.groundMesh.material.map       = diff;
-      threeState.groundMesh.material.normalMap = norm;
-      threeState.groundMesh.material.normalScale = new THREE.Vector2(0.3, 0.3);
-      threeState.groundMesh.material.needsUpdate = true;
-    }
+    _applyGroundTex('ground_diff.jpg', true,  'map');
+    _applyGroundTex('ground_norm.jpg', false, 'normalMap');
   }, 0);
   return mat;
 }
 
 // ══════════════════════════════════════════════
-// КУБИЧЕСКАЯ UV-ПРОЕКЦИЯ
-// Вычисляется в шейдере из мировых координат.
+// КУБИЧЕСКАЯ UV-ПРОЕКЦИЯ (CPU)
+// Вычисляет UV-координаты из позиций вершин меша
+// и записывает их в geometry.attributes.uv.
+// Вызывается ПОСЛЕ создания меша, перед добавлением в сцену.
 // tileSize — размер одного тайла в метрах.
 // ══════════════════════════════════════════════
-function _applyBoxUV(material, tileSize) {
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.boxTile = { value: 1.0 / tileSize };
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <common>',
-      `#include <common>
-      uniform float boxTile;
-      varying vec3 vWorldPos;
-      varying vec3 vWorldNorm;`
-    );
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
-      vWorldPos  = (modelMatrix * vec4(position, 1.0)).xyz;
-      vWorldNorm = normalize(mat3(modelMatrix) * normal);`
-    );
-    // Кубический блендинг: выбираем доминирующую ось, UV из двух оставшихся
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <map_fragment>',
-      `#ifdef USE_MAP
-        vec3 aN = abs(vWorldNorm);
-        vec2 boxUV;
-        if (aN.y >= aN.x && aN.y >= aN.z) {
-          boxUV = vWorldPos.xz;             // горизонталь
-        } else if (aN.x >= aN.z) {
-          boxUV = vWorldPos.zy;             // стена вдоль Z
-        } else {
-          boxUV = vWorldPos.xy;             // стена вдоль X
-        }
-        boxUV *= boxTile;
-        vec4 sampledDiffuseColor = texture2D(map, boxUV);
-        #ifdef DECODE_VIDEO_TEXTURE
-          sampledDiffuseColor = vec4(mix(pow(sampledDiffuseColor.rgb * 0.9478672986 + vec3(0.0521327014), vec3(2.4)), sampledDiffuseColor.rgb * 0.0773993808, vec3(lessThanEqual(sampledDiffuseColor.rgb, vec3(0.04045)))), sampledDiffuseColor.w);
-        #endif
-        diffuseColor *= sampledDiffuseColor;
-      #endif`
-    );
-    // То же для normalMap
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <normal_fragment_maps>',
-      `#ifdef USE_NORMALMAP
-        vec3 aN2 = abs(vWorldNorm);
-        vec2 normUV;
-        if (aN2.y >= aN2.x && aN2.y >= aN2.z) normUV = vWorldPos.xz;
-        else if (aN2.x >= aN2.z)               normUV = vWorldPos.zy;
-        else                                    normUV = vWorldPos.xy;
-        normUV *= boxTile;
-        vec3 mapN = texture2D(normalMap, normUV).xyz * 2.0 - 1.0;
-        mapN.xy *= normalScale;
-        normal = normalize(tbn * mapN);
-      #endif`
-    );
-    // То же для roughnessMap
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <roughnessmap_fragment>',
-      `float roughnessFactor = roughness;
-      #ifdef USE_ROUGHNESSMAP
-        vec3 aN3 = abs(vWorldNorm);
-        vec2 roughUV;
-        if (aN3.y >= aN3.x && aN3.y >= aN3.z) roughUV = vWorldPos.xz;
-        else if (aN3.x >= aN3.z)               roughUV = vWorldPos.zy;
-        else                                    roughUV = vWorldPos.xy;
-        roughUV *= boxTile;
-        vec4 texelRoughness = texture2D(roughnessMap, roughUV);
-        roughnessFactor *= texelRoughness.g;
-      #endif`
-    );
-  };
-  material.needsUpdate = true;
+function _applyBoxUV(mesh, tileSize) {
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position;
+  const nor = geo.attributes.normal;
+  if (!pos) return;
+
+  // Получаем мировые позиции вершин с учётом трансформации меша
+  mesh.updateMatrixWorld(true);
+  const mat4 = mesh.matrixWorld;
+  const mat3 = new THREE.Matrix3().getNormalMatrix(mat4);
+
+  const uv  = new Float32Array(pos.count * 2);
+  const vP  = new THREE.Vector3();
+  const vN  = new THREE.Vector3();
+
+  for (let i = 0; i < pos.count; i++) {
+    vP.fromBufferAttribute(pos, i).applyMatrix4(mat4);
+    if (nor) {
+      vN.fromBufferAttribute(nor, i).applyMatrix3(mat3).normalize();
+    } else {
+      vN.set(0, 1, 0);
+    }
+
+    const ax = Math.abs(vN.x), ay = Math.abs(vN.y), az = Math.abs(vN.z);
+    let u, v;
+    if (ay >= ax && ay >= az) {
+      // горизонтальная грань — проецируем XZ
+      u = vP.x / tileSize;
+      v = vP.z / tileSize;
+    } else if (ax >= az) {
+      // стена перпендикулярная X — проецируем ZY
+      u = vP.z / tileSize;
+      v = vP.y / tileSize;
+    } else {
+      // стена перпендикулярная Z — проецируем XY
+      u = vP.x / tileSize;
+      v = vP.y / tileSize;
+    }
+    uv[i * 2]     = u;
+    uv[i * 2 + 1] = v;
+  }
+
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.attributes.uv.needsUpdate = true;
+  // Текстуре не нужен repeat — UV уже в метрах
+  ['map', 'normalMap', 'roughnessMap'].forEach(slot => {
+    const tex = mesh.material[slot];
+    if (tex) { tex.repeat.set(1, 1); tex.needsUpdate = true; }
+  });
 }
 
 // ══════════════════════════════════════════════
@@ -639,6 +627,7 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
   const bm = mesh(box(length+.2, bh, width+.2), M.base);
   bm.position.set(length/2, bh/2, width/2);
   parent.add(bm);
+  _applyBoxUV(bm, 1.0);
 
   const WWIN=0.9, HWIN=1.2, YWIN=1.0, WDOOR=1.0, HDOOR=2.2;
 
@@ -647,7 +636,7 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
     const sorted = [...wins].sort((a,b)=>a.x-b.x);
     const botH   = sorted.length ? Math.min(...sorted.map(w=>w.y))     : wh;
     const topS   = sorted.length ? Math.max(...sorted.map(w=>w.y+w.h)) : wh;
-    const addW   = (sx,sy,px,py) => { const m=mesh(box(sx,sy,wt),M.wall); m.position.set(px,py,wt/2); g.add(m); threeState.wallMeshes.push(m); };
+    const addW   = (sx,sy,px,py) => { const m=mesh(box(sx,sy,wt),M.wall); m.position.set(px,py,wt/2); g.add(m); threeState.wallMeshes.push(m); _applyBoxUV(m,2.0); };
     if (botH>.01)   addW(len,botH,   len/2,botH/2);
     if (wh-topS>.01)addW(len,wh-topS,len/2,topS+(wh-topS)/2);
     let prev=0;
@@ -700,6 +689,18 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
     return grp;
   }
 
+  // Применяем box UV к стенам Z после их построения (zWallWithDoor)
+  // addW уже применяет к стенам X; здесь обрабатываем остальные wallMeshes
+  const _wallUVHelper = (grp) => {
+    grp.children.forEach(child => {
+      if (child.isMesh && child.material === M.wall && !child._boxUVDone) {
+        _applyBoxUV(child, 2.0);
+        child._boxUVDone = true;
+      }
+      if (child.isGroup) _wallUVHelper(child);
+    });
+  };
+
   const winCnt    = Math.max(0, Math.round(length/(WWIN*2.9)));
   const winIndent = winCnt>0 ? (length-winCnt*WWIN)/(winCnt+1) : length;
   const wins=[];
@@ -710,6 +711,8 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
   const zI=width-wt*2;
   const bk=zWallWithDoor(zI,false,true); bk.position.set(0,bh,wt);         parent.add(bk);
   const fw=zWallWithDoor(zI,true,true);  fw.position.set(length-wt,bh,wt); parent.add(fw);
+  // Применяем box UV к стенам Z (X-стены обработаны в addW)
+  [lw,rw,bk,fw].forEach(grp => _wallUVHelper(grp));
 
   const rh=2.0,oh=.3, x0=-oh,x1=length+oh,z0=-oh,z1=width+oh,zMid=width/2;
   const yBase=bh+wh, yPeak=bh+wh+rh;
