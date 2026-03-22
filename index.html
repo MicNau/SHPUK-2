@@ -267,11 +267,27 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/RGBELoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/EXRLoader.js"></script>
-<!-- Порядок важен: state → nav → canvas → viewer3d → ui → catalog -->
+<!-- Порядок важен: state → nav → canvas → viewer3d-* → ui → catalog -->
 <script src="state.js"></script>
 <script src="nav.js"></script>
 <script src="canvas.js"></script>
-<script src="viewer3d.js"></script>
+<script>
+// Детектор платформы — подключает нужный файл антуража
+(function () {
+  const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+                || window.innerWidth < 768;
+  function loadScript(src, cb) {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = cb || function(){};
+    document.head.appendChild(s);
+  }
+  // core загружается первым, затем версионный файл
+  loadScript('viewer3d-core.js', function() {
+    loadScript(isMobile ? 'viewer3d-mobile.js' : 'viewer3d-desktop.js');
+  });
+})();
+</script>
 <script src="ui.js"></script>
 <script src="catalog.js"></script>
 </body>
