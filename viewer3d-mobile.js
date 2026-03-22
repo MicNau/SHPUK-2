@@ -53,8 +53,8 @@ function _placeBushes(scene, texA, texB) {
     [6,0,-4.5],[12,0,-4.5],[2,0,14],[14,0,14],
     [22,0,5],[-6,0,11],[25,0,10],[-3,0,3],
   ];
-  const matA = new THREE.SpriteMaterial({ map: texA, fog: true, transparent: true, alphaTest: 0.15, depthWrite: false });
-  const matB = new THREE.SpriteMaterial({ map: texB, fog: true, transparent: true, alphaTest: 0.15, depthWrite: false });
+  const matA = new THREE.SpriteMaterial({ map: texA, fog: false, transparent: true, alphaTest: 0.12, depthWrite: false, toneMapped: false, color: new THREE.Color(0.72, 0.72, 0.72) });
+  const matB = new THREE.SpriteMaterial({ map: texB, fog: false, transparent: true, alphaTest: 0.12, depthWrite: false, toneMapped: false, color: new THREE.Color(0.72, 0.72, 0.72) });
   for (const [x,,z] of spots) {
     const sprite = new THREE.Sprite(Math.random()>.5 ? matA : matB);
     const s = 1.2 + Math.random() * 0.9;
@@ -70,8 +70,8 @@ function _placeTrees(scene, texA, texB) {
     [28,0,-4],[30,0,8],[28,0,18],
     [10,0,-8],[16,0,-8],[8,0,20],[18,0,20],
   ];
-  const matA = new THREE.SpriteMaterial({ map: texA, fog: true, transparent: true, alphaTest: 0.15, depthWrite: false });
-  const matB = new THREE.SpriteMaterial({ map: texB, fog: true, transparent: true, alphaTest: 0.15, depthWrite: false });
+  const matA = new THREE.SpriteMaterial({ map: texA, fog: false, transparent: true, alphaTest: 0.12, depthWrite: false, toneMapped: false, color: new THREE.Color(0.72, 0.72, 0.72) });
+  const matB = new THREE.SpriteMaterial({ map: texB, fog: false, transparent: true, alphaTest: 0.12, depthWrite: false, toneMapped: false, color: new THREE.Color(0.72, 0.72, 0.72) });
   for (const [x,,z] of spots) {
     const sprite = new THREE.Sprite(Math.random()>.5 ? matA : matB);
     const s = 2.8 + Math.random() * 2.0;

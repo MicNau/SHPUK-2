@@ -1,7 +1,6 @@
 // ══════════════════════════════════════════════
 // VIEWER3D-DESKTOP.JS
 // Антураж для десктопа:
-//   • InstancedMesh трава (12 000 стеблей) + шейдер покачивания
 //   • Billboard-спрайты кустов (assets/bush_a.png, bush_b.png)
 //   • Billboard-спрайты деревьев (assets/tree_a.png, tree_b.png)
 // Зависимости: viewer3d-core.js
@@ -9,115 +8,13 @@
 
 const IS_MOBILE = false;
 
-// Uniform для времени — обновляется каждый кадр
-let _grassTimeUniform = { value: 0 };
-
-// Хук анимационного цикла (вызывается из viewer3d-core.js)
-function _onAnimFrame(t) {
-  _grassTimeUniform.value = t;
-}
+// Хук анимационного цикла (трава выключена — нет анимации)
+function _onAnimFrame(t) { /* no-op */ }
 
 // Точка входа — вызывается из init3dCanvas
 function _buildEntourage(scene) {
-  _buildGrass(scene);
+  // _buildGrass — выключено по запросу
   _buildVegetationSprites(scene);
-}
-
-// ══════════════════════════════════════════════
-// INSTANCED ТРАВА С ШЕЙДЕРОМ ВЕТРА
-// ══════════════════════════════════════════════
-function _buildGrass(scene) {
-  const COUNT = 12000;
-  const AREA  = 42;
-
-  // Геометрия одного стебля — 3 сегмента для плавного изгиба
-  const SEG = 3;
-  const W   = 0.065, H = 0.50;
-  const positions = [], uvs = [], indices = [];
-
-  for (let s = 0; s <= SEG; s++) {
-    const v  = s / SEG;
-    const hw = W / 2 * (1 - v * 0.75);
-    positions.push(-hw, v*H, 0,  hw, v*H, 0);
-    uvs.push(0, v,  1, v);
-  }
-  for (let s = 0; s < SEG; s++) {
-    const b = s * 2;
-    indices.push(b, b+1, b+2,  b+1, b+3, b+2);
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-  geo.setAttribute('uv',       new THREE.BufferAttribute(new Float32Array(uvs),       2));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-
-  // Материал с шейдером ветра через onBeforeCompile
-  const mat = new THREE.MeshLambertMaterial({
-    side:        THREE.DoubleSide,
-    transparent: true,
-    alphaTest:   0.05,
-  });
-
-  // Загружаем grass_patch.png как albedo если есть, иначе остаётся зелёный
-  const loader = new THREE.TextureLoader();
-  loader.load(ASSETS + 'grass_patch.png', (tex) => {
-    mat.map = tex; mat.needsUpdate = true;
-  }, undefined, () => {});
-
-  mat.onBeforeCompile = (shader) => {
-    shader.uniforms.time      = _grassTimeUniform;
-    shader.uniforms.windDir   = { value: new THREE.Vector2(1.0, 0.38) };
-    shader.uniforms.windAmp   = { value: 0.16 };
-    shader.uniforms.windSpeed = { value: 1.7  };
-
-    shader.vertexShader = shader.vertexShader.replace('#include <common>', `
-      #include <common>
-      uniform float time;
-      uniform vec2  windDir;
-      uniform float windAmp;
-      uniform float windSpeed;
-    `);
-    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
-      #include <begin_vertex>
-      float vFactor = uv.y * uv.y;
-      float phase   = dot(transformed.xz, windDir) * 0.55;
-      float wave    = sin(time * windSpeed + phase) * windAmp * vFactor;
-      float gust    = sin(time * windSpeed * 0.28 + phase * 1.8) * windAmp * 0.35 * vFactor;
-      transformed.x += windDir.x * (wave + gust);
-      transformed.z += windDir.y * wave * 0.55;
-    `);
-    // Градиент тёмный корень → светлая верхушка
-    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
-      #include <color_fragment>
-      vec3 grassBot = vec3(0.09, 0.28, 0.06);
-      vec3 grassTop = vec3(0.36, 0.68, 0.15);
-      diffuseColor.rgb = mix(grassBot, grassTop, vUv.y);
-    `);
-  };
-
-  const dummy = new THREE.Object3D();
-  const iMesh = new THREE.InstancedMesh(geo, mat, COUNT);
-  iMesh.castShadow    = false;
-  iMesh.receiveShadow = true;
-  iMesh.frustumCulled = false;
-
-  for (let i = 0; i < COUNT; i++) {
-    let x, z;
-    do {
-      x = (Math.random() - .5) * AREA * 2;
-      z = (Math.random() - .5) * AREA * 2;
-    } while (Math.abs(x - 8) < 9 && Math.abs(z - 6) < 7);
-
-    dummy.position.set(x, 0, z);
-    dummy.rotation.y = Math.random() * Math.PI * 2;
-    const s = 0.6 + Math.random() * 0.8;
-    dummy.scale.set(s, s * (0.8 + Math.random() * .4), s);
-    dummy.updateMatrix();
-    iMesh.setMatrixAt(i, dummy.matrix);
-  }
-  iMesh.instanceMatrix.needsUpdate = true;
-  scene.add(iMesh);
 }
 
 // ══════════════════════════════════════════════
@@ -142,7 +39,7 @@ function _buildVegetationSprites(scene) {
     ];
     for (const [x,,z] of bushSpots) {
       const tex    = Math.random() > .5 ? texBushA : texBushB;
-      const mat    = new THREE.SpriteMaterial({ map: tex, fog: true, transparent: true, alphaTest: 0.15, depthWrite: false });
+      const mat    = new THREE.SpriteMaterial({ map: tex, fog: false, transparent: true, alphaTest: 0.12, depthWrite: false, toneMapped: false, color: new THREE.Color(0.72, 0.72, 0.72) });
       const sprite = new THREE.Sprite(mat);
       const s      = 1.2 + Math.random() * 0.9;
       sprite.scale.set(s * 1.1, s * 1.3, 1);
@@ -158,7 +55,7 @@ function _buildVegetationSprites(scene) {
     ];
     for (const [x,,z] of treeSpots) {
       const tex    = Math.random() > .5 ? texTreeA : texTreeB;
-      const mat    = new THREE.SpriteMaterial({ map: tex, fog: true, transparent: true, alphaTest: 0.15, depthWrite: false });
+      const mat    = new THREE.SpriteMaterial({ map: tex, fog: false, transparent: true, alphaTest: 0.12, depthWrite: false, toneMapped: false, color: new THREE.Color(0.72, 0.72, 0.72) });
       const sprite = new THREE.Sprite(mat);
       const s      = 2.8 + Math.random() * 2.0;
       sprite.scale.set(s * 0.85, s, 1);

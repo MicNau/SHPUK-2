@@ -142,7 +142,7 @@ function init3dCanvas(targetSlotId) {
 
   // ── Scene ─────────────────────────────────────
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x9ab8d4, isMobile ? 0.018 : 0.011);
+  // scene.fog отключён — мешает восприятию участка
 
   // ── Camera ────────────────────────────────────
   const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 200);
@@ -459,8 +459,8 @@ function _applyBoxUV(material, tileSize) {
       varying vec3 vWorldNorm;`
     );
     shader.vertexShader = shader.vertexShader.replace(
-      '#include <worldpos_vertex>',
-      `#include <worldpos_vertex>
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
       vWorldPos  = (modelMatrix * vec4(position, 1.0)).xyz;
       vWorldNorm = normalize(mat3(modelMatrix) * normal);`
     );
@@ -716,8 +716,8 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
   // Длина ската: от карниза до конька
   const slatLen = Math.sqrt(Math.pow((width+oh*2)/2, 2) + Math.pow(rh, 2));
   // UV: U вдоль конька (делим на 2м), V поперёк ската (делим на 2м)
-  const uL = (length+oh*2)/2, uR = (length+oh*2)/2; // половина длины на каждый скат
-  const vS = slatLen/2; // повторяем каждые 2м поперёк
+  const uL = (length+oh*2)/8, uR = (length+oh*2)/8; // длина / 8 для редкого тайлинга
+  const vS = slatLen/8; // повторяем каждые 8м поперёк
 
   // Строим геометрию вручную с UV для двух скатов + фронтоны
   // Каждый треугольник: [pos0, uv0, pos1, uv1, pos2, uv2]
