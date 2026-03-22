@@ -435,10 +435,14 @@ function _makeGroundMat() {
       tex.encoding = isColor ? THREE.sRGBEncoding : THREE.LinearEncoding;
       tex.needsUpdate = true;
       if (threeState && threeState.groundMesh) {
-        threeState.groundMesh.material[slot] = tex;
+        const mat = threeState.groundMesh.material;
+        mat[slot] = tex;
         if (slot === 'normalMap')
-          threeState.groundMesh.material.normalScale = new THREE.Vector2(0.3, 0.3);
-        threeState.groundMesh.material.needsUpdate = true;
+          mat.normalScale = new THREE.Vector2(0.3, 0.3);
+        // Сбрасываем базовый цвет на белый — иначе он умножается на текстуру
+        if (slot === 'map')
+          mat.color.set(0xffffff);
+        mat.needsUpdate = true;
       }
     }, undefined, () => {});
   };
@@ -456,51 +460,43 @@ function _makeGroundMat() {
 // Вызывается ПОСЛЕ создания меша, перед добавлением в сцену.
 // tileSize — размер одного тайла в метрах.
 // ══════════════════════════════════════════════
-function _applyBoxUV(mesh, tileSize) {
+function _applyBoxUV(mesh, tileSize, groupOffset) {
+  // UV из локальных координат меша + смещение его группы.
+  // groupOffset = {x,y,z} — position группы-родителя (и её родителя, если есть).
+  // Это даёт непрерывный тайлинг между соседними секциями стен.
   const geo = mesh.geometry;
   const pos = geo.attributes.position;
   const nor = geo.attributes.normal;
   if (!pos) return;
 
-  // Получаем мировые позиции вершин с учётом трансформации меша
-  mesh.updateMatrixWorld(true);
-  const mat4 = mesh.matrixWorld;
-  const mat3 = new THREE.Matrix3().getNormalMatrix(mat4);
+  const go = groupOffset || { x: 0, y: 0, z: 0 };
+  // Полный offset: позиция меша в группе + позиция группы
+  const ox = mesh.position.x + go.x;
+  const oy = mesh.position.y + go.y;
+  const oz = mesh.position.z + go.z;
 
-  const uv  = new Float32Array(pos.count * 2);
-  const vP  = new THREE.Vector3();
-  const vN  = new THREE.Vector3();
+  const uv = new Float32Array(pos.count * 2);
+  const vP = new THREE.Vector3(), vN = new THREE.Vector3();
 
   for (let i = 0; i < pos.count; i++) {
-    vP.fromBufferAttribute(pos, i).applyMatrix4(mat4);
-    if (nor) {
-      vN.fromBufferAttribute(nor, i).applyMatrix3(mat3).normalize();
-    } else {
-      vN.set(0, 1, 0);
-    }
+    vP.fromBufferAttribute(pos, i);
+    const wx = vP.x + ox, wy = vP.y + oy, wz = vP.z + oz;
+
+    if (nor) { vN.fromBufferAttribute(nor, i); }
+    else      { vN.set(0, 1, 0); }
 
     const ax = Math.abs(vN.x), ay = Math.abs(vN.y), az = Math.abs(vN.z);
     let u, v;
-    if (ay >= ax && ay >= az) {
-      // горизонтальная грань — проецируем XZ
-      u = vP.x / tileSize;
-      v = vP.z / tileSize;
-    } else if (ax >= az) {
-      // стена перпендикулярная X — проецируем ZY
-      u = vP.z / tileSize;
-      v = vP.y / tileSize;
-    } else {
-      // стена перпендикулярная Z — проецируем XY
-      u = vP.x / tileSize;
-      v = vP.y / tileSize;
-    }
+    if (ay >= ax && ay >= az) { u = wx / tileSize; v = wz / tileSize; }  // горизонталь XZ
+    else if (ax >= az)         { u = wz / tileSize; v = wy / tileSize; }  // нормаль X → ZY
+    else                       { u = wx / tileSize; v = wy / tileSize; }  // нормаль Z → XY
+
     uv[i * 2]     = u;
     uv[i * 2 + 1] = v;
   }
 
   geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   geo.attributes.uv.needsUpdate = true;
-  // Текстуре не нужен repeat — UV уже в метрах
   ['map', 'normalMap', 'roughnessMap'].forEach(slot => {
     const tex = mesh.material[slot];
     if (tex) { tex.repeat.set(1, 1); tex.needsUpdate = true; }
@@ -636,7 +632,7 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
     const sorted = [...wins].sort((a,b)=>a.x-b.x);
     const botH   = sorted.length ? Math.min(...sorted.map(w=>w.y))     : wh;
     const topS   = sorted.length ? Math.max(...sorted.map(w=>w.y+w.h)) : wh;
-    const addW   = (sx,sy,px,py) => { const m=mesh(box(sx,sy,wt),M.wall); m.position.set(px,py,wt/2); g.add(m); threeState.wallMeshes.push(m); _applyBoxUV(m,2.0); };
+    const addW   = (sx,sy,px,py) => { const m=mesh(box(sx,sy,wt),M.wall); m.position.set(px,py,wt/2); g.add(m); threeState.wallMeshes.push(m); };
     if (botH>.01)   addW(len,botH,   len/2,botH/2);
     if (wh-topS>.01)addW(len,wh-topS,len/2,topS+(wh-topS)/2);
     let prev=0;
@@ -691,13 +687,19 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
 
   // Применяем box UV к стенам Z после их построения (zWallWithDoor)
   // addW уже применяет к стенам X; здесь обрабатываем остальные wallMeshes
-  const _wallUVHelper = (grp) => {
+  // grpOff — суммарное смещение родительских групп (накапливается при рекурсии)
+  const _wallUVHelper = (grp, grpOff) => {
+    const off = grpOff || { x: 0, y: 0, z: 0 };
+    const thisOff = {
+      x: off.x + grp.position.x,
+      y: off.y + grp.position.y,
+      z: off.z + grp.position.z,
+    };
     grp.children.forEach(child => {
-      if (child.isMesh && child.material === M.wall && !child._boxUVDone) {
-        _applyBoxUV(child, 2.0);
-        child._boxUVDone = true;
+      if (child.isMesh && child.material === M.wall) {
+        _applyBoxUV(child, 2.0, thisOff);
       }
-      if (child.isGroup) _wallUVHelper(child);
+      if (child.isGroup) _wallUVHelper(child, thisOff);
     });
   };
 
