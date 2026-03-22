@@ -22,15 +22,15 @@ function _buildEntourage(scene) {
 // ══════════════════════════════════════════════
 function _buildMobileVegetation(scene) {
   const loader = new THREE.TextureLoader();
-  let texBushA=null, texBushB=null, texTreeA=null, texTreeB=null, texGrass=null;
+  let texBushA=null, texBushB=null, texTreeA=null, texTreeB=null;
   let loaded = 0;
 
   const onLoaded = () => {
     loaded++;
-    if (loaded < 5) return;
+    if (loaded < 4) return;
     _placeBushes(scene, texBushA, texBushB);
     _placeTrees(scene, texTreeA, texTreeB);
-    _placeGrassPatches(scene, texGrass);
+    // _placeGrassPatches — выключено
   };
 
   const loadOrFallback = (filename, fallbackFn, onReady) => {
@@ -41,11 +41,10 @@ function _buildMobileVegetation(scene) {
     );
   };
 
-  loadOrFallback('bush_a.png',     () => _fallbackBush(0.28, 0.50), (t) => { texBushA = t; });
-  loadOrFallback('bush_b.png',     () => _fallbackBush(0.32, 0.44), (t) => { texBushB = t; });
-  loadOrFallback('tree_a.png',     () => _fallbackTree(0.26, 0.52), (t) => { texTreeA = t; });
-  loadOrFallback('tree_b.png',     () => _fallbackTree(0.22, 0.58), (t) => { texTreeB = t; });
-  loadOrFallback('grass_patch.png',() => _fallbackGrass(),          (t) => { texGrass = t; });
+  loadOrFallback('bush_a.png', () => _fallbackBush(0.28, 0.50), (t) => { texBushA = t; });
+  loadOrFallback('bush_b.png', () => _fallbackBush(0.32, 0.44), (t) => { texBushB = t; });
+  loadOrFallback('tree_a.png', () => _fallbackTree(0.26, 0.52), (t) => { texTreeA = t; });
+  loadOrFallback('tree_b.png', () => _fallbackTree(0.22, 0.58), (t) => { texTreeB = t; });
 }
 
 function _placeBushes(scene, texA, texB) {
@@ -54,8 +53,8 @@ function _placeBushes(scene, texA, texB) {
     [6,0,-4.5],[12,0,-4.5],[2,0,14],[14,0,14],
     [22,0,5],[-6,0,11],[25,0,10],[-3,0,3],
   ];
-  const matA = new THREE.SpriteMaterial({ map: texA, fog: true });
-  const matB = new THREE.SpriteMaterial({ map: texB, fog: true });
+  const matA = new THREE.SpriteMaterial({ map: texA, fog: true, transparent: true, alphaTest: 0.15, depthWrite: false });
+  const matB = new THREE.SpriteMaterial({ map: texB, fog: true, transparent: true, alphaTest: 0.15, depthWrite: false });
   for (const [x,,z] of spots) {
     const sprite = new THREE.Sprite(Math.random()>.5 ? matA : matB);
     const s = 1.2 + Math.random() * 0.9;
@@ -71,8 +70,8 @@ function _placeTrees(scene, texA, texB) {
     [28,0,-4],[30,0,8],[28,0,18],
     [10,0,-8],[16,0,-8],[8,0,20],[18,0,20],
   ];
-  const matA = new THREE.SpriteMaterial({ map: texA, fog: true });
-  const matB = new THREE.SpriteMaterial({ map: texB, fog: true });
+  const matA = new THREE.SpriteMaterial({ map: texA, fog: true, transparent: true, alphaTest: 0.15, depthWrite: false });
+  const matB = new THREE.SpriteMaterial({ map: texB, fog: true, transparent: true, alphaTest: 0.15, depthWrite: false });
   for (const [x,,z] of spots) {
     const sprite = new THREE.Sprite(Math.random()>.5 ? matA : matB);
     const s = 2.8 + Math.random() * 2.0;

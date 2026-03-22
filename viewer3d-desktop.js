@@ -142,7 +142,7 @@ function _buildVegetationSprites(scene) {
     ];
     for (const [x,,z] of bushSpots) {
       const tex    = Math.random() > .5 ? texBushA : texBushB;
-      const mat    = new THREE.SpriteMaterial({ map: tex, fog: true });
+      const mat    = new THREE.SpriteMaterial({ map: tex, fog: true, transparent: true, alphaTest: 0.15, depthWrite: false });
       const sprite = new THREE.Sprite(mat);
       const s      = 1.2 + Math.random() * 0.9;
       sprite.scale.set(s * 1.1, s * 1.3, 1);
@@ -158,7 +158,7 @@ function _buildVegetationSprites(scene) {
     ];
     for (const [x,,z] of treeSpots) {
       const tex    = Math.random() > .5 ? texTreeA : texTreeB;
-      const mat    = new THREE.SpriteMaterial({ map: tex, fog: true });
+      const mat    = new THREE.SpriteMaterial({ map: tex, fog: true, transparent: true, alphaTest: 0.15, depthWrite: false });
       const sprite = new THREE.Sprite(mat);
       const s      = 2.8 + Math.random() * 2.0;
       sprite.scale.set(s * 0.85, s, 1);

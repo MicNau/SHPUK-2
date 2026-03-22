@@ -334,10 +334,12 @@ function getHouseMats() {
     envMap:          env,
     envMapIntensity: eI * 0.7,
   });
-  wall.map          = _loadTex('wall_diff.jpg', 5);
-  wall.normalMap    = _loadNorm('wall_norm.jpg', 5);
+  wall.map          = _loadTex('wall_diff.jpg', 1);
+  wall.normalMap    = _loadNorm('wall_norm.jpg', 1);
   wall.normalScale  = new THREE.Vector2(0.5, 0.5);
-  wall.roughnessMap = _loadData('wall_roug.jpg', 5);
+  wall.roughnessMap = _loadData('wall_roug.jpg', 1);
+  // Кубическая проекция UV: 1 тайл = 2м
+  _applyBoxUV(wall, 2.0);
 
   // Цоколь
   const base = new THREE.MeshStandardMaterial({
@@ -347,8 +349,10 @@ function getHouseMats() {
     envMap:          env,
     envMapIntensity: eI * 0.4,
   });
-  base.map       = _loadTex('base_diff.jpg', 3);
-  base.normalMap = _loadNorm('base_norm.jpg', 3);
+  base.map       = _loadTex('base_diff.jpg', 1);
+  base.normalMap = _loadNorm('base_norm.jpg', 1);
+  // Кубическая проекция UV: 1 тайл = 1м
+  _applyBoxUV(base, 1.0);
 
   // Крыша
   const roof = new THREE.MeshStandardMaterial({
@@ -427,8 +431,8 @@ function _makeGroundMat() {
   // Текстуры загружаются асинхронно — загружаем после init
   setTimeout(() => {
     if (!threeState) return;
-    const diff = _loadTex('ground_diff.jpg', 24);
-    const norm = _loadNorm('ground_norm.jpg', 24);
+    const diff = _loadTex('ground_diff.jpg', 72);
+    const norm = _loadNorm('ground_norm.jpg', 72);
     if (threeState.groundMesh) {
       threeState.groundMesh.material.map       = diff;
       threeState.groundMesh.material.normalMap = norm;
@@ -437,6 +441,82 @@ function _makeGroundMat() {
     }
   }, 0);
   return mat;
+}
+
+// ══════════════════════════════════════════════
+// КУБИЧЕСКАЯ UV-ПРОЕКЦИЯ
+// Вычисляется в шейдере из мировых координат.
+// tileSize — размер одного тайла в метрах.
+// ══════════════════════════════════════════════
+function _applyBoxUV(material, tileSize) {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.boxTile = { value: 1.0 / tileSize };
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      `#include <common>
+      uniform float boxTile;
+      varying vec3 vWorldPos;
+      varying vec3 vWorldNorm;`
+    );
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <worldpos_vertex>',
+      `#include <worldpos_vertex>
+      vWorldPos  = (modelMatrix * vec4(position, 1.0)).xyz;
+      vWorldNorm = normalize(mat3(modelMatrix) * normal);`
+    );
+    // Кубический блендинг: выбираем доминирующую ось, UV из двух оставшихся
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      `#ifdef USE_MAP
+        vec3 aN = abs(vWorldNorm);
+        vec2 boxUV;
+        if (aN.y >= aN.x && aN.y >= aN.z) {
+          boxUV = vWorldPos.xz;             // горизонталь
+        } else if (aN.x >= aN.z) {
+          boxUV = vWorldPos.zy;             // стена вдоль Z
+        } else {
+          boxUV = vWorldPos.xy;             // стена вдоль X
+        }
+        boxUV *= boxTile;
+        vec4 sampledDiffuseColor = texture2D(map, boxUV);
+        #ifdef DECODE_VIDEO_TEXTURE
+          sampledDiffuseColor = vec4(mix(pow(sampledDiffuseColor.rgb * 0.9478672986 + vec3(0.0521327014), vec3(2.4)), sampledDiffuseColor.rgb * 0.0773993808, vec3(lessThanEqual(sampledDiffuseColor.rgb, vec3(0.04045)))), sampledDiffuseColor.w);
+        #endif
+        diffuseColor *= sampledDiffuseColor;
+      #endif`
+    );
+    // То же для normalMap
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <normal_fragment_maps>',
+      `#ifdef USE_NORMALMAP
+        vec3 aN2 = abs(vWorldNorm);
+        vec2 normUV;
+        if (aN2.y >= aN2.x && aN2.y >= aN2.z) normUV = vWorldPos.xz;
+        else if (aN2.x >= aN2.z)               normUV = vWorldPos.zy;
+        else                                    normUV = vWorldPos.xy;
+        normUV *= boxTile;
+        vec3 mapN = texture2D(normalMap, normUV).xyz * 2.0 - 1.0;
+        mapN.xy *= normalScale;
+        normal = normalize(tbn * mapN);
+      #endif`
+    );
+    // То же для roughnessMap
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <roughnessmap_fragment>',
+      `float roughnessFactor = roughness;
+      #ifdef USE_ROUGHNESSMAP
+        vec3 aN3 = abs(vWorldNorm);
+        vec2 roughUV;
+        if (aN3.y >= aN3.x && aN3.y >= aN3.z) roughUV = vWorldPos.xz;
+        else if (aN3.x >= aN3.z)               roughUV = vWorldPos.zy;
+        else                                    roughUV = vWorldPos.xy;
+        roughUV *= boxTile;
+        vec4 texelRoughness = texture2D(roughnessMap, roughUV);
+        roughnessFactor *= texelRoughness.g;
+      #endif`
+    );
+  };
+  material.needsUpdate = true;
 }
 
 // ══════════════════════════════════════════════
@@ -633,16 +713,43 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
 
   const rh=2.0,oh=.3, x0=-oh,x1=length+oh,z0=-oh,z1=width+oh,zMid=width/2;
   const yBase=bh+wh, yPeak=bh+wh+rh;
-  const verts=new Float32Array([
-    x0,yBase,z0,x1,yBase,z0,x1,yPeak,zMid, x0,yBase,z0,x1,yPeak,zMid,x0,yPeak,zMid,
-    x0,yBase,z1,x0,yPeak,zMid,x1,yPeak,zMid, x0,yBase,z1,x1,yPeak,zMid,x1,yBase,z1,
-    x1,yBase,z0,x1,yBase,z1,x1,yPeak,zMid,
-    x0,yBase,z1,x0,yBase,z0,x0,yPeak,zMid,
-    x0,yBase,z0,x0,yBase,z1,x1,yBase,z1, x0,yBase,z0,x1,yBase,z1,x1,yBase,z0,
-  ]);
-  const roofGeo=new THREE.BufferGeometry();
-  roofGeo.setAttribute('position',new THREE.BufferAttribute(verts,3));
-  roofGeo.computeVertexNormals();
+  // Длина ската: от карниза до конька
+  const slatLen = Math.sqrt(Math.pow((width+oh*2)/2, 2) + Math.pow(rh, 2));
+  // UV: U вдоль конька (делим на 2м), V поперёк ската (делим на 2м)
+  const uL = (length+oh*2)/2, uR = (length+oh*2)/2; // половина длины на каждый скат
+  const vS = slatLen/2; // повторяем каждые 2м поперёк
+
+  // Строим геометрию вручную с UV для двух скатов + фронтоны
+  // Каждый треугольник: [pos0, uv0, pos1, uv1, pos2, uv2]
+  const buildRoofGeo = (tris) => {
+    const pos=[], uvArr=[];
+    for (const [p0,u0,p1,u1,p2,u2] of tris) {
+      pos.push(...p0,...p1,...p2);
+      uvArr.push(...u0,...u1,...u2);
+    }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(pos),3));
+    g.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(uvArr),2));
+    g.computeVertexNormals();
+    return g;
+  };
+
+  // Скат A (z0 → zMid, передний)
+  // Скат B (z1 → zMid, задний)
+  // U: вдоль X, V: вдоль ската
+  const roofTris = [
+    // Скат A: два треугольника
+    [[x0,yBase,z0],[0,0],     [x1,yBase,z0],[uL,0],     [x1,yPeak,zMid],[uL,vS]],
+    [[x0,yBase,z0],[0,0],     [x1,yPeak,zMid],[uL,vS],  [x0,yPeak,zMid],[0,vS]],
+    // Скат B
+    [[x0,yBase,z1],[0,0],     [x0,yPeak,zMid],[0,vS],   [x1,yPeak,zMid],[uR,vS]],
+    [[x0,yBase,z1],[0,0],     [x1,yPeak,zMid],[uR,vS],  [x1,yBase,z1],[uR,0]],
+    // Фронтон правый (xMax)
+    [[x1,yBase,z0],[0,0],     [x1,yBase,z1],[width/2,0],[x1,yPeak,zMid],[width/4,vS]],
+    // Фронтон левый (xMin)
+    [[x0,yBase,z1],[0,0],     [x0,yBase,z0],[width/2,0],[x0,yPeak,zMid],[width/4,vS]],
+  ];
+  const roofGeo=buildRoofGeo(roofTris);
   const roofMesh=new THREE.Mesh(roofGeo,M.roof); roofMesh.castShadow=true;
   parent.add(roofMesh);
 }
