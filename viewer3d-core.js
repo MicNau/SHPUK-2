@@ -365,20 +365,20 @@ function getHouseMats() {
   roof.normalMap    = _loadNorm('roof_norm.jpg', 6);
   roof.roughnessMap = _loadData('roof_roug.jpg', 6);
 
-  // Стекло — физически корректное
+  // Стекло — полупрозрачное с отражением HDRI
   const glass = new THREE.MeshPhysicalMaterial({
-    color:           0xc8e8f8,
-    roughness:       0.02,
+    color:           0xa8c8e0,  // чуть холоднее и темнее
+    roughness:       0.04,
     metalness:       0.0,
-    transmission:    0.88,
-    thickness:       0.12,
-    ior:             1.46,
-    reflectivity:    0.88,
+    transmission:    0.28,      // меньше прозрачности — сквозь стекло плохо видно
+    thickness:       0.06,
+    ior:             1.52,      // стекло
+    reflectivity:    0.95,      // высокое отражение
     transparent:     true,
     opacity:         1.0,
     side:            THREE.DoubleSide,
     envMap:          env,
-    envMapIntensity: eI * 1.8,
+    envMapIntensity: eI * 3.0,  // сильное отражение HDRI
   });
 
   // Рамы
@@ -642,11 +642,22 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
     for (const w of sorted) {
       if (w.x-prev>.01) addW(w.x-prev,topS-botH,prev+(w.x-prev)/2,botH+(topS-botH)/2);
       const gm=new THREE.Mesh(box(w.w,w.h,wt*.3),M.glass); gm.position.set(w.x+w.w/2,w.y+w.h/2,wt/2); g.add(gm);
-      const ft=.04,fd=wt+.06;
+      const ft=.045, fd=wt+.06;
+      // Рама снаружи (4 перекладины + 2 горбылька)
       [[w.w+ft*2,ft,fd,w.x+w.w/2,w.y+w.h+ft/2],[w.w+ft*2,ft,fd,w.x+w.w/2,w.y-ft/2],
        [ft,w.h,fd,w.x-ft/2,w.y+w.h/2],[ft,w.h,fd,w.x+w.w+ft/2,w.y+w.h/2],
        [w.w,ft*.7,fd*.7,w.x+w.w/2,w.y+w.h/2],[ft*.7,w.h,fd*.7,w.x+w.w/2,w.y+w.h/2]
       ].forEach(([sx,sy,sz,px,py])=>{ const m=new THREE.Mesh(box(sx,sy,sz),M.frame); m.position.set(px,py,wt/2); g.add(m); });
+      // Откосы (reveal) — 4 полосы M.wall по периметру проёма, заполняют торец стены
+      const rv = wt * 0.5; // глубина откоса = половина толщины стены
+      // верхний откос
+      { const m=new THREE.Mesh(box(w.w+ft*2,rv,rv),M.wall); m.position.set(w.x+w.w/2,w.y+w.h+ft/2-rv/2,rv/2); g.add(m); }
+      // нижний откос
+      { const m=new THREE.Mesh(box(w.w+ft*2,rv,rv),M.wall); m.position.set(w.x+w.w/2,w.y-ft/2+rv/2,    rv/2); g.add(m); }
+      // левый откос
+      { const m=new THREE.Mesh(box(rv,w.h+ft*2,rv),M.wall); m.position.set(w.x-ft/2+rv/2,   w.y+w.h/2, rv/2); g.add(m); }
+      // правый откос
+      { const m=new THREE.Mesh(box(rv,w.h+ft*2,rv),M.wall); m.position.set(w.x+w.w+ft/2-rv/2,w.y+w.h/2,rv/2); g.add(m); }
       prev=w.x+w.w;
     }
     if (len-prev>.01) addW(len-prev,topS-botH,prev+(len-prev)/2,botH+(topS-botH)/2);
@@ -678,6 +689,12 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
          [fd,h.h,ft,wt/2,h.y+h.h/2,h.z-ft/2],[fd,h.h,ft,wt/2,h.y+h.h/2,h.z+h.w+ft/2],
          [fd*.8,ft*.7,h.w,wt/2,h.y+h.h/2,h.z+h.w/2],[fd*.8,h.h,ft*.7,wt/2,h.y+h.h/2,h.z+h.w/2]
         ].forEach(([sx,sy,sz,px,py,pz])=>{ const m=new THREE.Mesh(box(sx,sy,sz),M.frame); m.position.set(px,py,pz); grp.add(m); });
+        // Откосы (reveal) — торец стены вокруг проёма
+        const rv=wt*0.5;
+        { const m=new THREE.Mesh(box(rv,rv,h.w+ft*2),M.wall); m.position.set(rv/2,h.y+h.h+ft/2-rv/2,h.z+h.w/2); grp.add(m); }
+        { const m=new THREE.Mesh(box(rv,rv,h.w+ft*2),M.wall); m.position.set(rv/2,h.y-ft/2+rv/2,    h.z+h.w/2); grp.add(m); }
+        { const m=new THREE.Mesh(box(rv,h.h+ft*2,rv),M.wall); m.position.set(rv/2,h.y+h.h/2, h.z-ft/2+rv/2);    grp.add(m); }
+        { const m=new THREE.Mesh(box(rv,h.h+ft*2,rv),M.wall); m.position.set(rv/2,h.y+h.h/2, h.z+h.w+ft/2-rv/2);grp.add(m); }
       } else {
         [[fd,ft,h.w+ft*2,wt/2,h.y+h.h+ft/2,h.z+h.w/2],[fd,h.h,ft,wt/2,h.y+h.h/2,h.z-ft/2],[fd,h.h,ft,wt/2,h.y+h.h/2,h.z+h.w+ft/2]
         ].forEach(([sx,sy,sz,px,py,pz])=>{ const m=new THREE.Mesh(box(sx,sy,sz),M.frame); m.position.set(px,py,pz); grp.add(m); });
