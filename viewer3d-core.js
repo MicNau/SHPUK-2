@@ -365,20 +365,18 @@ function getHouseMats() {
   roof.normalMap    = _loadNorm('roof_norm.jpg', 6);
   roof.roughnessMap = _loadData('roof_roug.jpg', 6);
 
-  // Стекло — полупрозрачное с отражением HDRI
-  const glass = new THREE.MeshPhysicalMaterial({
-    color:           0xa8c8e0,  // чуть холоднее и темнее
+  // Стекло — тёмное с отражением, сквозь него плохо видно
+  // MeshStandardMaterial надёжнее MeshPhysicalMaterial.transmission в r128
+  const glass = new THREE.MeshStandardMaterial({
+    color:           0x4a6878,  // тёмно-синеватый — имитирует тонированное стекло
     roughness:       0.04,
-    metalness:       0.0,
-    transmission:    0.28,      // меньше прозрачности — сквозь стекло плохо видно
-    thickness:       0.06,
-    ior:             1.52,      // стекло
-    reflectivity:    0.95,      // высокое отражение
+    metalness:       0.72,      // высокий metalness даёт отражение без transmission
     transparent:     true,
-    opacity:         1.0,
+    opacity:         0.55,      // частично прозрачное
     side:            THREE.DoubleSide,
     envMap:          env,
-    envMapIntensity: eI * 3.0,  // сильное отражение HDRI
+    envMapIntensity: eI * 2.5,
+    depthWrite:      false,     // избегаем z-fighting при прозрачности
   });
 
   // Рамы
@@ -648,16 +646,14 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
        [ft,w.h,fd,w.x-ft/2,w.y+w.h/2],[ft,w.h,fd,w.x+w.w+ft/2,w.y+w.h/2],
        [w.w,ft*.7,fd*.7,w.x+w.w/2,w.y+w.h/2],[ft*.7,w.h,fd*.7,w.x+w.w/2,w.y+w.h/2]
       ].forEach(([sx,sy,sz,px,py])=>{ const m=new THREE.Mesh(box(sx,sy,sz),M.frame); m.position.set(px,py,wt/2); g.add(m); });
-      // Откосы (reveal) — 4 полосы M.wall по периметру проёма, заполняют торец стены
-      const rv = wt * 0.5; // глубина откоса = половина толщины стены
-      // верхний откос
-      { const m=new THREE.Mesh(box(w.w+ft*2,rv,rv),M.wall); m.position.set(w.x+w.w/2,w.y+w.h+ft/2-rv/2,rv/2); g.add(m); }
-      // нижний откос
-      { const m=new THREE.Mesh(box(w.w+ft*2,rv,rv),M.wall); m.position.set(w.x+w.w/2,w.y-ft/2+rv/2,    rv/2); g.add(m); }
-      // левый откос
-      { const m=new THREE.Mesh(box(rv,w.h+ft*2,rv),M.wall); m.position.set(w.x-ft/2+rv/2,   w.y+w.h/2, rv/2); g.add(m); }
-      // правый откос
-      { const m=new THREE.Mesh(box(rv,w.h+ft*2,rv),M.wall); m.position.set(w.x+w.w+ft/2-rv/2,w.y+w.h/2,rv/2); g.add(m); }
+      // Откосы (reveal) — 4 полосы M.wall по внутреннему периметру проёма
+      // В группе g: внешняя грань Z=0, внутренняя Z=wt → откосы у Z=wt
+      const rv = wt * 0.48;
+      const rz = wt - rv / 2; // Z-центр откоса у внутренней грани
+      { const m=new THREE.Mesh(box(w.w+ft*2,rv,rv),M.wall); m.position.set(w.x+w.w/2, w.y+w.h+ft/2-rv/2, rz); g.add(m); }
+      { const m=new THREE.Mesh(box(w.w+ft*2,rv,rv),M.wall); m.position.set(w.x+w.w/2, w.y-ft/2+rv/2,     rz); g.add(m); }
+      { const m=new THREE.Mesh(box(rv,w.h+ft*2,rv),M.wall); m.position.set(w.x-ft/2+rv/2,    w.y+w.h/2,  rz); g.add(m); }
+      { const m=new THREE.Mesh(box(rv,w.h+ft*2,rv),M.wall); m.position.set(w.x+w.w+ft/2-rv/2,w.y+w.h/2,  rz); g.add(m); }
       prev=w.x+w.w;
     }
     if (len-prev>.01) addW(len-prev,topS-botH,prev+(len-prev)/2,botH+(topS-botH)/2);
@@ -689,12 +685,12 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
          [fd,h.h,ft,wt/2,h.y+h.h/2,h.z-ft/2],[fd,h.h,ft,wt/2,h.y+h.h/2,h.z+h.w+ft/2],
          [fd*.8,ft*.7,h.w,wt/2,h.y+h.h/2,h.z+h.w/2],[fd*.8,h.h,ft*.7,wt/2,h.y+h.h/2,h.z+h.w/2]
         ].forEach(([sx,sy,sz,px,py,pz])=>{ const m=new THREE.Mesh(box(sx,sy,sz),M.frame); m.position.set(px,py,pz); grp.add(m); });
-        // Откосы (reveal) — торец стены вокруг проёма
-        const rv=wt*0.5;
-        { const m=new THREE.Mesh(box(rv,rv,h.w+ft*2),M.wall); m.position.set(rv/2,h.y+h.h+ft/2-rv/2,h.z+h.w/2); grp.add(m); }
-        { const m=new THREE.Mesh(box(rv,rv,h.w+ft*2),M.wall); m.position.set(rv/2,h.y-ft/2+rv/2,    h.z+h.w/2); grp.add(m); }
-        { const m=new THREE.Mesh(box(rv,h.h+ft*2,rv),M.wall); m.position.set(rv/2,h.y+h.h/2, h.z-ft/2+rv/2);    grp.add(m); }
-        { const m=new THREE.Mesh(box(rv,h.h+ft*2,rv),M.wall); m.position.set(rv/2,h.y+h.h/2, h.z+h.w+ft/2-rv/2);grp.add(m); }
+        // Откосы (reveal) — у внутренней грани Z-стены (X=wt)
+        const rv=wt*0.48, rx=wt-rv/2;
+        { const m=new THREE.Mesh(box(rv,rv,h.w+ft*2),M.wall); m.position.set(rx,h.y+h.h+ft/2-rv/2,h.z+h.w/2); grp.add(m); }
+        { const m=new THREE.Mesh(box(rv,rv,h.w+ft*2),M.wall); m.position.set(rx,h.y-ft/2+rv/2,    h.z+h.w/2); grp.add(m); }
+        { const m=new THREE.Mesh(box(rv,h.h+ft*2,rv),M.wall); m.position.set(rx,h.y+h.h/2, h.z-ft/2+rv/2);    grp.add(m); }
+        { const m=new THREE.Mesh(box(rv,h.h+ft*2,rv),M.wall); m.position.set(rx,h.y+h.h/2, h.z+h.w+ft/2-rv/2);grp.add(m); }
       } else {
         [[fd,ft,h.w+ft*2,wt/2,h.y+h.h+ft/2,h.z+h.w/2],[fd,h.h,ft,wt/2,h.y+h.h/2,h.z-ft/2],[fd,h.h,ft,wt/2,h.y+h.h/2,h.z+h.w+ft/2]
         ].forEach(([sx,sy,sz,px,py,pz])=>{ const m=new THREE.Mesh(box(sx,sy,sz),M.frame); m.position.set(px,py,pz); grp.add(m); });
