@@ -388,6 +388,9 @@ function getHouseMats() {
     metalness:       0.28,
     envMap:          env,
     envMapIntensity: eI * 1.0,
+    polygonOffset:      true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits:  -1,
   });
 
   // Дверь
@@ -425,7 +428,9 @@ function _makeGroundMat() {
     color:     0xffffff,
     roughness: 0.92,
     metalness: 0.0,
-    map:       _generateGroundTex(),
+    map:         _generateGroundTex(),
+    normalMap:   _generateGrassNormal(),
+    normalScale: new THREE.Vector2(0.7, 0.7),
   });
 }
 
@@ -439,34 +444,45 @@ function _generateGroundTex() {
   ctx.fillStyle = '#3a6828';
   ctx.fillRect(0, 0, sz, sz);
 
-  // Крупные пятна — вариация оттенков газона
-  for (let i = 0; i < 55; i++) {
+  // Крупные пятна — эллиптические, органичные формы
+  for (let i = 0; i < 60; i++) {
     const x = Math.random() * sz, y = Math.random() * sz;
     const r = 40 + Math.random() * 160;
     const hue = 75 + Math.random() * 45 | 0;
     const sat = 30 + Math.random() * 35 | 0;
     const lt  = 18 + Math.random() * 28 | 0;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    g.addColorStop(0, `hsla(${hue},${sat}%,${lt}%,0.5)`);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Math.random() * Math.PI);
+    ctx.scale(1, 0.4 + Math.random() * 0.8);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0, `hsla(${hue},${sat}%,${lt}%,0.45)`);
+    g.addColorStop(0.6, `hsla(${hue},${sat}%,${lt}%,0.18)`);
     g.addColorStop(1, 'hsla(100,30%,20%,0)');
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, sz, sz);
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
   }
 
-  // Средняя детализация — мелкие пятна, проплешины
-  for (let i = 0; i < 140; i++) {
+  // Средние пятна — тоже эллиптические
+  for (let i = 0; i < 150; i++) {
     const x = Math.random() * sz, y = Math.random() * sz;
     const r = 6 + Math.random() * 28;
     const hue = 60 + Math.random() * 60 | 0;
     const lt  = 15 + Math.random() * 32 | 0;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    g.addColorStop(0, `hsla(${hue},38%,${lt}%,0.4)`);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Math.random() * Math.PI);
+    ctx.scale(1, 0.5 + Math.random());
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0, `hsla(${hue},38%,${lt}%,0.3)`);
     g.addColorStop(1, 'hsla(90,30%,18%,0)');
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, sz, sz);
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
   }
 
-  // Мелкая фактура
+  // Мелкая фактура (точки — округлость не заметна)
   for (let i = 0; i < 500; i++) {
     const x = Math.random() * sz, y = Math.random() * sz;
     const r = 1 + Math.random() * 4;
@@ -479,6 +495,46 @@ function _generateGroundTex() {
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.encoding = THREE.sRGBEncoding;
+  return tex;
+}
+
+function _generateGrassNormal() {
+  const sz = 512;
+  const c = document.createElement('canvas');
+  c.width = c.height = sz;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(sz, sz);
+  const d = img.data;
+
+  // Базовая нормаль — вертикаль (128, 128, 255)
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = 128; d[i+1] = 128; d[i+2] = 255; d[i+3] = 255;
+  }
+
+  // Травинки — короткие направленные штрихи
+  for (let i = 0; i < 60000; i++) {
+    const bx = Math.random() * sz | 0;
+    const by = Math.random() * sz | 0;
+    const angle = -Math.PI/2 + (Math.random() - 0.5) * 1.4;
+    const strength = 18 + Math.random() * 35;
+    const len = 2 + Math.random() * 7 | 0;
+    const dx = Math.cos(angle), dy = Math.sin(angle);
+
+    for (let t = 0; t < len; t++) {
+      const px = (bx + dx * t) | 0;
+      const py = (by + dy * t) | 0;
+      if (px < 0 || px >= sz || py < 0 || py >= sz) continue;
+      const idx = (py * sz + px) * 4;
+      const fade = 1 - t / len;
+      d[idx]     = Math.max(0, Math.min(255, 128 + dx * strength * fade));
+      d[idx + 1] = Math.max(0, Math.min(255, 128 + dy * strength * fade));
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(14, 14);
   return tex;
 }
 

@@ -1,24 +1,164 @@
 // ══════════════════════════════════════════════
 // VIEWER3D-MOBILE.JS
 // Антураж для мобильных устройств:
-//   • Cross-billboard кусты (2 плоскости, assets/bush_a.png, bush_b.png)
-//   • Cross-billboard деревья (2 плоскости, assets/tree_a.png, tree_b.png)
-// Зависимости: viewer3d-core.js
+//   • 3D-модели кустов/деревьев (GLB) с fallback на cross-billboard спрайты
+//   • Цепочка: GLB → PNG cross-billboard → процедурный canvas
+// Зависимости: viewer3d-core.js, GLTFLoader (CDN)
 // ══════════════════════════════════════════════
 
 const IS_MOBILE = true;
 
-// Нет анимации на мобиле
 function _onAnimFrame(t) { /* no-op */ }
 
-// Точка входа
 function _buildEntourage(scene) {
   _buildVegetation(scene);
 }
 
 // ══════════════════════════════════════════════
-// CROSS-BILLBOARD РАСТИТЕЛЬНОСТЬ
+// РАСТИТЕЛЬНОСТЬ: GLB → PNG → PROCEDURAL
 // ══════════════════════════════════════════════
+
+const _VEG_BUSH_SPOTS = [
+  [-4,0,-3],[16,0,-3],[20,0,8],[-4,0,8],
+  [6,0,-4.5],[12,0,-4.5],[2,0,14],[14,0,14],
+  [22,0,5],[-6,0,11],[25,0,10],[-3,0,3],
+];
+
+const _VEG_TREE_SPOTS = [
+  [-8,0,-6],[-10,0,4],[-8,0,14],
+  [28,0,-4],[30,0,8],[28,0,18],
+  [10,0,-8],[16,0,-8],[8,0,20],[18,0,20],
+];
+
+const _CROSS_PLANES_BUSH = 2;
+const _CROSS_PLANES_TREE = 2;
+
+function _buildVegetation(scene) {
+  const gltf = new THREE.GLTFLoader();
+  const tex  = new THREE.TextureLoader();
+
+  // Загружаем GLB кустов
+  _loadVegModels(gltf, tex, scene, {
+    glbFiles:  ['bush_a.glb', 'bush_b.glb'],
+    pngFiles:  ['bush_a.png', 'bush_b.png'],
+    fallbacks: [() => _fallbackBush(0.28, 0.50), () => _fallbackBush(0.32, 0.44)],
+    spots:     _VEG_BUSH_SPOTS,
+    type:      'bush',
+  });
+
+  // Загружаем GLB деревьев
+  _loadVegModels(gltf, tex, scene, {
+    glbFiles:  ['tree_a.glb', 'tree_b.glb'],
+    pngFiles:  ['tree_a.png', 'tree_b.png'],
+    fallbacks: [() => _fallbackTree(0.26, 0.52), () => _fallbackTree(0.22, 0.58)],
+    spots:     _VEG_TREE_SPOTS,
+    type:      'tree',
+  });
+}
+
+// ── Универсальный загрузчик с fallback-цепочкой ──
+
+function _loadVegModels(gltfLoader, texLoader, scene, cfg) {
+  const models = [null, null];
+  let ready = 0;
+
+  const onBothReady = () => {
+    if (++ready < 2) return;
+    _placeVeg(scene, models, cfg);
+  };
+
+  cfg.glbFiles.forEach((glb, i) => {
+    gltfLoader.load(ASSETS + glb,
+      (gltf) => {
+        models[i] = { mode: 'glb', data: gltf.scene };
+        onBothReady();
+      },
+      undefined,
+      () => {
+        // GLB не найден → пробуем PNG
+        texLoader.load(ASSETS + cfg.pngFiles[i],
+          (t) => {
+            models[i] = { mode: 'png', data: t };
+            onBothReady();
+          },
+          undefined,
+          () => {
+            // PNG тоже нет → процедурный fallback
+            models[i] = { mode: 'png', data: cfg.fallbacks[i]() };
+            onBothReady();
+          },
+        );
+      },
+    );
+  });
+}
+
+// ── Размещение по точкам ──
+
+function _placeVeg(scene, models, cfg) {
+  const isBush = cfg.type === 'bush';
+  const crossPlanes = isBush ? _CROSS_PLANES_BUSH : _CROSS_PLANES_TREE;
+
+  for (const [x,,z] of cfg.spots) {
+    const mdl = models[Math.random() > 0.5 ? 0 : 1];
+    const s = isBush
+      ? 1.2 + Math.random() * 0.9
+      : 2.8 + Math.random() * 2.0;
+
+    if (mdl.mode === 'glb') {
+      _placeGlb(scene, mdl.data, x, z, s, isBush);
+    } else {
+      _placeCross(scene, mdl.data, x, z, s, isBush, crossPlanes);
+    }
+  }
+}
+
+function _placeGlb(scene, srcModel, x, z, scale, isBush) {
+  const clone = srcModel.clone();
+
+  // Нормализуем размер: подгоняем под bounding box
+  const box = new THREE.Box3().setFromObject(clone);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const targetH = isBush ? scale * 1.3 : scale;
+  const k = targetH / maxDim;
+  clone.scale.set(k, k, k);
+
+  // Центрируем по основанию
+  const box2 = new THREE.Box3().setFromObject(clone);
+  clone.position.set(x - (box2.min.x + box2.max.x) / 2, -box2.min.y, z - (box2.min.z + box2.max.z) / 2);
+  clone.rotation.y = Math.random() * Math.PI * 2;
+
+  // Включаем тени
+  clone.traverse((child) => {
+    if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+    }
+  });
+
+  scene.add(clone);
+}
+
+function _placeCross(scene, tex, x, z, s, isBush, planes) {
+  const mat = _makeCrossMat(tex);
+  const w = isBush ? s * 1.1 : s * 0.85;
+  const h = isBush ? s * 1.3 : s;
+  const geo = new THREE.PlaneGeometry(w, h);
+  const grp = new THREE.Group();
+
+  for (let i = 0; i < planes; i++) {
+    const m = new THREE.Mesh(geo, mat);
+    m.rotation.y = (Math.PI / planes) * i;
+    m.position.y = h * 0.45;
+    grp.add(m);
+  }
+
+  grp.position.set(x, 0, z);
+  grp.rotation.y = Math.random() * Math.PI;
+  scene.add(grp);
+}
 
 function _makeCrossMat(tex) {
   return new THREE.MeshBasicMaterial({
@@ -26,83 +166,6 @@ function _makeCrossMat(tex) {
     depthWrite: false, toneMapped: false, side: THREE.DoubleSide,
     color: new THREE.Color(0.75, 0.75, 0.75),
   });
-}
-
-function _buildVegetation(scene) {
-  const loader = new THREE.TextureLoader();
-  let texBushA = null, texBushB = null, texTreeA = null, texTreeB = null;
-  let loaded = 0;
-
-  const onLoaded = () => {
-    if (++loaded < 4) return;
-    _placeBushes(scene, texBushA, texBushB);
-    _placeTrees(scene, texTreeA, texTreeB);
-  };
-
-  const loadOrFallback = (filename, fallbackFn, onReady) => {
-    loader.load(ASSETS + filename,
-      (tex) => { onReady(tex); onLoaded(); },
-      undefined,
-      () => { onReady(fallbackFn()); onLoaded(); },
-    );
-  };
-
-  loadOrFallback('bush_a.png', () => _fallbackBush(0.28, 0.50), (t) => { texBushA = t; });
-  loadOrFallback('bush_b.png', () => _fallbackBush(0.32, 0.44), (t) => { texBushB = t; });
-  loadOrFallback('tree_a.png', () => _fallbackTree(0.26, 0.52), (t) => { texTreeA = t; });
-  loadOrFallback('tree_b.png', () => _fallbackTree(0.22, 0.58), (t) => { texTreeB = t; });
-}
-
-function _placeBushes(scene, texA, texB) {
-  const spots = [
-    [-4,0,-3],[16,0,-3],[20,0,8],[-4,0,8],
-    [6,0,-4.5],[12,0,-4.5],[2,0,14],[14,0,14],
-    [22,0,5],[-6,0,11],[25,0,10],[-3,0,3],
-  ];
-  const matA = _makeCrossMat(texA), matB = _makeCrossMat(texB);
-
-  for (const [x,,z] of spots) {
-    const mat = Math.random() > 0.5 ? matA : matB;
-    const s = 1.2 + Math.random() * 0.9;
-    const w = s * 1.1, h = s * 1.3;
-    const geo = new THREE.PlaneGeometry(w, h);
-    const grp = new THREE.Group();
-    for (let i = 0; i < 2; i++) {
-      const m = new THREE.Mesh(geo, mat);
-      m.rotation.y = (Math.PI / 2) * i;
-      m.position.y = h * 0.45;
-      grp.add(m);
-    }
-    grp.position.set(x, 0, z);
-    grp.rotation.y = Math.random() * Math.PI;
-    scene.add(grp);
-  }
-}
-
-function _placeTrees(scene, texA, texB) {
-  const spots = [
-    [-8,0,-6],[-10,0,4],[-8,0,14],
-    [28,0,-4],[30,0,8],[28,0,18],
-    [10,0,-8],[16,0,-8],[8,0,20],[18,0,20],
-  ];
-  const matA = _makeCrossMat(texA), matB = _makeCrossMat(texB);
-
-  for (const [x,,z] of spots) {
-    const mat = Math.random() > 0.5 ? matA : matB;
-    const s = 2.8 + Math.random() * 2.0;
-    const w = s * 0.85, h = s;
-    const geo = new THREE.PlaneGeometry(w, h);
-    const grp = new THREE.Group();
-    for (let i = 0; i < 2; i++) {
-      const m = new THREE.Mesh(geo, mat);
-      m.rotation.y = (Math.PI / 2) * i;
-      m.position.y = h * 0.45;
-      grp.add(m);
-    }
-    grp.position.set(x, 0, z);
-    grp.rotation.y = Math.random() * Math.PI;
-    scene.add(grp);
-  }
 }
 
 // ── Процедурные fallback-текстуры ─────────────
@@ -144,7 +207,6 @@ function _fallbackTree(lightBase, satBase) {
   const sz = 256, c = document.createElement('canvas');
   c.width = c.height = sz;
   const ctx = c.getContext('2d');
-  // Ствол
   ctx.beginPath();
   ctx.moveTo(sz * 0.46, sz * 0.95);
   ctx.lineTo(sz * 0.54, sz * 0.95);
@@ -157,7 +219,6 @@ function _fallbackTree(lightBase, satBase) {
   stg.addColorStop(1, '#2a1a08aa');
   ctx.fillStyle = stg;
   ctx.fill();
-  // Крона — несколько слоёв эллипсов
   const layers = [
     [sz * 0.50, sz * 0.48, sz * 0.36, sz * 0.32],
     [sz * 0.38, sz * 0.54, sz * 0.24, sz * 0.22],
@@ -180,7 +241,6 @@ function _fallbackTree(lightBase, satBase) {
     ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
   }
-  // Световые блики
   for (let i = 0; i < 10; i++) {
     const hx = sz * 0.25 + Math.random() * sz * 0.5;
     const hy = sz * 0.15 + Math.random() * sz * 0.5;
