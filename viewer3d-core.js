@@ -258,8 +258,9 @@ function _applyHdri(texture) {
   scene.environment = envMap;
   scene.background  = envMap;
   skyMesh.visible   = false;
-  sunLight.intensity = 0.9;
+  sunLight.intensity = 1.8;
   ambLight.intensity = 0.0;
+  renderer.toneMappingExposure = 0.85;
   threeState.envMap  = envMap;
 
   // Перестраиваем дом — материалы получат envMap
@@ -371,9 +372,9 @@ function getHouseMats() {
   const glass = new THREE.MeshStandardMaterial({
     color:           0x4a6878,  // тёмно-синеватый — имитирует тонированное стекло
     roughness:       0.04,
-    metalness:       0.72,      // высокий metalness даёт отражение без transmission
+    metalness:       0.82,      // высокий metalness даёт отражение без transmission
     transparent:     true,
-    opacity:         0.55,      // частично прозрачное
+    opacity:         0.38,      // менее прозрачное — скрывает отсутствие интерьера
     side:            THREE.DoubleSide,
     envMap:          env,
     envMapIntensity: eI * 2.5,
