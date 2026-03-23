@@ -170,11 +170,12 @@ function init3dCanvas(targetSlotId) {
   sunLight.castShadow = true;
   const smSz = isMobile ? 1024 : 2048;
   sunLight.shadow.mapSize.set(smSz, smSz);
-  sunLight.shadow.camera.left   = -22; sunLight.shadow.camera.right  =  22;
-  sunLight.shadow.camera.top    =  22; sunLight.shadow.camera.bottom = -22;
-  sunLight.shadow.camera.near   = 1;   sunLight.shadow.camera.far    =  65;
-  sunLight.shadow.bias   = -0.0004;
-  sunLight.shadow.radius = isMobile ? 2 : 4;
+  sunLight.shadow.camera.left   = -26; sunLight.shadow.camera.right  =  26;
+  sunLight.shadow.camera.top    =  26; sunLight.shadow.camera.bottom = -26;
+  sunLight.shadow.camera.near   = 0.5; sunLight.shadow.camera.far    =  80;
+  sunLight.shadow.bias          = -0.0003;
+  sunLight.shadow.normalBias    = 0.02;
+  sunLight.shadow.radius        = isMobile ? 3 : 5;
   scene.add(sunLight);
   scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a8a3c, 0.7));
 
@@ -417,38 +418,67 @@ function getHouseMats() {
   return { wall, base, roof, glass, frame, door, deck, joist, post, step };
 }
 
-// ── Земля ─────────────────────────────────────
+// ── Земля (процедурная текстура без тайлинга) ──
 function _makeGroundMat() {
-  const mat = new THREE.MeshStandardMaterial({
-    color:    0x4a7c3f,
-    roughness: 0.93,
+  return new THREE.MeshStandardMaterial({
+    color:     0xffffff,
+    roughness: 0.92,
     metalness: 0.0,
+    map:       _generateGroundTex(),
   });
-  // Текстуры земли — загружаем напрямую без placeholder-кэша
-  const groundLoader = new THREE.TextureLoader();
-  const _applyGroundTex = (filename, isColor, slot) => {
-    groundLoader.load(ASSETS + filename, (tex) => {
-      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(72, 72);
-      tex.encoding = isColor ? THREE.sRGBEncoding : THREE.LinearEncoding;
-      tex.needsUpdate = true;
-      if (threeState && threeState.groundMesh) {
-        const mat = threeState.groundMesh.material;
-        mat[slot] = tex;
-        if (slot === 'normalMap')
-          mat.normalScale = new THREE.Vector2(0.3, 0.3);
-        // Сбрасываем базовый цвет на белый — иначе он умножается на текстуру
-        if (slot === 'map')
-          mat.color.set(0xffffff);
-        mat.needsUpdate = true;
-      }
-    }, undefined, () => {});
-  };
-  setTimeout(() => {
-    _applyGroundTex('ground_diff.jpg', true,  'map');
-    _applyGroundTex('ground_norm.jpg', false, 'normalMap');
-  }, 0);
-  return mat;
+}
+
+function _generateGroundTex() {
+  const sz = 1024;
+  const c = document.createElement('canvas');
+  c.width = c.height = sz;
+  const ctx = c.getContext('2d');
+
+  // Базовый зелёный
+  ctx.fillStyle = '#3a6828';
+  ctx.fillRect(0, 0, sz, sz);
+
+  // Крупные пятна — вариация оттенков газона
+  for (let i = 0; i < 55; i++) {
+    const x = Math.random() * sz, y = Math.random() * sz;
+    const r = 40 + Math.random() * 160;
+    const hue = 75 + Math.random() * 45 | 0;
+    const sat = 30 + Math.random() * 35 | 0;
+    const lt  = 18 + Math.random() * 28 | 0;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `hsla(${hue},${sat}%,${lt}%,0.5)`);
+    g.addColorStop(1, 'hsla(100,30%,20%,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, sz, sz);
+  }
+
+  // Средняя детализация — мелкие пятна, проплешины
+  for (let i = 0; i < 140; i++) {
+    const x = Math.random() * sz, y = Math.random() * sz;
+    const r = 6 + Math.random() * 28;
+    const hue = 60 + Math.random() * 60 | 0;
+    const lt  = 15 + Math.random() * 32 | 0;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `hsla(${hue},38%,${lt}%,0.4)`);
+    g.addColorStop(1, 'hsla(90,30%,18%,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, sz, sz);
+  }
+
+  // Мелкая фактура
+  for (let i = 0; i < 500; i++) {
+    const x = Math.random() * sz, y = Math.random() * sz;
+    const r = 1 + Math.random() * 4;
+    const hue = 55 + Math.random() * 65 | 0;
+    const lt  = 18 + Math.random() * 35 | 0;
+    ctx.fillStyle = `hsla(${hue},42%,${lt}%,0.22)`;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.encoding = THREE.sRGBEncoding;
+  return tex;
 }
 
 // ══════════════════════════════════════════════
@@ -628,7 +658,7 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
 
   const WWIN=0.9, HWIN=1.2, YWIN=1.0, WDOOR=1.0, HDOOR=2.2;
 
-  function xWallWithWins(len, wins) {
+  function xWallWithWins(len, wins, extZ) {
     const g      = new THREE.Group();
     const sorted = [...wins].sort((a,b)=>a.x-b.x);
     const botH   = sorted.length ? Math.min(...sorted.map(w=>w.y))     : wh;
@@ -646,19 +676,18 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
        [ft,w.h,fd,w.x-ft/2,w.y+w.h/2],[ft,w.h,fd,w.x+w.w+ft/2,w.y+w.h/2],
        [w.w,ft*.7,fd*.7,w.x+w.w/2,w.y+w.h/2],[ft*.7,w.h,fd*.7,w.x+w.w/2,w.y+w.h/2]
       ].forEach(([sx,sy,sz,px,py])=>{ const m=new THREE.Mesh(box(sx,sy,sz),M.frame); m.position.set(px,py,wt/2); g.add(m); });
-      // Откосы (reveal) — белые полосы рамного материала у внутренней грани стены
-      const rv = wt * 0.48, rz = wt - rv / 2;
-      { const m=new THREE.Mesh(box(w.w,rv,rv),M.frame); m.position.set(w.x+w.w/2, w.y+w.h+rv/2, rz); g.add(m); }
-      { const m=new THREE.Mesh(box(w.w,rv,rv),M.frame); m.position.set(w.x+w.w/2, w.y-rv/2,     rz); g.add(m); }
-      { const m=new THREE.Mesh(box(rv,w.h,rv),M.frame); m.position.set(w.x-rv/2,     w.y+w.h/2, rz); g.add(m); }
-      { const m=new THREE.Mesh(box(rv,w.h,rv),M.frame); m.position.set(w.x+w.w+rv/2, w.y+w.h/2, rz); g.add(m); }
+      // Подоконник (exterior windowsill)
+      { const sw=w.w+ft*4, sh=0.025, sd=0.07;
+        const sillZ = extZ===0 ? -sd*0.35 : wt+sd*0.35;
+        const m=new THREE.Mesh(box(sw,sh,sd),M.frame);
+        m.position.set(w.x+w.w/2, w.y-ft/2-sh/2, sillZ); g.add(m); }
       prev=w.x+w.w;
     }
     if (len-prev>.01) addW(len-prev,topS-botH,prev+(len-prev)/2,botH+(topS-botH)/2);
     return g;
   }
 
-  function zWallWithDoor(zLen, hasDoor, hasWins) {
+  function zWallWithDoor(zLen, hasDoor, hasWins, extX) {
     const grp=new THREE.Group(), holes=[];
     if (hasDoor) holes.push({z:zLen/2-WDOOR/2,y:0,w:WDOOR,h:HDOOR,isDoor:true});
     if (hasWins) {
@@ -683,12 +712,11 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
          [fd,h.h,ft,wt/2,h.y+h.h/2,h.z-ft/2],[fd,h.h,ft,wt/2,h.y+h.h/2,h.z+h.w+ft/2],
          [fd*.8,ft*.7,h.w,wt/2,h.y+h.h/2,h.z+h.w/2],[fd*.8,h.h,ft*.7,wt/2,h.y+h.h/2,h.z+h.w/2]
         ].forEach(([sx,sy,sz,px,py,pz])=>{ const m=new THREE.Mesh(box(sx,sy,sz),M.frame); m.position.set(px,py,pz); grp.add(m); });
-        // Откосы (reveal) — белые, у внутренней грани Z-стены
-        const rv=wt*0.48, rx=wt-rv/2;
-        { const m=new THREE.Mesh(box(rv,rv,h.w),M.frame); m.position.set(rx, h.y+h.h+rv/2, h.z+h.w/2); grp.add(m); }
-        { const m=new THREE.Mesh(box(rv,rv,h.w),M.frame); m.position.set(rx, h.y-rv/2,     h.z+h.w/2); grp.add(m); }
-        { const m=new THREE.Mesh(box(rv,h.h,rv),M.frame); m.position.set(rx, h.y+h.h/2, h.z-rv/2);    grp.add(m); }
-        { const m=new THREE.Mesh(box(rv,h.h,rv),M.frame); m.position.set(rx, h.y+h.h/2, h.z+h.w+rv/2);grp.add(m); }
+        // Подоконник (exterior windowsill)
+        { const sh=0.025, sd=0.07;
+          const sillX = extX===0 ? -sd*0.35 : wt+sd*0.35;
+          const m=new THREE.Mesh(box(sd,sh,h.w+ft*4),M.frame);
+          m.position.set(sillX, h.y-ft/2-sh/2, h.z+h.w/2); grp.add(m); }
       } else {
         [[fd,ft,h.w+ft*2,wt/2,h.y+h.h+ft/2,h.z+h.w/2],[fd,h.h,ft,wt/2,h.y+h.h/2,h.z-ft/2],[fd,h.h,ft,wt/2,h.y+h.h/2,h.z+h.w+ft/2]
         ].forEach(([sx,sy,sz,px,py,pz])=>{ const m=new THREE.Mesh(box(sx,sy,sz),M.frame); m.position.set(px,py,pz); grp.add(m); });
@@ -722,11 +750,11 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
   const wins=[];
   for(let i=0;i<winCnt;i++) wins.push({x:winIndent+(WWIN+winIndent)*i,y:YWIN,w:WWIN,h:HWIN});
 
-  const lw=xWallWithWins(length,wins); lw.position.set(0,bh,0);        parent.add(lw);
-  const rw=xWallWithWins(length,wins); rw.position.set(0,bh,width-wt); parent.add(rw);
+  const lw=xWallWithWins(length,wins,0); lw.position.set(0,bh,0);        parent.add(lw);
+  const rw=xWallWithWins(length,wins,wt); rw.position.set(0,bh,width-wt); parent.add(rw);
   const zI=width-wt*2;
-  const bk=zWallWithDoor(zI,false,true); bk.position.set(0,bh,wt);         parent.add(bk);
-  const fw=zWallWithDoor(zI,true,true);  fw.position.set(length-wt,bh,wt); parent.add(fw);
+  const bk=zWallWithDoor(zI,false,true,0);  bk.position.set(0,bh,wt);         parent.add(bk);
+  const fw=zWallWithDoor(zI,true,true,wt); fw.position.set(length-wt,bh,wt); parent.add(fw);
   // Применяем box UV к стенам Z (X-стены обработаны в addW)
   [lw,rw,bk,fw].forEach(grp => _wallUVHelper(grp));
   console.log('[3D] стены построены, wallMeshes:', threeState.wallMeshes.length);
