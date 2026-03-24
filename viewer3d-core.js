@@ -106,6 +106,25 @@ function _loadData(filename, repeat = 4) {
 }
 
 // ══════════════════════════════════════════════
+// НАСТРОЙКА OrbitControls (единый источник)
+// ══════════════════════════════════════════════
+function _setupControls(camera, domElement) {
+  const c = new THREE.OrbitControls(camera, domElement);
+  c.enableDamping  = true;
+  c.dampingFactor  = 0.08;
+  c.minDistance    = 4;
+  c.maxDistance    = 50;
+  c.maxPolarAngle  = Math.PI / 2.05;
+  // Правая кнопка — pan (перемещение), средняя — dolly
+  c.mouseButtons   = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+  // Камера не опускается ниже земли
+  c.addEventListener('change', () => {
+    if (camera.position.y < 0.3) camera.position.y = 0.3;
+  });
+  return c;
+}
+
+// ══════════════════════════════════════════════
 // ИНИЦИАЛИЗАЦИЯ СЦЕНЫ
 // ══════════════════════════════════════════════
 function init3dCanvas(targetSlotId) {
@@ -149,17 +168,8 @@ function init3dCanvas(targetSlotId) {
   camera.position.set(18, 12, 18);
 
   // ── Controls ──────────────────────────────────
-  const controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.08;
+  const controls = _setupControls(camera, renderer.domElement);
   controls.target.set(4, 2, 2.5);
-  controls.minDistance   = 4;
-  controls.maxDistance   = 50;
-  controls.maxPolarAngle = Math.PI / 2.05;
-  // Ограничение: камера не опускается ниже земли
-  controls.addEventListener('change', () => {
-    if (camera.position.y < 0.3) camera.position.y = 0.3;
-  });
 
   // ── Процедурное небо (до загрузки HDRI) ───────
   const skyMesh = _buildProceduralSky();
@@ -1110,10 +1120,7 @@ function moveThreeTo(slotId) {
   target.appendChild(threeState.renderer.domElement);
   threeState.currentSlot=slotId;
   threeState.controls.dispose();
-  threeState.controls=new THREE.OrbitControls(threeState.camera,threeState.renderer.domElement);
-  threeState.controls.enableDamping=true; threeState.controls.dampingFactor=.08;
-  threeState.controls.minDistance=4; threeState.controls.maxDistance=50;
-  threeState.controls.maxPolarAngle=Math.PI/2.05;
+  threeState.controls=_setupControls(threeState.camera,threeState.renderer.domElement);
   const area2=parseFloat(document.getElementById('v-area')?.value||120);
   const houseW2=Math.sqrt(area2/1.6),houseL2=houseW2*1.6;
   const bh2=parseFloat(document.getElementById('v-found')?.value||80)/100;
