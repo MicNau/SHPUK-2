@@ -328,9 +328,9 @@ function getHouseMats() {
   const env = threeState?.envMap || null;
   const eI  = env ? 1.0 : 0.0;
 
-  // Штукатурка стен
+  // Штукатурка стен (белая, как на референсе)
   const wall = new THREE.MeshStandardMaterial({
-    color:           0xf5e6c8,
+    color:           0xf2f2ee,
     roughness:       0.85,
     metalness:       0.0,
     envMap:          env,
@@ -342,9 +342,9 @@ function getHouseMats() {
   wall.roughnessMap = _loadData('wall_roug.jpg', 1);
   // UV назначаются на меш через _applyBoxUV(mesh, 2.0) в buildHouseMeshes
 
-  // Цоколь
+  // Цоколь (тёмный антрацит)
   const base = new THREE.MeshStandardMaterial({
-    color:           0x8a8278,
+    color:           0x3a3a3c,
     roughness:       0.88,
     metalness:       0.04,
     envMap:          env,
@@ -354,9 +354,9 @@ function getHouseMats() {
   base.normalMap = _loadNorm('base_norm.jpg', 1);
   // UV назначаются на меш через _applyBoxUV(mesh, 1.0) в buildHouseMeshes
 
-  // Крыша
+  // Крыша (тёмно-серая черепица)
   const roof = new THREE.MeshStandardMaterial({
-    color:           0x8b3a3a,
+    color:           0x404045,
     roughness:       0.80,
     metalness:       0.04,
     side:            THREE.DoubleSide,
@@ -381,9 +381,9 @@ function getHouseMats() {
     depthWrite:      false,     // избегаем z-fighting при прозрачности
   });
 
-  // Рамы
+  // Рамы (тёмный антрацит, как на референсе)
   const frame = new THREE.MeshStandardMaterial({
-    color:           0xf0f0ee,
+    color:           0x3a3a3c,
     roughness:       0.28,
     metalness:       0.28,
     envMap:          env,
@@ -393,9 +393,9 @@ function getHouseMats() {
     polygonOffsetUnits:  -1,
   });
 
-  // Дверь
+  // Дверь (тёмная, как на референсе)
   const door = new THREE.MeshStandardMaterial({
-    color:           0x5c3a1e,
+    color:           0x2a2a2e,
     roughness:       0.72,
     metalness:       0.06,
     envMap:          env,
@@ -419,7 +419,25 @@ function getHouseMats() {
   const post  = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.80, metalness: 0.20, envMap: env, envMapIntensity: eI * 0.2 });
   const step  = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.80, metalness: 0.05, envMap: env, envMapIntensity: eI * 0.3 });
 
-  return { wall, base, roof, glass, frame, door, deck, joist, post, step };
+  // Деревянная обшивка входной зоны (тёплое дерево)
+  const woodClad = new THREE.MeshStandardMaterial({
+    color:           0xB08050,
+    roughness:       0.75,
+    metalness:       0.0,
+    envMap:          env,
+    envMapIntensity: eI * 0.4,
+  });
+
+  // Колонны (белые, как стены)
+  const column = new THREE.MeshStandardMaterial({
+    color:           0xf0f0ec,
+    roughness:       0.60,
+    metalness:       0.05,
+    envMap:          env,
+    envMapIntensity: eI * 0.5,
+  });
+
+  return { wall, base, roof, glass, frame, door, deck, joist, post, step, woodClad, column };
 }
 
 // ── Земля (процедурная текстура без тайлинга) ──
@@ -713,7 +731,7 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
   console.log('[3D] цоколь создан, size:', length+.2, bh, width+.2, 'pos:', bm.position);
   console.log('[3D] M.base.map:', M.base.map, 'visible:', bm.visible, 'material:', M.base.type);
 
-  const WWIN=0.9, HWIN=1.2, YWIN=1.0, WDOOR=1.0, HDOOR=2.2;
+  const WWIN=0.9, HWIN=1.2, YWIN=1.0, WDOOR=1.6, HDOOR=2.3;
 
   function xWallWithWins(len, wins, extZ) {
     const g      = new THREE.Group();
@@ -818,16 +836,23 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
   console.log('[3D] M.wall.map:', M.wall.map, 'M.wall.onBeforeCompile:', M.wall.onBeforeCompile);
   console.log('[3D] lw children:', lw.children.length, 'rw:', rw.children.length);
 
-  const rh=2.0,oh=.3, x0=-oh,x1=length+oh,z0=-oh,z1=width+oh,zMid=width/2;
+  // ── Вальмовая (hip) крыша ──────────────────────
+  const rh=2.0, oh=0.45; // overhang 0.45m
+  const x0=-oh, x1=length+oh, z0=-oh, z1=width+oh, zMid=width/2;
   const yBase=bh+wh, yPeak=bh+wh+rh;
-  // Длина ската: от карниза до конька
-  const slatLen = Math.sqrt(Math.pow((width+oh*2)/2, 2) + Math.pow(rh, 2));
-  // UV: U вдоль конька (делим на 2м), V поперёк ската (делим на 2м)
-  const uL = (length+oh*2)/8, uR = (length+oh*2)/8; // длина / 8 для редкого тайлинга
-  const vS = slatLen/8; // повторяем каждые 8м поперёк
 
-  // Строим геометрию вручную с UV для двух скатов + фронтоны
-  // Каждый треугольник: [pos0, uv0, pos1, uv1, pos2, uv2]
+  // Вальм: конёк короче длины дома, 4 ската
+  const eaveHalfW = (width + oh*2) / 2;
+  const hipInset  = eaveHalfW * 0.7; // длина вальма от карниза до конька
+  const ridgeX0   = x0 + hipInset;   // начало конька
+  const ridgeX1   = x1 - hipInset;   // конец конька
+
+  // UV масштабы
+  const slatLen = Math.sqrt(eaveHalfW*eaveHalfW + rh*rh);
+  const uTotal  = (length + oh*2) / 8;
+  const vS      = slatLen / 8;
+  const uHip    = hipInset / 8;
+
   const buildRoofGeo = (tris) => {
     const pos=[], uvArr=[];
     for (const [p0,u0,p1,u1,p2,u2] of tris) {
@@ -841,24 +866,96 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
     return g;
   };
 
-  // Скат A (z0 → zMid, передний)
-  // Скат B (z1 → zMid, задний)
-  // U: вдоль X, V: вдоль ската
   const roofTris = [
-    // Скат A: два треугольника
-    [[x0,yBase,z0],[0,0],     [x1,yBase,z0],[uL,0],     [x1,yPeak,zMid],[uL,vS]],
-    [[x0,yBase,z0],[0,0],     [x1,yPeak,zMid],[uL,vS],  [x0,yPeak,zMid],[0,vS]],
-    // Скат B
-    [[x0,yBase,z1],[0,0],     [x0,yPeak,zMid],[0,vS],   [x1,yPeak,zMid],[uR,vS]],
-    [[x0,yBase,z1],[0,0],     [x1,yPeak,zMid],[uR,vS],  [x1,yBase,z1],[uR,0]],
-    // Фронтон правый (xMax)
-    [[x1,yBase,z0],[0,0],     [x1,yBase,z1],[width/2,0],[x1,yPeak,zMid],[width/4,vS]],
-    // Фронтон левый (xMin)
-    [[x0,yBase,z1],[0,0],     [x0,yBase,z0],[width/2,0],[x0,yPeak,zMid],[width/4,vS]],
+    // Передний скат (z0, трапеция) — 2 треугольника
+    [[x0,yBase,z0],[0,0],         [x1,yBase,z0],[uTotal,0],       [ridgeX1,yPeak,zMid],[uTotal-uHip,vS]],
+    [[x0,yBase,z0],[0,0],         [ridgeX1,yPeak,zMid],[uTotal-uHip,vS], [ridgeX0,yPeak,zMid],[uHip,vS]],
+    // Задний скат (z1, трапеция)
+    [[x1,yBase,z1],[0,0],         [x0,yBase,z1],[uTotal,0],       [ridgeX0,yPeak,zMid],[uTotal-uHip,vS]],
+    [[x1,yBase,z1],[0,0],         [ridgeX0,yPeak,zMid],[uTotal-uHip,vS], [ridgeX1,yPeak,zMid],[uHip,vS]],
+    // Левый вальм (x0, треугольник)
+    [[x0,yBase,z0],[0,0],         [ridgeX0,yPeak,zMid],[uHip,vS], [x0,yBase,z1],[uHip*2,0]],
+    // Правый вальм (x1, треугольник)
+    [[x1,yBase,z1],[0,0],         [ridgeX1,yPeak,zMid],[uHip,vS], [x1,yBase,z0],[uHip*2,0]],
   ];
+
   const roofGeo=buildRoofGeo(roofTris);
-  const roofMesh=new THREE.Mesh(roofGeo,M.roof); roofMesh.castShadow=true;
+  const roofMesh=new THREE.Mesh(roofGeo,M.roof);
+  roofMesh.castShadow=true; roofMesh.receiveShadow=true;
   parent.add(roofMesh);
+
+  // ── Подшивка карниза (софит) ─────────────────
+  const sofH = 0.06; // толщина лобовой доски
+  const sofMat = M.base;
+  [[x0,yBase,z0, x1-x0,sofH,0.01, (x0+x1)/2,yBase-sofH/2,z0],   // передний
+   [x0,yBase,z1, x1-x0,sofH,0.01, (x0+x1)/2,yBase-sofH/2,z1],   // задний
+   [x0,yBase,z0, 0.01,sofH,z1-z0, x0,yBase-sofH/2,(z0+z1)/2],    // левый
+   [x1,yBase,z0, 0.01,sofH,z1-z0, x1,yBase-sofH/2,(z0+z1)/2],    // правый
+  ].forEach(([,,, sx,sy,sz, px,py,pz])=>{
+    const m=new THREE.Mesh(box(sx,sy,sz),sofMat);
+    m.position.set(px,py,pz); m.castShadow=true; parent.add(m);
+  });
+
+  // ── Входная зона (крытое крыльцо с колоннами) ─
+  // Расположена на правой стене (x = length), по центру Z
+  const porchW  = Math.min(width * 0.4, 4.0);  // ширина входной зоны
+  const porchD  = 1.8;                           // глубина (выступ наружу)
+  const porchZ0 = width/2 - porchW/2;
+  const porchZ1 = width/2 + porchW/2;
+  const colW    = 0.22; // сечение колонны
+  const colH    = wh;   // высота колонны
+
+  // Колонны (2 шт по углам)
+  const colGeo = box(colW, colH, colW);
+  [[length + porchD - colW/2, bh + colH/2, porchZ0 + colW/2],
+   [length + porchD - colW/2, bh + colH/2, porchZ1 - colW/2],
+  ].forEach(([cx,cy,cz])=>{
+    const c = new THREE.Mesh(colGeo, M.column);
+    c.position.set(cx,cy,cz); c.castShadow=true; c.receiveShadow=true;
+    parent.add(c);
+  });
+
+  // Деревянная обшивка задней стенки крыльца
+  const cladH = wh;
+  const cladM = new THREE.Mesh(box(0.03, cladH, porchW), M.woodClad);
+  cladM.position.set(length + 0.015, bh + cladH/2, width/2);
+  cladM.castShadow=true; cladM.receiveShadow=true;
+  parent.add(cladM);
+
+  // Боковые стенки входной зоны (частичные, до колонн)
+  const sideD = porchD - colW;
+  [[length + sideD/2, bh + cladH/2, porchZ0 + 0.015],
+   [length + sideD/2, bh + cladH/2, porchZ1 - 0.015],
+  ].forEach(([sx,sy,sz])=>{
+    const sw = new THREE.Mesh(box(sideD, cladH * 0.35, 0.03), M.wall);
+    sw.position.set(sx, bh + cladH * 0.825, sz);
+    sw.castShadow=true; parent.add(sw);
+  });
+
+  // Перекрытие крыльца (козырёк, продолжение крыши)
+  const canopyM = new THREE.Mesh(box(porchD + oh, 0.12, porchW + oh*0.5), M.roof);
+  canopyM.position.set(length + porchD/2, yBase - 0.06, width/2);
+  canopyM.castShadow=true; canopyM.receiveShadow=true;
+  parent.add(canopyM);
+
+  // Ступеньки перед входом
+  const entStepH = 0.17, entStepD = 0.30;
+  const nEntSteps = Math.max(1, Math.round(bh / entStepH));
+  const aEntStepH = bh / nEntSteps;
+  for (let i = 0; i < nEntSteps; i++) {
+    const yBot = bh - (i+1) * aEntStepH;
+    const sx = porchW * 0.8;
+    const stepM = new THREE.Mesh(box(entStepD, aEntStepH, sx), M.base);
+    stepM.position.set(length + porchD + i*entStepD + entStepD/2, yBot + aEntStepH/2, width/2);
+    stepM.castShadow=true; stepM.receiveShadow=true;
+    parent.add(stepM); threeState.stepMeshes.push(stepM);
+  }
+
+  // Плита крыльца (площадка)
+  const porchSlab = new THREE.Mesh(box(porchD, 0.06, porchW), M.base);
+  porchSlab.position.set(length + porchD/2, bh - 0.03, width/2);
+  porchSlab.castShadow=true; porchSlab.receiveShadow=true;
+  parent.add(porchSlab);
 }
 
 // ══════════════════════════════════════════════
