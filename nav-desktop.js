@@ -172,8 +172,11 @@ function dToggleSidebarItem(el, secId) {
       _dOpenCanvas(secId);
     }
   }
-  // Rebuild 3D to show/hide elements
-  if (typeof buildScene3d === 'function') {
+  // Update panel tabs (sections changed)
+  _dRenderPanelTabs();
+
+  // Rebuild 3D to show/hide elements (only if no canvas editor is open)
+  if (!dActiveCanvas && typeof buildScene3d === 'function') {
     setTimeout(() => buildScene3d(), 100);
   }
 }
@@ -465,6 +468,11 @@ function ttg(el) { el.classList.toggle('on'); }
 // Override renderSec for desktop (called by some init flows)
 function renderSec() { _dRenderPanelTabs(); dRenderSwatches(); }
 function renderSwatches() { dRenderSwatches(); }
+
+// getActive() — called by viewer3d-core.js (buildScene3d, applyMaterialToScene)
+function getActive() {
+  return SECS.filter(s => S.sections.length === 0 || S.sections.includes(s.req));
+}
 
 // Resize handler
 window.addEventListener('resize', () => {
