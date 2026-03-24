@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Конфигуратор дома — Десктоп</title>
+<link rel="stylesheet" href="styles-desktop.css">
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="d-topbar">
+  <div class="d-topbar-logo">SHPUK</div>
+  <div class="d-topbar-step" id="d-step-label">Шаг 1: Выберите тип дома</div>
+  <div class="d-topbar-spacer"></div>
+  <button class="d-topbar-btn" id="d-btn-summary" onclick="dShowSummary()" style="display:none">✓ Итог</button>
+</div>
+
+<!-- ═══ STEP 1: House type selection (fullscreen) ═══ -->
+<div class="d-screen active" id="d-screen-1">
+  <div class="d-select-wrap">
+    <div class="d-select-title">Выберите тип дома</div>
+    <div class="d-select-grid">
+      <div class="d-house-card" onclick="dSelHouse(this,'Одноэтажный дом')">
+        <div class="hcp"><div class="ic">🏠</div>Картинка с домом, описание</div>
+        <div class="hcl">Одноэтажный дом</div>
+      </div>
+      <div class="d-house-card" onclick="dSelHouse(this,'Двухэтажный дом')">
+        <div class="hcp"><div class="ic">🏡</div>Картинка с домом, описание</div>
+        <div class="hcl">Двухэтажный дом</div>
+      </div>
+      <div class="d-house-card" onclick="dSelHouse(this,'Дом с мансардой')">
+        <div class="hcp"><div class="ic">🏘</div>Картинка с домом, описание</div>
+        <div class="hcl">Дом с мансардой</div>
+      </div>
+      <div class="d-house-card" onclick="dSelHouse(this,'Участок без дома')">
+        <div class="hcp"><div class="ic">🌿</div>Пустой участок, без строений</div>
+        <div class="hcl">Участок без дома</div>
+      </div>
+      <label class="d-upload-card">
+        <input type="file" id="d-upload-input" accept="image/*">
+        <span>📷</span><span>Загрузите фото дома или участка</span>
+      </label>
+    </div>
+    <button class="d-select-next" onclick="dGoTo(2)">ДАЛЬШЕ <span>→</span></button>
+  </div>
+</div>
+
+<!-- ═══ STEP 2: Parameters + 3D ═══ -->
+<div class="d-screen" id="d-screen-2">
+  <div class="d-params-layout">
+    <!-- Left: parameters -->
+    <div class="d-params-left">
+      <div class="d-params-title">Параметры дома</div>
+
+      <div class="d-param-group">
+        <div class="d-param-label">Общая площадь (кв.м)</div>
+        <input class="d-param-input" type="number" id="v-area" value="80" min="40" max="100"
+               oninput="dOnParam()">
+        <input class="d-param-range" type="range" id="r-area" value="80" min="40" max="100" step="5"
+               oninput="document.getElementById('v-area').value=this.value; dOnParam()">
+        <div class="d-param-unit">40 — 100 кв.м</div>
+      </div>
+
+      <div class="d-param-group">
+        <div class="d-param-label">Высота этажа (см)</div>
+        <input class="d-param-input" type="number" id="v-floor" value="300" min="270" max="360"
+               oninput="dOnParam()">
+        <input class="d-param-range" type="range" id="r-floor" value="300" min="270" max="360" step="10"
+               oninput="document.getElementById('v-floor').value=this.value; dOnParam()">
+        <div class="d-param-unit">270 — 360 см</div>
+      </div>
+
+      <div class="d-param-group">
+        <div class="d-param-label">Высота фундамента (см)</div>
+        <input class="d-param-input" type="number" id="v-found" value="80" min="50" max="120"
+               oninput="dOnParam()">
+        <input class="d-param-range" type="range" id="r-found" value="80" min="50" max="120" step="10"
+               oninput="document.getElementById('v-found').value=this.value; dOnParam()">
+        <div class="d-param-unit">50 — 120 см</div>
+      </div>
+
+      <div class="d-params-actions">
+        <button class="d-btn d-btn-back" onclick="dGoTo(1)">← Назад</button>
+        <button class="d-btn d-btn-next" onclick="dGoTo(3)">Дальше →</button>
+      </div>
+    </div>
+
+    <!-- Center: 3D viewer -->
+    <div class="d-params-center">
+      <div class="d-3d-container" id="d-slot-params">
+        <div class="d-3d-hint">ЛКМ — вращение · ПКМ — перемещение · Колесо — зум</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ STEP 3: Workspace (left sidebar + center + right panel) ═══ -->
+<div class="d-screen" id="d-screen-3">
+  <div class="d-workspace">
+
+    <!-- LEFT SIDEBAR: sections checklist + editors -->
+    <div class="d-sidebar">
+      <div class="d-sidebar-title">Элементы проекта</div>
+      <div class="d-sidebar-list" id="d-sidebar-list">
+        <!-- filled dynamically -->
+      </div>
+      <div class="d-sidebar-divider"></div>
+      <div style="padding: 12px 20px;">
+        <button class="d-btn d-btn-back" style="width:100%; height:40px; font-size:14px;" onclick="dGoTo(2)">← К параметрам</button>
+      </div>
+    </div>
+
+    <!-- CENTER: 3D + canvas overlay -->
+    <div class="d-center">
+      <div class="d-center-view">
+        <div class="d-center-3d" id="d-slot-workspace">
+          <div class="d-3d-hint">ЛКМ — вращение · ПКМ — перемещение · Колесо — зум</div>
+        </div>
+
+        <!-- Canvas editors (one at a time) -->
+        <div class="d-center-canvas" id="d-canvas-terrace">
+          <div class="d-canvas-header">
+            <div>
+              <div class="d-canvas-title">Терраса — разметка</div>
+              <div class="d-canvas-hint">Нажмите на план чтобы отметить углы террасы</div>
+            </div>
+            <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="undoPt('terrace')">↩ Отменить</button>
+              <button class="d-canvas-btn" onclick="clrPts('terrace')">✕ Очистить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('terrace')">✓ Готово</button>
+            </div>
+          </div>
+          <div class="d-canvas-area" id="cw-terrace"><canvas id="cv-terrace"></canvas></div>
+          <div class="d-canvas-footer">
+            <div class="tg" onclick="ttg(this)" data-id="terrace-railing"><span class="tg-txt">Ограждение</span><div class="tg-ind"></div></div>
+            <div class="tg" onclick="ttg(this)" data-id="terrace-roof"><span class="tg-txt">Навес</span><div class="tg-ind"></div></div>
+          </div>
+        </div>
+
+        <div class="d-center-canvas" id="d-canvas-pool_terrace">
+          <div class="d-canvas-header">
+            <div>
+              <div class="d-canvas-title">Терраса у бассейна — разметка</div>
+              <div class="d-canvas-hint">Нажмите на план чтобы отметить углы</div>
+            </div>
+            <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="undoPt('pool_terrace')">↩ Отменить</button>
+              <button class="d-canvas-btn" onclick="clrPts('pool_terrace')">✕ Очистить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('pool_terrace')">✓ Готово</button>
+            </div>
+          </div>
+          <div class="d-canvas-area" id="cw-pool_terrace"><canvas id="cv-pool_terrace"></canvas></div>
+          <div class="d-canvas-footer">
+            <div class="tg" onclick="ttg(this)"><span class="tg-txt">Ограждение бассейна</span><div class="tg-ind"></div></div>
+          </div>
+        </div>
+
+        <div class="d-center-canvas" id="d-canvas-paths">
+          <div class="d-canvas-header">
+            <div>
+              <div class="d-canvas-title">Дорожки — разметка</div>
+              <div class="d-canvas-hint">Нажимайте точки последовательно вдоль дорожки</div>
+            </div>
+            <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="undoPt('paths')">↩ Отменить</button>
+              <button class="d-canvas-btn" onclick="clrPts('paths')">✕ Очистить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('paths')">✓ Готово</button>
+            </div>
+          </div>
+          <div class="d-canvas-area" id="cw-paths"><canvas id="cv-paths"></canvas></div>
+          <div class="d-canvas-footer">
+            <div class="p-row" style="margin:0; max-width:280px;">
+              <div class="p-lbl">Ширина дорожки (см):</div>
+              <input class="p-inp" type="number" id="v-paths-width" value="120" min="60" max="300">
+            </div>
+          </div>
+        </div>
+
+        <div class="d-center-canvas" id="d-canvas-pier">
+          <div class="d-canvas-header">
+            <div>
+              <div class="d-canvas-title">Причал — разметка</div>
+              <div class="d-canvas-hint">Нажмите на план чтобы отметить форму причала</div>
+            </div>
+            <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="undoPt('pier')">↩ Отменить</button>
+              <button class="d-canvas-btn" onclick="clrPts('pier')">✕ Очистить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('pier')">✓ Готово</button>
+            </div>
+          </div>
+          <div class="d-canvas-area" id="cw-pier"><canvas id="cv-pier"></canvas></div>
+          <div class="d-canvas-footer">
+            <div class="tg" onclick="ttg(this)"><span class="tg-txt">Перила причала</span><div class="tg-ind"></div></div>
+            <div class="tg" onclick="ttg(this)"><span class="tg-txt">Крыша / навес</span><div class="tg-ind"></div></div>
+          </div>
+        </div>
+
+        <div class="d-center-canvas" id="d-canvas-porch">
+          <div class="d-canvas-header">
+            <div>
+              <div class="d-canvas-title">Крыльцо — размещение</div>
+              <div class="d-canvas-hint">Перетащите крыльцо, потяните за угол — размер</div>
+            </div>
+            <div class="d-canvas-actions">
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('porch')">✓ Готово</button>
+            </div>
+          </div>
+          <div class="d-canvas-area" id="cw-porch" style="cursor:default;"><canvas id="cv-porch"></canvas></div>
+          <div class="d-canvas-footer">
+            <div class="tg" onclick="ttg(this)"><span class="tg-txt">Нужны перила</span><div class="tg-ind"></div></div>
+          </div>
+        </div>
+
+        <div class="d-center-canvas" id="d-canvas-fence">
+          <div class="d-canvas-header">
+            <div>
+              <div class="d-canvas-title">Забор — разметка</div>
+              <div class="d-canvas-hint">Точки прилипают к сетке (1 клетка = 1 м)</div>
+            </div>
+            <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="undoPt('fence')">↩ Отменить</button>
+              <button class="d-canvas-btn" onclick="clrPts('fence')">✕ Очистить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('fence')">✓ Готово</button>
+            </div>
+          </div>
+          <div class="d-canvas-area" id="cw-fence"><canvas id="cv-fence"></canvas></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- RIGHT PANEL: materials / catalog -->
+    <div class="d-panel" id="d-panel">
+      <div class="d-panel-header">
+        <div class="d-panel-title" id="d-panel-title">Материалы</div>
+      </div>
+      <div class="d-panel-body" id="d-panel-body">
+        <!-- Section tabs -->
+        <div class="d-panel-tabs" id="d-panel-tabs"></div>
+
+        <!-- VIEW: samples -->
+        <div class="d-panel-view active" id="d-view-samples">
+          <div class="d-samples-title" id="d-samples-lbl">Образцы:</div>
+          <div class="d-samples-grid" id="d-samples-grid"></div>
+          <button class="d-search-btn" onclick="dOpenCatalog()">КАТАЛОГ →</button>
+        </div>
+
+        <!-- VIEW: catalog filters -->
+        <div class="d-panel-view" id="d-view-filters">
+          <div class="d-color-section">
+            <div class="d-color-title">Цвет (можно несколько):</div>
+            <div class="d-color-grid" id="d-color-grid"></div>
+          </div>
+          <div class="d-filter-divider"></div>
+          <div class="d-color-section">
+            <div class="d-color-title">Ценовой диапазон:</div>
+            <div class="d-price-grid" id="d-price-grid"></div>
+          </div>
+          <button class="d-search-btn" onclick="dShowResults()">ПОДОБРАТЬ →</button>
+          <button class="d-search-btn" style="background:var(--card);color:var(--text);margin-top:8px;"
+                  onclick="dBackToSamples()">← К образцам</button>
+        </div>
+
+        <!-- VIEW: catalog results -->
+        <div class="d-panel-view" id="d-view-results">
+          <div class="d-mat-list" id="d-mat-list"></div>
+          <button class="d-search-btn" style="background:var(--card);color:var(--text);margin-top:12px;"
+                  onclick="dBackToFilters()">← К фильтрам</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══ SUMMARY OVERLAY ═══ -->
+<div class="d-summary-overlay" id="d-summary-overlay">
+  <div class="d-summary-box">
+    <div class="d-summary-header">
+      <div class="d-summary-title">Ваш проект</div>
+      <button class="d-panel-close" onclick="dCloseSummary()">✕</button>
+    </div>
+    <div class="d-summary-body" id="d-sum-body"></div>
+    <div class="d-summary-actions">
+      <button class="d-summary-btn d-btn-back" onclick="dCloseSummary()">← Закрыть</button>
+      <button class="d-summary-btn d-btn-next" onclick="alert('Заявка отправлена!')">ОТПРАВИТЬ ЗАЯВКУ →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ SCRIPTS ═══ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/RGBELoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/EXRLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<!-- Shared state, canvas engine -->
+<script src="state.js?v=9"></script>
+<script src="canvas.js?v=9"></script>
+<!-- 3D viewer -->
+<script src="viewer3d-core.js?v=9"></script>
+<script src="viewer3d-desktop.js?v=9"></script>
+<!-- Desktop navigation & UI -->
+<script src="nav-desktop.js?v=9"></script>
+</body>
+</html>

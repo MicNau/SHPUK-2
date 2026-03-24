@@ -1,23 +1,30 @@
 # ARCHITECTURE.md — Конфигуратор загородного дома
 
-## Статус: фронтенд разбит на файлы, PBR-визуализация работает, GLB-растительность готова (ожидают ассеты), бэкенд не начат
+## Статус: фронтенд разбит на файлы, PBR-визуализация работает, GLB-растительность готова (ожидают ассеты), десктоп-UI создан, бэкенд не начат
 
 ---
 
 ## Структура файлов (текущая)
 
 ```
-/frontend
+/frontend — мобильная версия (wizard)
   index.html              # разметка + JS-детектор платформы, подключает viewer3d-*
-  styles.css              # все стили
-  state.js                # S, SECS, SEC_SCREEN, CATALOG_COLORS, PRICE_TIERS, STUB_RESULTS
+  styles.css              # все стили (мобильный wizard, max-width 480px)
   nav.js                  # goTo, updProg, getStepOrder и навигационные хелперы
+  ui.js                   # шаг 10: секции, образцы, примерка
+  catalog.js              # каталог, фильтры, результаты, selMat
+
+/frontend — десктопная версия (3-column workspace)
+  index-desktop.html      # 3 экрана: выбор дома → параметры+3D → workspace
+  styles-desktop.css      # все стили (3-column layout, topbar, sidebar, panel)
+  nav-desktop.js          # dGoTo, sidebar, canvas editors, right panel, catalog
+
+/frontend — общие файлы (используются обеими версиями)
+  state.js                # S, SECS, SEC_SCREEN, CATALOG_COLORS, PRICE_TIERS, STUB_RESULTS
   canvas.js               # pan/zoom движок, snap-canvas, крыльцо (drag+resize)
   viewer3d-core.js        # сцена, HDRI, PBR-материалы, buildScene3d, все 3D-строители
   viewer3d-desktop.js     # антураж десктоп: GLB-модели → PNG cross-billboard → процедурный fallback
   viewer3d-mobile.js      # антураж мобиль: GLB-модели → PNG cross-billboard → процедурный fallback
-  catalog.js              # каталог, фильтры, результаты, selMat
-  ui.js                   # шаг 10: секции, образцы, примерка, итог
 
   assets/                 # текстуры, HDRI и 3D-модели растительности
     README.md             # описание соглашения по именам файлов
@@ -42,13 +49,20 @@ ARCHITECTURE.md
 README.md
 ```
 
-### Порядок подключения скриптов в index.html
+### Порядок подключения скриптов
 
+**Мобильная (index.html):**
 ```
 Three.js r128 → OrbitControls → RGBELoader → EXRLoader → GLTFLoader
 state.js → nav.js → canvas.js
 → [JS-детектор] → viewer3d-core.js → viewer3d-desktop.js | viewer3d-mobile.js
 ui.js → catalog.js
+```
+
+**Десктопная (index-desktop.html):**
+```
+Three.js r128 → OrbitControls → RGBELoader → EXRLoader → GLTFLoader
+state.js → canvas.js → viewer3d-core.js → viewer3d-desktop.js → nav-desktop.js
 ```
 
 Все скрипты подключаются с query-string `?v=N` для сброса кэша браузера.
@@ -297,6 +311,34 @@ CREATE TABLE projects (
 | Площадка под домом | Box 5 см высотой, на 30 см шире фундамента по каждой стороне |
 | Антураж после разметки | _buildEntourage вызывается только при наличии размеченных конструкций |
 | Ограничение размеров | Площадь 40–100 м², этаж 270–360 см, фундамент 50–120 см |
+| Десктоп UI — отдельный HTML | Мобильный wizard и десктоп 3-column слишком разные для media queries |
+| nav-desktop.js переопределяет goTo() | Совместимость с canvas.js/viewer3d-core, которые могут вызывать goTo() |
+| Canvas wrapper IDs (cw-*) совпадают | canvas.js ищет элементы по `cw-` + name — одинаковые ID в обеих версиях |
+
+---
+
+## Десктопный UI (index-desktop.html)
+
+### 3 экрана:
+
+1. **d-screen-1** — выбор типа дома (fullscreen grid карточек)
+2. **d-screen-2** — параметры + 3D (left: area/floor/foundation с range-слайдерами, center: 3D)
+3. **d-screen-3** — рабочая область (3 колонки):
+   - **Left sidebar** (300px) — чеклист позиций (терраса, крыльцо и т.д.), клик → открытие canvas-редактора в центре
+   - **Center** — 3D-вид или canvas-редактор (overlay поверх 3D)
+   - **Right panel** (340px) — материалы: секции → образцы → каталог (фильтры → результаты)
+
+### Canvas-редакторы в десктопе:
+Каждая секция с редактором (terrace, pool_terrace, paths, pier, porch, fence) имеет свой `d-center-canvas` overlay.
+При нажатии на позицию в sidebar → overlay открывается, кнопка "Готово" → закрывается, 3D перестраивается.
+Обёртки canvas (`cw-*`) и сами canvas (`cv-*`) имеют те же ID, что и в мобильной версии — canvas.js работает без изменений.
+
+### Правая панель — 3 вида:
+- **d-view-samples** — образцы + кнопка "КАТАЛОГ"
+- **d-view-filters** — цвета + ценовой диапазон + кнопка "ПОДОБРАТЬ"
+- **d-view-results** — карточки материалов с кнопками "Применить", "Сравнить", "В смету"
+
+При нажатии "Применить" материал автоматически добавляется в образцы и применяется к 3D-сцене.
 
 ---
 
@@ -321,9 +363,8 @@ CREATE TABLE projects (
 
 ## Следующие шаги
 
-1. **Согласовать HOUSE_MODULES_SPEC.md** — финализировать дескриптор, номенклатуру модулей, открытые вопросы
-2. **Подготовить GLB-модели растительности** — экспорт из Blender, положить в assets/vegetation/
-3. **Смоделировать минимальный набор GLB-модулей дома** — wall_segment, base_segment, window_single, door_entrance, roof_hip_slope
-4. **Написать загрузчик и сборщик** — loadHouseType() + buildHouseFromDescriptor() + applyMaterialOverride()
+1. ~~**Десктопная версия UI**~~ ✅ — создана (index-desktop.html + styles-desktop.css + nav-desktop.js)
+2. **Подготовить GLB-модели** — растительность (assets/vegetation/) + модули дома (assets/modules/)
+3. **Написать загрузчик и сборщик модульного дома** — loadHouseType() + buildHouseFromDescriptor() + applyMaterialOverride()
+4. **Протестировать десктоп UI** — проверить все 3 экрана, canvas-редакторы, правую панель каталога
 5. **Бэкенд** — FastAPI + расчётный модуль + БД
-6. **Десктопная версия UI** — другой layout, но тот же viewer3d-core
