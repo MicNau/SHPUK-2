@@ -156,6 +156,10 @@ function init3dCanvas(targetSlotId) {
   controls.minDistance   = 4;
   controls.maxDistance   = 50;
   controls.maxPolarAngle = Math.PI / 2.05;
+  // Ограничение: камера не опускается ниже земли
+  controls.addEventListener('change', () => {
+    if (camera.position.y < 0.3) camera.position.y = 0.3;
+  });
 
   // ── Процедурное небо (до загрузки HDRI) ───────
   const skyMesh = _buildProceduralSky();
@@ -202,8 +206,8 @@ function init3dCanvas(targetSlotId) {
     animId: null,
   };
 
-  // ── Антураж — реализован в версионном файле ───
-  _buildEntourage(scene);
+  // Антураж (растительность) вызывается из buildScene3d
+  // после того как размечены конструкции
 
   // ── Анимационный цикл ─────────────────────────
   const clock = new THREE.Clock();
@@ -328,9 +332,9 @@ function getHouseMats() {
   const env = threeState?.envMap || null;
   const eI  = env ? 1.0 : 0.0;
 
-  // Штукатурка стен (белая, как на референсе)
+  // Штукатурка стен
   const wall = new THREE.MeshStandardMaterial({
-    color:           0xf2f2ee,
+    color:           0xf5e6c8,
     roughness:       0.85,
     metalness:       0.0,
     envMap:          env,
@@ -342,9 +346,9 @@ function getHouseMats() {
   wall.roughnessMap = _loadData('wall_roug.jpg', 1);
   // UV назначаются на меш через _applyBoxUV(mesh, 2.0) в buildHouseMeshes
 
-  // Цоколь (тёмный антрацит)
+  // Цоколь
   const base = new THREE.MeshStandardMaterial({
-    color:           0x3a3a3c,
+    color:           0x8a8278,
     roughness:       0.88,
     metalness:       0.04,
     envMap:          env,
@@ -354,9 +358,9 @@ function getHouseMats() {
   base.normalMap = _loadNorm('base_norm.jpg', 1);
   // UV назначаются на меш через _applyBoxUV(mesh, 1.0) в buildHouseMeshes
 
-  // Крыша (тёмно-серая черепица)
+  // Крыша
   const roof = new THREE.MeshStandardMaterial({
-    color:           0x404045,
+    color:           0x8b3a3a,
     roughness:       0.80,
     metalness:       0.04,
     side:            THREE.DoubleSide,
@@ -381,9 +385,9 @@ function getHouseMats() {
     depthWrite:      false,     // избегаем z-fighting при прозрачности
   });
 
-  // Рамы (тёмный антрацит, как на референсе)
+  // Рамы
   const frame = new THREE.MeshStandardMaterial({
-    color:           0x3a3a3c,
+    color:           0xf0f0ee,
     roughness:       0.28,
     metalness:       0.28,
     envMap:          env,
@@ -393,9 +397,9 @@ function getHouseMats() {
     polygonOffsetUnits:  -1,
   });
 
-  // Дверь (тёмная, как на референсе)
+  // Дверь
   const door = new THREE.MeshStandardMaterial({
-    color:           0x2a2a2e,
+    color:           0x5c3a1e,
     roughness:       0.72,
     metalness:       0.06,
     envMap:          env,
@@ -419,25 +423,7 @@ function getHouseMats() {
   const post  = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.80, metalness: 0.20, envMap: env, envMapIntensity: eI * 0.2 });
   const step  = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.80, metalness: 0.05, envMap: env, envMapIntensity: eI * 0.3 });
 
-  // Деревянная обшивка входной зоны (тёплое дерево)
-  const woodClad = new THREE.MeshStandardMaterial({
-    color:           0xB08050,
-    roughness:       0.75,
-    metalness:       0.0,
-    envMap:          env,
-    envMapIntensity: eI * 0.4,
-  });
-
-  // Колонны (белые, как стены)
-  const column = new THREE.MeshStandardMaterial({
-    color:           0xf0f0ec,
-    roughness:       0.60,
-    metalness:       0.05,
-    envMap:          env,
-    envMapIntensity: eI * 0.5,
-  });
-
-  return { wall, base, roof, glass, frame, door, deck, joist, post, step, woodClad, column };
+  return { wall, base, roof, glass, frame, door, deck, joist, post, step };
 }
 
 // ── Земля (процедурная текстура без тайлинга) ──
@@ -458,25 +444,25 @@ function _generateGroundTex() {
   c.width = c.height = sz;
   const ctx = c.getContext('2d');
 
-  // Базовый зелёный
-  ctx.fillStyle = '#3a6828';
+  // Базовый зелёный (приглушённый)
+  ctx.fillStyle = '#2e4a22';
   ctx.fillRect(0, 0, sz, sz);
 
   // Крупные пятна — эллиптические, органичные формы
   for (let i = 0; i < 60; i++) {
     const x = Math.random() * sz, y = Math.random() * sz;
     const r = 40 + Math.random() * 160;
-    const hue = 75 + Math.random() * 45 | 0;
-    const sat = 30 + Math.random() * 35 | 0;
-    const lt  = 18 + Math.random() * 28 | 0;
+    const hue = 80 + Math.random() * 40 | 0;
+    const sat = 18 + Math.random() * 22 | 0;
+    const lt  = 14 + Math.random() * 18 | 0;
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(Math.random() * Math.PI);
     ctx.scale(1, 0.4 + Math.random() * 0.8);
     const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
-    g.addColorStop(0, `hsla(${hue},${sat}%,${lt}%,0.45)`);
-    g.addColorStop(0.6, `hsla(${hue},${sat}%,${lt}%,0.18)`);
-    g.addColorStop(1, 'hsla(100,30%,20%,0)');
+    g.addColorStop(0, `hsla(${hue},${sat}%,${lt}%,0.40)`);
+    g.addColorStop(0.6, `hsla(${hue},${sat}%,${lt}%,0.15)`);
+    g.addColorStop(1, 'hsla(100,20%,16%,0)');
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
@@ -486,15 +472,15 @@ function _generateGroundTex() {
   for (let i = 0; i < 150; i++) {
     const x = Math.random() * sz, y = Math.random() * sz;
     const r = 6 + Math.random() * 28;
-    const hue = 60 + Math.random() * 60 | 0;
-    const lt  = 15 + Math.random() * 32 | 0;
+    const hue = 70 + Math.random() * 50 | 0;
+    const lt  = 12 + Math.random() * 22 | 0;
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(Math.random() * Math.PI);
     ctx.scale(1, 0.5 + Math.random());
     const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
-    g.addColorStop(0, `hsla(${hue},38%,${lt}%,0.3)`);
-    g.addColorStop(1, 'hsla(90,30%,18%,0)');
+    g.addColorStop(0, `hsla(${hue},24%,${lt}%,0.28)`);
+    g.addColorStop(1, 'hsla(90,20%,14%,0)');
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
@@ -504,9 +490,9 @@ function _generateGroundTex() {
   for (let i = 0; i < 500; i++) {
     const x = Math.random() * sz, y = Math.random() * sz;
     const r = 1 + Math.random() * 4;
-    const hue = 55 + Math.random() * 65 | 0;
-    const lt  = 18 + Math.random() * 35 | 0;
-    ctx.fillStyle = `hsla(${hue},42%,${lt}%,0.22)`;
+    const hue = 65 + Math.random() * 55 | 0;
+    const lt  = 12 + Math.random() * 22 | 0;
+    ctx.fillStyle = `hsla(${hue},22%,${lt}%,0.20)`;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
   }
 
@@ -667,16 +653,29 @@ function buildScene3d() {
   }
 
   const isNoHouse = (S.houseType === 'Участок без дома');
-  const area   = parseFloat(document.getElementById('v-area')?.value  || 120);
-  const wallH  = parseFloat(document.getElementById('v-floor')?.value || 400) / 100;
-  const foundH = parseFloat(document.getElementById('v-found')?.value || 80)  / 100;
+  const areaRaw  = parseFloat(document.getElementById('v-area')?.value  || 80);
+  const floorRaw = parseFloat(document.getElementById('v-floor')?.value || 300);
+  const foundRaw = parseFloat(document.getElementById('v-found')?.value || 80);
+  const area   = Math.min(100, Math.max(40, areaRaw));
+  const wallH  = Math.min(3.6, Math.max(2.7, floorRaw / 100));
+  const foundH = Math.min(1.2, Math.max(0.5, foundRaw / 100));
   const RATIO  = 1.6, wt = 0.2;
   const houseW = Math.sqrt(area / RATIO);
   const houseL = houseW * RATIO;
-  const wh     = Math.min(Math.max(wallH, 2), 5);
-  const bh     = Math.max(foundH, 0.1);
+  const wh     = wallH;
+  const bh     = foundH;
 
-  if (!isNoHouse) buildHouseMeshes(houseGroup, M, houseL, houseW, wh, bh, wt);
+  if (!isNoHouse) {
+    buildHouseMeshes(houseGroup, M, houseL, houseW, wh, bh, wt);
+    // Площадка под домом: выступает на 5 см над землёй, на 30 см шире фундамента
+    const padW = houseL + 0.6, padD = houseW + 0.6, padH = 0.05;
+    const padGeo = new THREE.BoxGeometry(padW, padH, padD);
+    const padMat = new THREE.MeshStandardMaterial({ color: 0x8a8278, roughness: 0.90, metalness: 0.02 });
+    const padMesh = new THREE.Mesh(padGeo, padMat);
+    padMesh.position.set(houseL/2, padH/2, houseW/2);
+    padMesh.receiveShadow = true;
+    houseGroup.add(padMesh);
+  }
 
   if (S.sections.includes('terrace') && S.pts.terrace.length >= 3)
     buildTerrace3d(houseGroup, M, S.pts.terrace, isNoHouse ? 0.35 : bh, houseL, houseW, 'deckMeshes');
@@ -699,6 +698,15 @@ function buildScene3d() {
   const terraceRailingOn = document.querySelector('.tg[data-id="terrace-railing"]')?.classList.contains('on');
   if (terraceRailingOn && S.pts.terrace.length >= 3)
     buildRailing3d(houseGroup, M, S.pts.terrace, isNoHouse ? 0.35 : bh, houseL, houseW);
+
+  // Антураж (растительность) — только когда есть размеченные конструкции
+  const hasLayout = S.pts.terrace.length >= 3
+    || S.pts.paths.length >= 2
+    || S.pts.fence.length >= 2
+    || S.sections.includes('porch');
+  if (hasLayout && typeof _buildEntourage === 'function') {
+    _buildEntourage(threeState.scene);
+  }
 
   const cx = isNoHouse ? 0 : houseL/2;
   const cy = isNoHouse ? 1 : (bh+wh)/2;
@@ -731,7 +739,7 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
   console.log('[3D] цоколь создан, size:', length+.2, bh, width+.2, 'pos:', bm.position);
   console.log('[3D] M.base.map:', M.base.map, 'visible:', bm.visible, 'material:', M.base.type);
 
-  const WWIN=0.9, HWIN=1.2, YWIN=1.0, WDOOR=1.6, HDOOR=2.3;
+  const WWIN=0.9, HWIN=1.2, YWIN=1.0, WDOOR=1.0, HDOOR=2.2;
 
   function xWallWithWins(len, wins, extZ) {
     const g      = new THREE.Group();
@@ -836,23 +844,16 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
   console.log('[3D] M.wall.map:', M.wall.map, 'M.wall.onBeforeCompile:', M.wall.onBeforeCompile);
   console.log('[3D] lw children:', lw.children.length, 'rw:', rw.children.length);
 
-  // ── Вальмовая (hip) крыша ──────────────────────
-  const rh=2.0, oh=0.45; // overhang 0.45m
-  const x0=-oh, x1=length+oh, z0=-oh, z1=width+oh, zMid=width/2;
+  const rh=2.0,oh=.3, x0=-oh,x1=length+oh,z0=-oh,z1=width+oh,zMid=width/2;
   const yBase=bh+wh, yPeak=bh+wh+rh;
+  // Длина ската: от карниза до конька
+  const slatLen = Math.sqrt(Math.pow((width+oh*2)/2, 2) + Math.pow(rh, 2));
+  // UV: U вдоль конька (делим на 2м), V поперёк ската (делим на 2м)
+  const uL = (length+oh*2)/8, uR = (length+oh*2)/8; // длина / 8 для редкого тайлинга
+  const vS = slatLen/8; // повторяем каждые 8м поперёк
 
-  // Вальм: конёк короче длины дома, 4 ската
-  const eaveHalfW = (width + oh*2) / 2;
-  const hipInset  = eaveHalfW * 0.7; // длина вальма от карниза до конька
-  const ridgeX0   = x0 + hipInset;   // начало конька
-  const ridgeX1   = x1 - hipInset;   // конец конька
-
-  // UV масштабы
-  const slatLen = Math.sqrt(eaveHalfW*eaveHalfW + rh*rh);
-  const uTotal  = (length + oh*2) / 8;
-  const vS      = slatLen / 8;
-  const uHip    = hipInset / 8;
-
+  // Строим геометрию вручную с UV для двух скатов + фронтоны
+  // Каждый треугольник: [pos0, uv0, pos1, uv1, pos2, uv2]
   const buildRoofGeo = (tris) => {
     const pos=[], uvArr=[];
     for (const [p0,u0,p1,u1,p2,u2] of tris) {
@@ -866,96 +867,24 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
     return g;
   };
 
+  // Скат A (z0 → zMid, передний)
+  // Скат B (z1 → zMid, задний)
+  // U: вдоль X, V: вдоль ската
   const roofTris = [
-    // Передний скат (z0, трапеция) — 2 треугольника
-    [[x0,yBase,z0],[0,0],         [x1,yBase,z0],[uTotal,0],       [ridgeX1,yPeak,zMid],[uTotal-uHip,vS]],
-    [[x0,yBase,z0],[0,0],         [ridgeX1,yPeak,zMid],[uTotal-uHip,vS], [ridgeX0,yPeak,zMid],[uHip,vS]],
-    // Задний скат (z1, трапеция)
-    [[x1,yBase,z1],[0,0],         [x0,yBase,z1],[uTotal,0],       [ridgeX0,yPeak,zMid],[uTotal-uHip,vS]],
-    [[x1,yBase,z1],[0,0],         [ridgeX0,yPeak,zMid],[uTotal-uHip,vS], [ridgeX1,yPeak,zMid],[uHip,vS]],
-    // Левый вальм (x0, треугольник)
-    [[x0,yBase,z0],[0,0],         [ridgeX0,yPeak,zMid],[uHip,vS], [x0,yBase,z1],[uHip*2,0]],
-    // Правый вальм (x1, треугольник)
-    [[x1,yBase,z1],[0,0],         [ridgeX1,yPeak,zMid],[uHip,vS], [x1,yBase,z0],[uHip*2,0]],
+    // Скат A: два треугольника
+    [[x0,yBase,z0],[0,0],     [x1,yBase,z0],[uL,0],     [x1,yPeak,zMid],[uL,vS]],
+    [[x0,yBase,z0],[0,0],     [x1,yPeak,zMid],[uL,vS],  [x0,yPeak,zMid],[0,vS]],
+    // Скат B
+    [[x0,yBase,z1],[0,0],     [x0,yPeak,zMid],[0,vS],   [x1,yPeak,zMid],[uR,vS]],
+    [[x0,yBase,z1],[0,0],     [x1,yPeak,zMid],[uR,vS],  [x1,yBase,z1],[uR,0]],
+    // Фронтон правый (xMax)
+    [[x1,yBase,z0],[0,0],     [x1,yBase,z1],[width/2,0],[x1,yPeak,zMid],[width/4,vS]],
+    // Фронтон левый (xMin)
+    [[x0,yBase,z1],[0,0],     [x0,yBase,z0],[width/2,0],[x0,yPeak,zMid],[width/4,vS]],
   ];
-
   const roofGeo=buildRoofGeo(roofTris);
-  const roofMesh=new THREE.Mesh(roofGeo,M.roof);
-  roofMesh.castShadow=true; roofMesh.receiveShadow=true;
+  const roofMesh=new THREE.Mesh(roofGeo,M.roof); roofMesh.castShadow=true;
   parent.add(roofMesh);
-
-  // ── Подшивка карниза (софит) ─────────────────
-  const sofH = 0.06; // толщина лобовой доски
-  const sofMat = M.base;
-  [[x0,yBase,z0, x1-x0,sofH,0.01, (x0+x1)/2,yBase-sofH/2,z0],   // передний
-   [x0,yBase,z1, x1-x0,sofH,0.01, (x0+x1)/2,yBase-sofH/2,z1],   // задний
-   [x0,yBase,z0, 0.01,sofH,z1-z0, x0,yBase-sofH/2,(z0+z1)/2],    // левый
-   [x1,yBase,z0, 0.01,sofH,z1-z0, x1,yBase-sofH/2,(z0+z1)/2],    // правый
-  ].forEach(([,,, sx,sy,sz, px,py,pz])=>{
-    const m=new THREE.Mesh(box(sx,sy,sz),sofMat);
-    m.position.set(px,py,pz); m.castShadow=true; parent.add(m);
-  });
-
-  // ── Входная зона (крытое крыльцо с колоннами) ─
-  // Расположена на правой стене (x = length), по центру Z
-  const porchW  = Math.min(width * 0.4, 4.0);  // ширина входной зоны
-  const porchD  = 1.8;                           // глубина (выступ наружу)
-  const porchZ0 = width/2 - porchW/2;
-  const porchZ1 = width/2 + porchW/2;
-  const colW    = 0.22; // сечение колонны
-  const colH    = wh;   // высота колонны
-
-  // Колонны (2 шт по углам)
-  const colGeo = box(colW, colH, colW);
-  [[length + porchD - colW/2, bh + colH/2, porchZ0 + colW/2],
-   [length + porchD - colW/2, bh + colH/2, porchZ1 - colW/2],
-  ].forEach(([cx,cy,cz])=>{
-    const c = new THREE.Mesh(colGeo, M.column);
-    c.position.set(cx,cy,cz); c.castShadow=true; c.receiveShadow=true;
-    parent.add(c);
-  });
-
-  // Деревянная обшивка задней стенки крыльца
-  const cladH = wh;
-  const cladM = new THREE.Mesh(box(0.03, cladH, porchW), M.woodClad);
-  cladM.position.set(length + 0.015, bh + cladH/2, width/2);
-  cladM.castShadow=true; cladM.receiveShadow=true;
-  parent.add(cladM);
-
-  // Боковые стенки входной зоны (частичные, до колонн)
-  const sideD = porchD - colW;
-  [[length + sideD/2, bh + cladH/2, porchZ0 + 0.015],
-   [length + sideD/2, bh + cladH/2, porchZ1 - 0.015],
-  ].forEach(([sx,sy,sz])=>{
-    const sw = new THREE.Mesh(box(sideD, cladH * 0.35, 0.03), M.wall);
-    sw.position.set(sx, bh + cladH * 0.825, sz);
-    sw.castShadow=true; parent.add(sw);
-  });
-
-  // Перекрытие крыльца (козырёк, продолжение крыши)
-  const canopyM = new THREE.Mesh(box(porchD + oh, 0.12, porchW + oh*0.5), M.roof);
-  canopyM.position.set(length + porchD/2, yBase - 0.06, width/2);
-  canopyM.castShadow=true; canopyM.receiveShadow=true;
-  parent.add(canopyM);
-
-  // Ступеньки перед входом
-  const entStepH = 0.17, entStepD = 0.30;
-  const nEntSteps = Math.max(1, Math.round(bh / entStepH));
-  const aEntStepH = bh / nEntSteps;
-  for (let i = 0; i < nEntSteps; i++) {
-    const yBot = bh - (i+1) * aEntStepH;
-    const sx = porchW * 0.8;
-    const stepM = new THREE.Mesh(box(entStepD, aEntStepH, sx), M.base);
-    stepM.position.set(length + porchD + i*entStepD + entStepD/2, yBot + aEntStepH/2, width/2);
-    stepM.castShadow=true; stepM.receiveShadow=true;
-    parent.add(stepM); threeState.stepMeshes.push(stepM);
-  }
-
-  // Плита крыльца (площадка)
-  const porchSlab = new THREE.Mesh(box(porchD, 0.06, porchW), M.base);
-  porchSlab.position.set(length + porchD/2, bh - 0.03, width/2);
-  porchSlab.castShadow=true; porchSlab.receiveShadow=true;
-  parent.add(porchSlab);
 }
 
 // ══════════════════════════════════════════════
