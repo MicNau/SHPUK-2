@@ -342,9 +342,7 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
 }
 .d-search-btn:hover { background: #333; }
 
-/* Panel views toggle */
-.d-panel-view { display: none; }
-.d-panel-view.active { display: block; }
+/* (panel is a single scrollable view — no view toggling) */
 
 /* ═══════════════════════════════════════════
    SUMMARY overlay

@@ -239,35 +239,30 @@
         <!-- Section tabs -->
         <div class="d-panel-tabs" id="d-panel-tabs"></div>
 
-        <!-- VIEW: samples -->
-        <div class="d-panel-view active" id="d-view-samples">
-          <div class="d-samples-title" id="d-samples-lbl">Образцы:</div>
-          <div class="d-samples-grid" id="d-samples-grid"></div>
-          <button class="d-search-btn" onclick="dOpenCatalog()">КАТАЛОГ →</button>
+        <!-- Color filter (always visible) -->
+        <div class="d-color-section">
+          <div class="d-color-title">Цвет:</div>
+          <div class="d-color-grid" id="d-color-grid"></div>
         </div>
 
-        <!-- VIEW: catalog filters -->
-        <div class="d-panel-view" id="d-view-filters">
-          <div class="d-color-section">
-            <div class="d-color-title">Цвет (можно несколько):</div>
-            <div class="d-color-grid" id="d-color-grid"></div>
-          </div>
-          <div class="d-filter-divider"></div>
-          <div class="d-color-section">
-            <div class="d-color-title">Ценовой диапазон:</div>
-            <div class="d-price-grid" id="d-price-grid"></div>
-          </div>
-          <button class="d-search-btn" onclick="dShowResults()">ПОДОБРАТЬ →</button>
-          <button class="d-search-btn" style="background:var(--card);color:var(--text);margin-top:8px;"
-                  onclick="dBackToSamples()">← К образцам</button>
+        <!-- Price filter -->
+        <div class="d-color-section" style="margin-top:6px;">
+          <div class="d-color-title">Цена:</div>
+          <div class="d-price-grid" id="d-price-grid"></div>
         </div>
 
-        <!-- VIEW: catalog results -->
-        <div class="d-panel-view" id="d-view-results">
-          <div class="d-mat-list" id="d-mat-list"></div>
-          <button class="d-search-btn" style="background:var(--card);color:var(--text);margin-top:12px;"
-                  onclick="dBackToFilters()">← К фильтрам</button>
-        </div>
+        <button class="d-search-btn" style="margin-top:10px;" onclick="dShowResults()">ПОДОБРАТЬ</button>
+
+        <div class="d-filter-divider"></div>
+
+        <!-- Results (appears after search) -->
+        <div class="d-mat-list" id="d-mat-list"></div>
+
+        <div class="d-filter-divider" id="d-samples-divider" style="display:none;"></div>
+
+        <!-- Samples (always visible below) -->
+        <div class="d-samples-title" id="d-samples-lbl">Образцы:</div>
+        <div class="d-samples-grid" id="d-samples-grid"></div>
       </div>
     </div>
 

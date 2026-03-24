@@ -6,7 +6,7 @@
 // ══════════════════════════════════════════════
 let dStep = 1;
 let dActiveCanvas = null;   // current canvas editor open (section id or null)
-let dPanelView = 'samples'; // 'samples' | 'filters' | 'results'
+// (panel is single scrollable view, no separate modes)
 
 // All sidebar items (checkbox + editor items)
 const D_SIDEBAR_ITEMS = [
@@ -125,7 +125,6 @@ function _dInitWorkspace() {
   // Init right panel
   _dRenderPanel();
   _dRenderPanelTabs();
-  dSwitchPanelView('samples');
 }
 
 // ── SIDEBAR ──
@@ -251,13 +250,6 @@ function dSwitchSec(i) {
   dRenderSwatches();
 }
 
-function dSwitchPanelView(view) {
-  dPanelView = view;
-  document.querySelectorAll('.d-panel-view').forEach(el => el.classList.remove('active'));
-  const viewEl = document.getElementById('d-view-' + view);
-  if (viewEl) viewEl.classList.add('active');
-}
-
 // ── Samples ──
 function dRenderSwatches() {
   const grid = document.getElementById('d-samples-grid');
@@ -301,15 +293,6 @@ function _dIsLight(hex) {
 }
 
 // ── Catalog filters ──
-function dOpenCatalog() {
-  S.catShowResults = false;
-  S.catColors = new Set();
-  S.catPrice = null;
-  _dRenderColorGrid();
-  _dRenderPriceGrid();
-  dSwitchPanelView('filters');
-}
-
 function _dRenderColorGrid() {
   const grid = document.getElementById('d-color-grid');
   if (!grid) return;
@@ -341,13 +324,6 @@ function dToggleColor(cid) {
 function dSelectPrice(tid) {
   S.catPrice = S.catPrice === tid ? null : tid;
   _dRenderPriceGrid();
-}
-
-function dBackToSamples() { dSwitchPanelView('samples'); }
-function dBackToFilters() {
-  _dRenderColorGrid();
-  _dRenderPriceGrid();
-  dSwitchPanelView('filters');
 }
 
 // ── Catalog results ──
@@ -400,7 +376,9 @@ function dShowResults() {
       </div></div>
     </div>`).join('');
 
-  dSwitchPanelView('results');
+  // Show samples divider if there are samples
+  const divider = document.getElementById('d-samples-divider');
+  if (divider) divider.style.display = S.samples.length ? '' : 'none';
 }
 
 function dToggleMatCard(mid) {
