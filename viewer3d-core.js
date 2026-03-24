@@ -1121,16 +1121,9 @@ function moveThreeTo(slotId) {
   if (!threeState) return;
   const target=document.getElementById(slotId); if(!target) return;
   if(threeState.currentSlot===slotId) return;
+  // Просто переносим canvas в новый слот — controls остаются те же
   target.appendChild(threeState.renderer.domElement);
   threeState.currentSlot=slotId;
-  threeState.controls.dispose();
-  threeState.controls=_setupControls(threeState.camera,threeState.renderer.domElement);
-  const area2=parseFloat(document.getElementById('v-area')?.value||120);
-  const houseW2=Math.sqrt(area2/1.6),houseL2=houseW2*1.6;
-  const bh2=parseFloat(document.getElementById('v-found')?.value||80)/100;
-  const wh2=Math.min(Math.max(parseFloat(document.getElementById('v-floor')?.value||400)/100,2),5);
-  threeState.controls.target.set(houseL2/2,(bh2+wh2)/2,houseW2/2);
-  threeState.controls.update();
 }
 
 function resizeThree() {
