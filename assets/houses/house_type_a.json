@@ -1,0 +1,106 @@
+{
+  "id": "type_a",
+  "name": "Одноэтажный дом",
+  "description": "Одноэтажный дом с вальмовой крышей. По референсу 1house.by",
+
+  "constraints": {
+    "base_h":         { "min": 50, "max": 120, "step": 10, "default": 70,  "unit": "cm" },
+    "roof_angle":     { "min": 15, "max": 35,  "step": 5,  "default": 22,  "unit": "deg" },
+    "wall_thickness": 0.25
+  },
+
+  "roof_type": "hip",
+
+  "modules": {
+    "_comment": "Размеры модулей: w=ширина, h=высота проёма, y=низ проёма от уровня пола этажа (м)",
+
+    "window_single": { "w": 0.90, "h": 1.20, "y": 0.90,  "glb": "mod_window_single.glb" },
+    "window_double": { "w": 1.40, "h": 1.20, "y": 0.90,  "glb": "mod_window_double.glb" },
+    "window_wide":   { "w": 2.40, "h": 1.50, "y": 0.60,  "glb": "mod_window_wide.glb"   },
+    "door_entrance": { "w": 1.00, "h": 2.20, "y": 0.00,  "glb": "mod_door_entrance.glb" },
+    "door_patio":    { "w": 2.00, "h": 2.30, "y": 0.00,  "glb": "mod_door_patio.glb"    }
+  },
+
+  "floors": [
+    {
+      "id": "floor_1",
+      "label": "Первый этаж",
+
+      "constraints": {
+        "area":    { "min": 40, "max": 100, "step": 5,  "default": 80,  "unit": "m2" },
+        "floor_h": { "min": 270, "max": 330, "step": 10, "default": 300, "unit": "cm" }
+      },
+
+      "vars": {
+        "L": "sqrt(area * 1.5)",
+        "W": "sqrt(area / 1.5)"
+      },
+
+      "perimeter": [
+        { "_comment": "═══ Северная стена (длинная, верх на плане) → ═══" },
+        {
+          "run": "L",
+          "facade": [
+            { "wall": 1.0 },
+            { "window": "single" },
+            { "wall": "fill" },
+            { "window": "single" },
+            { "wall": "fill" },
+            { "window": "single" },
+            { "wall": 1.0 }
+          ]
+        },
+        { "turn": 90 },
+
+        { "_comment": "═══ Восточная стена (короткая, вход) ↓ ═══" },
+        {
+          "run": "W",
+          "facade": [
+            { "wall": "fill" },
+            { "window": "single" },
+            { "wall": "fill" },
+            { "door": "entrance" },
+            { "wall": 0.6 }
+          ]
+        },
+        { "turn": 90 },
+
+        { "_comment": "═══ Южная стена (длинная, авто-окна) ← ═══" },
+        {
+          "run": "L",
+          "facade": "auto_windows",
+          "window_type": "single",
+          "min_margin": 1.2
+        },
+        { "turn": 90 },
+
+        { "_comment": "═══ Западная стена (короткая, авто-окна) ↑ ═══" },
+        {
+          "run": "W",
+          "facade": "auto_windows",
+          "window_type": "single",
+          "min_margin": 1.0
+        },
+        { "turn": 90 }
+      ]
+    }
+  ],
+
+  "features": {
+    "chimney":  { "position": [0.65, 0.45], "model": "chimney" },
+    "gutters":  true,
+    "cornice":  true
+  },
+
+  "materials_map": {
+    "mat_wall":     { "label": "Стены (штукатурка)",   "swappable": true  },
+    "mat_base":     { "label": "Цоколь",               "swappable": true  },
+    "mat_roof":     { "label": "Крыша (черепица)",      "swappable": true  },
+    "mat_frame":    { "label": "Рамы окон",            "swappable": true  },
+    "mat_glass":    { "label": "Стекло",               "swappable": false },
+    "mat_door":     { "label": "Входная дверь",        "swappable": true  },
+    "mat_wood":     { "label": "Деревянная отделка",   "swappable": true  },
+    "mat_metal":    { "label": "Металл (водосток)",    "swappable": true  },
+    "mat_curtain":  { "label": "Шторы",                "swappable": true  }
+  }
+}
