@@ -116,7 +116,11 @@ function _setupControls(camera, domElement) {
   c.maxDistance    = 50;
   c.maxPolarAngle  = Math.PI / 2.05;
   // Правая кнопка — pan (перемещение), средняя — dolly
-  c.mouseButtons   = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+  c.mouseButtons.LEFT   = THREE.MOUSE.ROTATE;
+  c.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+  c.mouseButtons.RIGHT  = THREE.MOUSE.PAN;
+  c.enablePan = true;
+  c.screenSpacePanning = true;
   // Камера не опускается ниже земли
   c.addEventListener('change', () => {
     if (camera.position.y < 0.3) camera.position.y = 0.3;
