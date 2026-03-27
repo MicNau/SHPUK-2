@@ -102,7 +102,7 @@ const S = {
   houseType: null,
   sections: [],
   pts: { terrace:[], pool_terrace:[], paths:[], pier:[], fence:[] },
-  porch: { x:0.3, y:0.3, w:0.2, h:0.12 },
+  porch: { x:0.3125, y:0.3125, w:0.203125, h:0.125 },
   mats: {},
   samples: [],    // [{id, name, color}] — накопленные образцы
   activeSample: null, // {id, name, color} — текущий выбранный для примерки

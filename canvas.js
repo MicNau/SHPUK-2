@@ -101,7 +101,7 @@ function initSnapCanvas(name) {
     // Прилипание к стенам дома для террас (порог 0.75 м)
     if (['terrace','pool_terrace','pier'].includes(name) && S.houseType !== 'Участок без дома') {
       const hr = getHouseRectNorm();
-      const thr = 0.75 / GRID; // 0.75m порог в нормализованных координатах
+      const thr = 1.0 / GRID; // 1m порог в нормализованных координатах
       // Прилипание по X к левой/правой стене
       if (Math.abs(snX - hr.nx) < thr)              snX = hr.nx;
       else if (Math.abs(snX - (hr.nx+hr.nw)) < thr) snX = hr.nx + hr.nw;
@@ -366,6 +366,9 @@ function initPorchCanvas() {
   cv.width=sz*dpr; cv.height=sz*dpr;
   cv.style.width=sz+'px'; cv.style.height=sz+'px';
   CV['porch']=mkCvState();
+  // Привязываем крыльцо к сетке при инициализации
+  const p=S.porch;
+  p.x=snapNorm(p.x); p.y=snapNorm(p.y); p.w=snapNorm(p.w); p.h=snapNorm(p.h);
   const newCv=cv.cloneNode(false);
   newCv.width=sz*dpr; newCv.height=sz*dpr;
   newCv.style.width=sz+'px'; newCv.style.height=sz+'px';

@@ -690,7 +690,7 @@ function buildScene3d() {
     // Площадка под домом: выступает на 5 см над землёй, на 30 см шире фундамента
     const padW = houseL + 0.6, padD = houseW + 0.6, padH = 0.05;
     const padGeo = new THREE.BoxGeometry(padW, padH, padD);
-    const padMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.92, metalness: 0.02 });
+    const padMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.95, metalness: 0.0 });
     const padMesh = new THREE.Mesh(padGeo, padMat);
     padMesh.position.set(houseL/2, padH/2, houseW/2);
     padMesh.receiveShadow = true;
@@ -698,10 +698,10 @@ function buildScene3d() {
   }
 
   if (S.sections.includes('terrace') && S.pts.terrace.length >= 3)
-    buildTerrace3d(houseGroup, M, S.pts.terrace, isNoHouse ? 0.35 : bh, houseL, houseW, 'deckMeshes');
+    buildTerrace3d(houseGroup, M, S.pts.terrace, (isNoHouse ? 0.35 : bh) - 0.01, houseL, houseW, 'deckMeshes');
 
   if (S.sections.includes('pool_terrace') && S.pts.pool_terrace.length >= 3)
-    buildTerrace3d(houseGroup, M, S.pts.pool_terrace, isNoHouse ? 0.35 : bh, houseL, houseW, 'deckMeshes');
+    buildTerrace3d(houseGroup, M, S.pts.pool_terrace, (isNoHouse ? 0.35 : bh) - 0.01, houseL, houseW, 'deckMeshes');
 
   if (S.sections.includes('pier') && S.pts.pier.length >= 3)
     buildTerrace3d(houseGroup, M, S.pts.pier, 0.5, houseL, houseW, 'deckMeshes');
