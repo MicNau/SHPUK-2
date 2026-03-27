@@ -11,8 +11,11 @@ const IS_MOBILE = false;
 
 function _onAnimFrame(t) { /* no-op */ }
 
+let _vegGen = 0; // счётчик генерации — предотвращает дублирование при async-загрузке
+
 function _buildEntourage(scene) {
-  _buildVegetation(scene);
+  _vegGen++;
+  _buildVegetation(scene, _vegGen);
 }
 
 // ══════════════════════════════════════════════
@@ -34,7 +37,7 @@ const _VEG_TREE_SPOTS = [
 const _CROSS_PLANES_BUSH = 2;
 const _CROSS_PLANES_TREE = 3; // Desktop: больше плоскостей для объёма
 
-function _buildVegetation(scene) {
+function _buildVegetation(scene, gen) {
   const gltf = new THREE.GLTFLoader();
   const tex  = new THREE.TextureLoader();
 
@@ -44,7 +47,7 @@ function _buildVegetation(scene) {
     fallbacks: [() => _fallbackBush(0.28, 0.50), () => _fallbackBush(0.32, 0.44)],
     spots:     _VEG_BUSH_SPOTS,
     type:      'bush',
-  });
+  }, gen);
 
   _loadVegModels(gltf, tex, scene, {
     glbFiles:  ['tree_a.glb', 'tree_b.glb'],
@@ -52,17 +55,19 @@ function _buildVegetation(scene) {
     fallbacks: [() => _fallbackTree(0.26, 0.52), () => _fallbackTree(0.22, 0.58)],
     spots:     _VEG_TREE_SPOTS,
     type:      'tree',
-  });
+  }, gen);
 }
 
 // ── Универсальный загрузчик с fallback-цепочкой ──
 
-function _loadVegModels(gltfLoader, texLoader, scene, cfg) {
+function _loadVegModels(gltfLoader, texLoader, scene, cfg, gen) {
   const models = [null, null];
   let ready = 0;
 
   const onBothReady = () => {
     if (++ready < 2) return;
+    // Если сцена перестроилась, не добавляем устаревшую растительность
+    if (gen !== _vegGen) return;
     _placeVeg(scene, models, cfg);
   };
 

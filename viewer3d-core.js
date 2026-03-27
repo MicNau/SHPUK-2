@@ -210,9 +210,13 @@ function init3dCanvas(targetSlotId) {
   const houseGroup = new THREE.Group();
   scene.add(houseGroup);
 
+  // Группа для растительности (очищается при каждой перестройке)
+  const vegGroup = new THREE.Group();
+  scene.add(vegGroup);
+
   threeState = {
     renderer, scene, camera, controls,
-    houseGroup, skyMesh, sunLight, ambLight, groundMesh,
+    houseGroup, vegGroup, skyMesh, sunLight, ambLight, groundMesh,
     envMap: null, texCache: {},
     wallMeshes: [], deckMeshes: [], porchMeshes: [],
     stepMeshes: [], fenceMeshes: [], railingMeshes: [],
@@ -645,9 +649,10 @@ function _buildProceduralSky() {
 // ══════════════════════════════════════════════
 function buildScene3d() {
   if (!threeState || typeof THREE === 'undefined') return;
-  const { houseGroup, controls } = threeState;
+  const { houseGroup, vegGroup, controls } = threeState;
 
   clearGroup(houseGroup);
+  if (vegGroup) clearGroup(vegGroup);
   threeState.wallMeshes    = [];
   threeState.deckMeshes    = [];
   threeState.porchMeshes   = [];
@@ -741,7 +746,7 @@ function buildScene3d() {
     || S.pts.fence.length >= 2
     || S.sections.includes('porch');
   if (hasLayout && typeof _buildEntourage === 'function') {
-    _buildEntourage(threeState.scene);
+    _buildEntourage(threeState.vegGroup || threeState.scene);
   }
 
   const cx = isNoHouse ? 0 : houseL/2;
