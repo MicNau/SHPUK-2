@@ -98,10 +98,10 @@ function initSnapCanvas(name) {
     const W=cvEl.width, snapStep=W/CELLS;
     let snX=Math.round(wx/snapStep)*snapStep/W, snY=Math.round(wy/snapStep)*snapStep/W;
 
-    // Прилипание к стенам дома для террас (порог 1.5 м)
+    // Прилипание к стенам дома для террас (порог 0.75 м)
     if (['terrace','pool_terrace','pier'].includes(name) && S.houseType !== 'Участок без дома') {
       const hr = getHouseRectNorm();
-      const thr = 1.5 / GRID; // 1.5m порог в нормализованных координатах
+      const thr = 0.75 / GRID; // 0.75m порог в нормализованных координатах
       // Прилипание по X к левой/правой стене
       if (Math.abs(snX - hr.nx) < thr)              snX = hr.nx;
       else if (Math.abs(snX - (hr.nx+hr.nw)) < thr) snX = hr.nx + hr.nw;

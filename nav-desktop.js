@@ -245,17 +245,11 @@ function _dRenderPanelContent() {
   const subToggle = document.getElementById('d-panel-sub-toggle');
   if (subToggle) {
     if (secId === 'terrace') {
-      const railOn = document.querySelector('.tg[data-id="terrace-railing"]')?.classList.contains('on');
-      if (railOn) {
-        const mode = S.matSubMode || 'deck';
-        subToggle.innerHTML = `
-          <button class="d-sub-btn ${mode==='deck'?'active':''}" onclick="dSetSubMode('deck')">Терраса</button>
-          <button class="d-sub-btn ${mode==='railing'?'active':''}" onclick="dSetSubMode('railing')">Ограждение</button>`;
-        subToggle.style.display = '';
-      } else {
-        subToggle.style.display = 'none';
-        S.matSubMode = null;
-      }
+      const mode = S.matSubMode || 'deck';
+      subToggle.innerHTML = `
+        <button class="d-sub-btn ${mode==='deck'?'active':''}" onclick="dSetSubMode('deck')">Терраса</button>
+        <button class="d-sub-btn ${mode==='railing'?'active':''}" onclick="dSetSubMode('railing')">Ограждение</button>`;
+      subToggle.style.display = '';
     } else {
       subToggle.style.display = 'none';
       S.matSubMode = null;

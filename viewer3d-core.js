@@ -690,7 +690,7 @@ function buildScene3d() {
     // Площадка под домом: выступает на 5 см над землёй, на 30 см шире фундамента
     const padW = houseL + 0.6, padD = houseW + 0.6, padH = 0.05;
     const padGeo = new THREE.BoxGeometry(padW, padH, padD);
-    const padMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.90, metalness: 0.02 });
+    const padMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.92, metalness: 0.02 });
     const padMesh = new THREE.Mesh(padGeo, padMat);
     padMesh.position.set(houseL/2, padH/2, houseW/2);
     padMesh.receiveShadow = true;
@@ -998,7 +998,7 @@ function buildTerrace3d(parent, M, pts, deckHeight, houseL, houseW, meshArrayNam
   }
 
   // Боковые панели (юбка) по периметру — закрываем пространство под настилом
-  const skirtT = 0.025; // толщина панели
+  const skirtT = 0.06; // толщина панели
   for(let i=0;i<worldPts.length;i++){
     const a=worldPts[i],b=worldPts[(i+1)%worldPts.length];
     const sdx=b.x-a.x,sdz=b.z-a.z;
@@ -1042,7 +1042,7 @@ function buildPorch3d(parent,M,porch,houseL,houseW,bh){
     const s=mesh(box(sx,aStepH,sz),M.step);s.position.set(sxP,yBot+aStepH/2,szP);porchGroup.add(s);threeState.stepMeshes.push(s);
   }
   // Боковые панели крыльца — материал террасы (deck)
-  const sideW=.025;
+  const sideW=.06;
   if(sDZ!==0){
     // Левая и правая стенки
     const ls=mesh(box(sideW,bh,pd),M.deck);ls.position.set(px,bh/2,pz+pd/2);porchGroup.add(ls);threeState.porchMeshes.push(ls);
