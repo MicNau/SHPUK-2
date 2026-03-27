@@ -98,8 +98,11 @@ function _loadVegModels(gltfLoader, texLoader, scene, cfg) {
 function _placeVeg(scene, models, cfg) {
   const isBush = cfg.type === 'bush';
   const crossPlanes = isBush ? _CROSS_PLANES_BUSH : _CROSS_PLANES_TREE;
+  const margin = isBush ? 0.8 : 1.5;
 
   for (const [x,,z] of cfg.spots) {
+    if (_isOccupied(x, z, margin)) continue;
+
     const mdl = models[Math.random() > 0.5 ? 0 : 1];
     const s = isBush
       ? 1.2 + Math.random() * 0.9
@@ -111,6 +114,25 @@ function _placeVeg(scene, models, cfg) {
       _placeCross(scene, mdl.data, x, z, s, isBush, crossPlanes);
     }
   }
+}
+
+function _isOccupied(x, z, margin) {
+  if (!threeState || !threeState.occupiedZones) return false;
+  for (const zone of threeState.occupiedZones) {
+    if (zone.type === 'rect') {
+      if (x>=zone.minX-margin && x<=zone.maxX+margin && z>=zone.minZ-margin && z<=zone.maxZ+margin) return true;
+    } else if (zone.type === 'poly') {
+      const xs=zone.points.map(p=>p.x),zs=zone.points.map(p=>p.z);
+      if (x>=Math.min(...xs)-margin && x<=Math.max(...xs)+margin && z>=Math.min(...zs)-margin && z<=Math.max(...zs)+margin) return true;
+    } else if (zone.type === 'path') {
+      for(let i=0;i<zone.points.length-1;i++){
+        const a=zone.points[i],b=zone.points[i+1],dx=b.x-a.x,dz=b.z-a.z,lenSq=dx*dx+dz*dz;
+        const t=lenSq<.001?0:Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/lenSq));
+        if(Math.sqrt((x-a.x-t*dx)**2+(z-a.z-t*dz)**2)<zone.width/2+margin) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function _placeGlb(scene, srcModel, x, z, scale, isBush) {

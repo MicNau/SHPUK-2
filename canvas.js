@@ -87,7 +87,7 @@ function initSnapCanvas(name) {
 
   attachPanZoom(wrap, name, ()=>drawSnapCanvas(name));
 
-  // Клик — добавить точку с snap (0.5m step)
+  // Клик — добавить точку с snap (0.5m step + прилипание к стенам дома)
   wrap.addEventListener('click', e=>{
     if (CV[name].pinching) return;
     const cvEl=document.getElementById('cv-'+name); if (!cvEl) return;
@@ -96,7 +96,19 @@ function initSnapCanvas(name) {
     const cx=CV[name];
     const wx=(sx-cx.ox)/cx.scale, wy=(sy-cx.oy)/cx.scale;
     const W=cvEl.width, snapStep=W/CELLS;
-    S.pts[name].push({ x:Math.round(wx/snapStep)*snapStep/W, y:Math.round(wy/snapStep)*snapStep/W });
+    let snX=Math.round(wx/snapStep)*snapStep/W, snY=Math.round(wy/snapStep)*snapStep/W;
+
+    // Прилипание к стенам дома для террас
+    if (['terrace','pool_terrace','pier'].includes(name) && S.houseType !== 'Участок без дома') {
+      const hr = getHouseRectNorm();
+      const thr = SNAP / GRID; // 0.5m порог
+      if (Math.abs(snX - hr.nx) < thr)           snX = hr.nx;
+      else if (Math.abs(snX - (hr.nx+hr.nw)) < thr) snX = hr.nx + hr.nw;
+      if (Math.abs(snY - hr.ny) < thr)           snY = hr.ny;
+      else if (Math.abs(snY - (hr.ny+hr.nh)) < thr) snY = hr.ny + hr.nh;
+    }
+
+    S.pts[name].push({ x:snX, y:snY });
     drawSnapCanvas(name);
   });
 }

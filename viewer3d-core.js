@@ -685,7 +685,7 @@ function buildScene3d() {
     // Площадка под домом: выступает на 5 см над землёй, на 30 см шире фундамента
     const padW = houseL + 0.6, padD = houseW + 0.6, padH = 0.05;
     const padGeo = new THREE.BoxGeometry(padW, padH, padD);
-    const padMat = new THREE.MeshStandardMaterial({ color: 0x8a8278, roughness: 0.90, metalness: 0.02 });
+    const padMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.90, metalness: 0.02 });
     const padMesh = new THREE.Mesh(padGeo, padMat);
     padMesh.position.set(houseL/2, padH/2, houseW/2);
     padMesh.receiveShadow = true;
@@ -713,6 +713,27 @@ function buildScene3d() {
   const terraceRailingOn = document.querySelector('.tg[data-id="terrace-railing"]')?.classList.contains('on');
   if (terraceRailingOn && S.pts.terrace.length >= 3)
     buildRailing3d(houseGroup, M, S.pts.terrace, isNoHouse ? 0.35 : bh, houseL, houseW);
+
+  // Собираем зоны, занятые конструкциями (для проверки растительности)
+  threeState.occupiedZones = [];
+  if (!isNoHouse) {
+    threeState.occupiedZones.push({ type:'rect', minX:-0.5, maxX:houseL+0.5, minZ:-0.5, maxZ:houseW+0.5 });
+  }
+  for (const secId of ['terrace','pool_terrace','pier']) {
+    if (S.sections.includes(secId) && S.pts[secId].length >= 3) {
+      threeState.occupiedZones.push({ type:'poly', points:canvasToWorld(S.pts[secId],houseL,houseW) });
+    }
+  }
+  if (S.sections.includes('paths') && S.pts.paths.filter(p=>!p.break).length >= 2) {
+    const pw2=parseFloat(document.getElementById('v-paths-width')?.value||120)/100;
+    const segs2=(typeof splitAtBreaks==='function')?splitAtBreaks(S.pts.paths):[S.pts.paths.filter(p=>!p.break)];
+    for(const seg of segs2){if(seg.length<2)continue; threeState.occupiedZones.push({type:'path',points:canvasToWorld(seg,houseL,houseW),width:pw2});}
+  }
+  if (S.sections.includes('porch') && !isNoHouse) {
+    const gs2=GRID,ox2=(gs2-houseL)/2,oz2=(gs2-houseW)/2;
+    const ppx=S.porch.x*gs2-ox2,ppz=S.porch.y*gs2-oz2,ppw=S.porch.w*gs2,ppd=S.porch.h*gs2;
+    threeState.occupiedZones.push({type:'rect',minX:ppx,maxX:ppx+ppw,minZ:ppz,maxZ:ppz+ppd});
+  }
 
   // Антураж (растительность) — только когда есть размеченные конструкции
   const hasLayout = S.pts.terrace.length >= 3
@@ -970,6 +991,22 @@ function buildTerrace3d(parent, M, pts, deckHeight, houseL, houseW, meshArrayNam
       terraceGroup.add(b); threeState[trackArray].push(b);
     }
   }
+
+  // Боковые панели (юбка) по периметру — закрываем пространство под настилом
+  const skirtT = 0.025; // толщина панели
+  for(let i=0;i<worldPts.length;i++){
+    const a=worldPts[i],b=worldPts[(i+1)%worldPts.length];
+    const sdx=b.x-a.x,sdz=b.z-a.z;
+    const segLen=Math.sqrt(sdx*sdx+sdz*sdz); if(segLen<.1)continue;
+    const angle=Math.atan2(sdx,sdz);
+    const mx=(a.x+b.x)/2,mz=(a.z+b.z)/2;
+    const skirtH=boardBot; if(skirtH<.03)continue;
+    const panel=mesh(box(skirtT,skirtH,segLen),M.deck);
+    panel.position.set(mx,skirtH/2,mz);
+    panel.rotation.y=angle;
+    terraceGroup.add(panel); threeState[trackArray].push(panel);
+  }
+
   parent.add(terraceGroup);
 }
 
@@ -999,9 +1036,19 @@ function buildPorch3d(parent,M,porch,houseL,houseW,bh){
     else{sx=stepD;sz=pd;szP=pz+pd/2;sxP=sDX>0?(px+pw+i*stepD+stepD/2):(px-i*stepD-stepD/2);}
     const s=mesh(box(sx,aStepH,sz),M.step);s.position.set(sxP,yBot+aStepH/2,szP);porchGroup.add(s);threeState.stepMeshes.push(s);
   }
-  const sideW=.06;
-  if(sDZ!==0){const ls=mesh(box(sideW,bh,pd),M.base);ls.position.set(px,bh/2,pz+pd/2);porchGroup.add(ls);const rs=mesh(box(sideW,bh,pd),M.base);rs.position.set(px+pw,bh/2,pz+pd/2);porchGroup.add(rs);}
-  else{const ls=mesh(box(pw,bh,sideW),M.base);ls.position.set(px+pw/2,bh/2,pz);porchGroup.add(ls);const rs=mesh(box(pw,bh,sideW),M.base);rs.position.set(px+pw/2,bh/2,pz+pd);porchGroup.add(rs);}
+  // Боковые панели крыльца — материал террасы (deck)
+  const sideW=.025;
+  if(sDZ!==0){
+    // Левая и правая стенки
+    const ls=mesh(box(sideW,bh,pd),M.deck);ls.position.set(px,bh/2,pz+pd/2);porchGroup.add(ls);threeState.porchMeshes.push(ls);
+    const rs=mesh(box(sideW,bh,pd),M.deck);rs.position.set(px+pw,bh/2,pz+pd/2);porchGroup.add(rs);threeState.porchMeshes.push(rs);
+    // Передняя стенка (дальняя от ступеней)
+    const fz=sDZ>0?pz:(pz+pd); const fs=mesh(box(pw,bh,sideW),M.deck);fs.position.set(px+pw/2,bh/2,fz);porchGroup.add(fs);threeState.porchMeshes.push(fs);
+  } else {
+    const ls=mesh(box(pw,bh,sideW),M.deck);ls.position.set(px+pw/2,bh/2,pz);porchGroup.add(ls);threeState.porchMeshes.push(ls);
+    const rs=mesh(box(pw,bh,sideW),M.deck);rs.position.set(px+pw/2,bh/2,pz+pd);porchGroup.add(rs);threeState.porchMeshes.push(rs);
+    const fx=sDX>0?px:(px+pw); const fs=mesh(box(sideW,bh,pd),M.deck);fs.position.set(fx,bh/2,pz+pd/2);porchGroup.add(fs);threeState.porchMeshes.push(fs);
+  }
   parent.add(porchGroup);
 }
 

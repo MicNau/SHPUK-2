@@ -95,8 +95,12 @@ function _loadVegModels(gltfLoader, texLoader, scene, cfg) {
 function _placeVeg(scene, models, cfg) {
   const isBush = cfg.type === 'bush';
   const crossPlanes = isBush ? _CROSS_PLANES_BUSH : _CROSS_PLANES_TREE;
+  const margin = isBush ? 0.8 : 1.5;
 
   for (const [x,,z] of cfg.spots) {
+    // Пропускаем точки, пересекающиеся с конструкциями
+    if (_isOccupied(x, z, margin)) continue;
+
     const mdl = models[Math.random() > 0.5 ? 0 : 1];
     const s = isBush
       ? 1.2 + Math.random() * 0.9
@@ -108,6 +112,33 @@ function _placeVeg(scene, models, cfg) {
       _placeCross(scene, mdl.data, x, z, s, isBush, crossPlanes);
     }
   }
+}
+
+// ── Проверка пересечения с занятыми зонами ──
+function _isOccupied(x, z, margin) {
+  if (!threeState || !threeState.occupiedZones) return false;
+  for (const zone of threeState.occupiedZones) {
+    if (zone.type === 'rect') {
+      if (x >= zone.minX - margin && x <= zone.maxX + margin &&
+          z >= zone.minZ - margin && z <= zone.maxZ + margin) return true;
+    } else if (zone.type === 'poly') {
+      const xs = zone.points.map(p=>p.x), zs = zone.points.map(p=>p.z);
+      if (x >= Math.min(...xs)-margin && x <= Math.max(...xs)+margin &&
+          z >= Math.min(...zs)-margin && z <= Math.max(...zs)+margin) return true;
+    } else if (zone.type === 'path') {
+      for (let i=0;i<zone.points.length-1;i++) {
+        if (_distToSeg(x,z,zone.points[i],zone.points[i+1]) < zone.width/2 + margin) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function _distToSeg(px,pz,a,b) {
+  const dx=b.x-a.x,dz=b.z-a.z,lenSq=dx*dx+dz*dz;
+  if(lenSq<.001) return Math.sqrt((px-a.x)**2+(pz-a.z)**2);
+  const t=Math.max(0,Math.min(1,((px-a.x)*dx+(pz-a.z)*dz)/lenSq));
+  return Math.sqrt((px-a.x-t*dx)**2+(pz-a.z-t*dz)**2);
 }
 
 function _placeGlb(scene, srcModel, x, z, scale, isBush) {
