@@ -5,10 +5,11 @@
 // DESKTOP STATE
 // ══════════════════════════════════════════════
 let dStep = 1;
-let dActiveCanvas = null;   // current canvas editor open (section id or null)
-// (panel is single scrollable view, no separate modes)
+let dActiveItem = null;     // currently selected sidebar item id
+let dEditorOpen = false;    // true when canvas editor is open (locks UI)
+const dConfigured = new Set(); // items that completed configuration
 
-// All sidebar items (checkbox + editor items)
+// All sidebar items
 const D_SIDEBAR_ITEMS = [
   { id: 'terrace',       lbl: 'Терраса',             hasEditor: true  },
   { id: 'porch',         lbl: 'Крыльцо',             hasEditor: true  },
@@ -21,7 +22,7 @@ const D_SIDEBAR_ITEMS = [
   { id: 'pier',          lbl: 'Причал',              hasEditor: true  },
 ];
 
-// Canvas init functions map (section id → init function)
+// Canvas init functions map
 const D_CANVAS_INIT = {
   terrace:      () => initSnapCanvas('terrace'),
   pool_terrace: () => initSnapCanvas('pool_terrace'),
@@ -35,7 +36,6 @@ const D_CANVAS_INIT = {
 // SCREEN NAVIGATION
 // ══════════════════════════════════════════════
 function dGoTo(s) {
-  // Hide previous screen
   const prev = document.getElementById('d-screen-' + dStep);
   if (prev) prev.classList.remove('active');
 
@@ -43,23 +43,16 @@ function dGoTo(s) {
   const el = document.getElementById('d-screen-' + s);
   if (el) el.classList.add('active');
 
-  // Update topbar
   const labels = {
     1: 'Шаг 1: Выберите тип дома',
     2: 'Шаг 2: Параметры дома',
     3: 'Шаг 3: Конфигуратор',
   };
   document.getElementById('d-step-label').textContent = labels[s] || '';
-
-  // Show summary button on step 3
   document.getElementById('d-btn-summary').style.display = s === 3 ? '' : 'none';
 
-  // Init 3D / sidebar for each step
-  if (s === 2) {
-    _dInitParamsView();
-  } else if (s === 3) {
-    _dInitWorkspace();
-  }
+  if (s === 2) _dInitParamsView();
+  else if (s === 3) _dInitWorkspace();
 }
 
 // ══════════════════════════════════════════════
@@ -75,31 +68,22 @@ function dSelHouse(el, name) {
 // STEP 2 — Parameters + 3D
 // ══════════════════════════════════════════════
 function _dInitParamsView() {
-  // Sync range sliders with inputs
   _dSyncRanges();
-  // Init 3D in the params container
   setTimeout(() => {
     const slot = document.getElementById('d-slot-params');
-    if (slot && slot.offsetWidth > 0) {
-      init3dCanvas('d-slot-params');
-    } else {
-      setTimeout(() => init3dCanvas('d-slot-params'), 100);
-    }
+    if (slot && slot.offsetWidth > 0) init3dCanvas('d-slot-params');
+    else setTimeout(() => init3dCanvas('d-slot-params'), 100);
   }, 80);
 }
 
 function dOnParam() {
-  // Sync range sliders
   _dSyncRanges();
-  // Trigger 3D rebuild (reuse existing onParamChange from viewer3d-core)
   if (typeof onParamChange === 'function') onParamChange();
 }
 
 function _dSyncRanges() {
-  const pairs = [['v-area','r-area'],['v-floor','r-floor'],['v-found','r-found']];
-  pairs.forEach(([inp,rng]) => {
-    const iEl = document.getElementById(inp);
-    const rEl = document.getElementById(rng);
+  [['v-area','r-area'],['v-floor','r-floor'],['v-found','r-found']].forEach(([inp,rng]) => {
+    const iEl = document.getElementById(inp), rEl = document.getElementById(rng);
     if (iEl && rEl) rEl.value = iEl.value;
   });
 }
@@ -108,149 +92,185 @@ function _dSyncRanges() {
 // STEP 3 — Workspace
 // ══════════════════════════════════════════════
 function _dInitWorkspace() {
-  // Build sidebar
-  _dRenderSidebar();
-  // Close any open canvas
-  dActiveCanvas = null;
+  dActiveItem = null;
+  dEditorOpen = false;
   _dCloseAllCanvases();
-  // Init 3D in workspace
+  _dRenderSidebar();
+  _dSetPanelLocked(true); // Panel locked until an item is selected
+
   setTimeout(() => {
     const slot = document.getElementById('d-slot-workspace');
-    if (slot && slot.offsetWidth > 0) {
-      init3dCanvas('d-slot-workspace');
-    } else {
-      setTimeout(() => init3dCanvas('d-slot-workspace'), 100);
-    }
+    if (slot && slot.offsetWidth > 0) init3dCanvas('d-slot-workspace');
+    else setTimeout(() => init3dCanvas('d-slot-workspace'), 100);
   }, 80);
-  // Init right panel
-  _dRenderPanel();
-  _dRenderPanelTabs();
 }
 
 // ── SIDEBAR ──
 function _dRenderSidebar() {
   const list = document.getElementById('d-sidebar-list');
   list.innerHTML = D_SIDEBAR_ITEMS.map(item => {
-    const checked = S.sections.includes(item.id) ? 'checked' : '';
-    const hasData = _dHasData(item.id);
-    const status = hasData ? '✓ настроено' : (item.hasEditor ? 'нажмите для настройки' : '');
+    const isActive = dActiveItem === item.id;
+    const isCfg = dConfigured.has(item.id);
+    const isLocked = dEditorOpen && dActiveItem !== item.id;
     return `
-      <div class="d-sidebar-item ${checked}"
-           data-id="${item.id}"
-           onclick="dToggleSidebarItem(this, '${item.id}')">
-        <div class="d-sidebar-check"></div>
-        <div class="d-sidebar-label">${item.lbl}</div>
-        <div class="d-sidebar-status">${status}</div>
+      <div class="d-sb-row">
+        <button class="d-sb-btn ${isActive ? 'active' : ''} ${isCfg ? 'configured' : ''} ${isLocked ? 'locked' : ''}"
+                data-id="${item.id}"
+                onclick="dClickItem('${item.id}')"
+                ${isLocked ? 'disabled' : ''}>
+          ${item.lbl}
+        </button>
+        ${isCfg && item.hasEditor ? `<button class="d-sb-edit ${isLocked ? 'locked' : ''}" title="Редактировать"
+            onclick="dEditItem('${item.id}')" ${isLocked ? 'disabled' : ''}>✏</button>` : ''}
       </div>`;
   }).join('');
 }
 
-function _dHasData(secId) {
-  if (secId === 'porch') return true; // always has default placement
-  if (S.pts[secId] && S.pts[secId].length > 0) return true;
-  return false;
-}
+// ── Click on sidebar button ──
+function dClickItem(secId) {
+  if (dEditorOpen) return; // locked
 
-function dToggleSidebarItem(el, secId) {
   const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
   if (!item) return;
 
-  // Toggle checked state
-  const isChecked = el.classList.contains('checked');
-  if (isChecked) {
-    // Uncheck
-    el.classList.remove('checked');
-    S.sections = S.sections.filter(s => s !== secId);
-    // Close canvas if open for this section
-    if (dActiveCanvas === secId) dConfirmCanvas(secId);
-  } else {
-    // Check
-    el.classList.add('checked');
+  // If has editor and NOT yet configured → open editor
+  if (item.hasEditor && !dConfigured.has(secId)) {
+    _dOpenEditor(secId);
+    return;
+  }
+
+  // Otherwise → select item, show catalog
+  _dSelectItem(secId);
+}
+
+// ── Edit (pencil) button ──
+function dEditItem(secId) {
+  if (dEditorOpen) return;
+  _dOpenEditor(secId);
+}
+
+// ── Select item (no editor) ──
+function _dSelectItem(secId) {
+  dActiveItem = secId;
+  dEditorOpen = false;
+  S.matSubMode = null;
+
+  // For non-editor items, add to sections on first click
+  const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
+  if (item && !item.hasEditor && !dConfigured.has(secId)) {
+    dConfigured.add(secId);
     if (!S.sections.includes(secId)) S.sections.push(secId);
-    // If has editor, open canvas
-    if (item.hasEditor) {
-      _dOpenCanvas(secId);
-    }
   }
-  // Update panel tabs (sections changed)
-  _dRenderPanelTabs();
 
-  // Rebuild 3D to show/hide elements (only if no canvas editor is open)
-  if (!dActiveCanvas && typeof buildScene3d === 'function') {
-    setTimeout(() => buildScene3d(), 100);
-  }
-}
+  // Map active item to curSec for material application
+  const secIdx = SECS.findIndex(s => s.id === secId);
+  if (secIdx >= 0) S.curSec = 0; // getActive returns single item
 
-// ── CANVAS EDITORS ──
-function _dOpenCanvas(secId) {
-  _dCloseAllCanvases();
-  dActiveCanvas = secId;
-
-  const canvasEl = document.getElementById('d-canvas-' + secId);
-  if (!canvasEl) return;
-  canvasEl.classList.add('active');
-
-  // Highlight active sidebar item
-  document.querySelectorAll('.d-sidebar-item').forEach(el => {
-    el.classList.toggle('active', el.dataset.id === secId);
-  });
-
-  // Init the canvas
-  const initFn = D_CANVAS_INIT[secId];
-  if (initFn) {
-    setTimeout(() => initFn(), 80);
-  }
-}
-
-function _dCloseAllCanvases() {
-  document.querySelectorAll('.d-center-canvas').forEach(el => el.classList.remove('active'));
-  document.querySelectorAll('.d-sidebar-item').forEach(el => el.classList.remove('active'));
-  dActiveCanvas = null;
-}
-
-function dConfirmCanvas(secId) {
-  _dCloseAllCanvases();
-  // Update sidebar status
   _dRenderSidebar();
-  // Re-check the checked sections
-  document.querySelectorAll('.d-sidebar-item').forEach(el => {
-    if (S.sections.includes(el.dataset.id)) el.classList.add('checked');
-  });
+  _dSetPanelLocked(false);
+  _dRenderPanelContent();
+
   // Rebuild 3D
   if (typeof buildScene3d === 'function') {
     setTimeout(() => {
       init3dCanvas('d-slot-workspace');
-    }, 100);
+    }, 50);
   }
+}
+
+// ── Open editor ──
+function _dOpenEditor(secId) {
+  dActiveItem = secId;
+  dEditorOpen = true;
+
+  // Add to sections if not yet
+  if (!S.sections.includes(secId)) S.sections.push(secId);
+
+  _dRenderSidebar();
+  _dSetPanelLocked(true);
+
+  // Show canvas
+  _dCloseAllCanvases();
+  const canvasEl = document.getElementById('d-canvas-' + secId);
+  if (canvasEl) canvasEl.classList.add('active');
+
+  const initFn = D_CANVAS_INIT[secId];
+  if (initFn) setTimeout(() => initFn(), 80);
+}
+
+// ── Confirm editor (Готово) ──
+function dConfirmCanvas(secId) {
+  dConfigured.add(secId);
+  dEditorOpen = false;
+  _dCloseAllCanvases();
+
+  // Keep item selected
+  dActiveItem = secId;
+  S.matSubMode = null;
+  S.curSec = 0;
+
+  _dRenderSidebar();
+  _dSetPanelLocked(false);
+  _dRenderPanelContent();
+
+  // Rebuild 3D
+  setTimeout(() => {
+    init3dCanvas('d-slot-workspace');
+  }, 100);
+}
+
+// ── Canvas helpers ──
+function _dCloseAllCanvases() {
+  document.querySelectorAll('.d-center-canvas').forEach(el => el.classList.remove('active'));
+}
+
+// ── Panel lock/unlock ──
+function _dSetPanelLocked(locked) {
+  const panel = document.getElementById('d-panel');
+  if (panel) panel.classList.toggle('locked', locked);
 }
 
 // ══════════════════════════════════════════════
 // RIGHT PANEL — Materials / Catalog
 // ══════════════════════════════════════════════
-function _dRenderPanel() {
+function _dRenderPanelContent() {
+  const secId = dActiveItem;
+  if (!secId) return;
+
+  const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
+  const panelTitle = document.getElementById('d-panel-title');
+  if (panelTitle) panelTitle.textContent = item ? item.lbl : 'Материалы';
+
+  // Terrace sub-mode toggle (Терраса / Ограждение)
+  const subToggle = document.getElementById('d-panel-sub-toggle');
+  if (subToggle) {
+    if (secId === 'terrace') {
+      const railOn = document.querySelector('.tg[data-id="terrace-railing"]')?.classList.contains('on');
+      if (railOn) {
+        const mode = S.matSubMode || 'deck';
+        subToggle.innerHTML = `
+          <button class="d-sub-btn ${mode==='deck'?'active':''}" onclick="dSetSubMode('deck')">Терраса</button>
+          <button class="d-sub-btn ${mode==='railing'?'active':''}" onclick="dSetSubMode('railing')">Ограждение</button>`;
+        subToggle.style.display = '';
+      } else {
+        subToggle.style.display = 'none';
+        S.matSubMode = null;
+      }
+    } else {
+      subToggle.style.display = 'none';
+      S.matSubMode = null;
+    }
+  }
+
+  // Render swatches
   dRenderSwatches();
-  _dRenderColorGrid();
-  _dRenderPriceGrid();
+  // Auto-show catalog results
+  dShowResults();
 }
 
-function _dRenderPanelTabs() {
-  const active = SECS.filter(s => S.sections.length === 0 || S.sections.includes(s.req));
-  if (!active.length) return;
-  if (S.curSec >= active.length) S.curSec = 0;
-
-  const tabs = document.getElementById('d-panel-tabs');
-  tabs.innerHTML = active.map((s, i) =>
-    `<div class="d-panel-tab ${i === S.curSec ? 'active' : ''}"
-          onclick="dSwitchSec(${i})">${s.lbl}</div>`
-  ).join('');
-
-  document.getElementById('d-panel-title').textContent = active[S.curSec].lbl;
-}
-
-function dSwitchSec(i) {
-  S.curSec = i;
-  _dRenderPanelTabs();
-  dRenderSwatches();
+function dSetSubMode(mode) {
+  S.matSubMode = mode;
+  _dRenderPanelContent();
 }
 
 // ── Samples ──
@@ -301,8 +321,7 @@ function _dRenderColorGrid() {
   if (!grid) return;
   grid.innerHTML = CATALOG_COLORS.map(c =>
     `<div class="d-color-dot ${S.catColors.has(c.id) ? 'selected' : ''}"
-          id="dcd-${c.id}" title="${c.label}"
-          style="background:${c.hex};"
+          title="${c.label}" style="background:${c.hex};"
           onclick="dToggleColor('${c.id}')"></div>`
   ).join('');
 }
@@ -312,7 +331,7 @@ function _dRenderPriceGrid() {
   if (!grid) return;
   grid.innerHTML = PRICE_TIERS.map(t =>
     `<button class="d-price-btn ${S.catPrice === t.id ? 'selected' : ''}"
-             id="dpb-${t.id}" onclick="dSelectPrice('${t.id}')">
+             onclick="dSelectPrice('${t.id}')">
        ${t.lbl}<br><span style="font-size:11px;font-weight:400;opacity:.7">${t.sub}</span>
      </button>`
   ).join('');
@@ -322,17 +341,21 @@ function dToggleColor(cid) {
   if (S.catColors.has(cid)) S.catColors.delete(cid);
   else S.catColors.add(cid);
   _dRenderColorGrid();
+  dShowResults();
 }
 
 function dSelectPrice(tid) {
   S.catPrice = S.catPrice === tid ? null : tid;
   _dRenderPriceGrid();
+  dShowResults();
 }
 
-// ── Catalog results ──
+// ── Catalog results (auto-shown) ──
 function dShowResults() {
-  let results = [...STUB_RESULTS];
+  _dRenderColorGrid();
+  _dRenderPriceGrid();
 
+  let results = [...STUB_RESULTS];
   if (S.catPrice === 'budget')        results = results.filter(r => r.id === 4);
   else if (S.catPrice === 'balanced') results = results.filter(r => [1, 4].includes(r.id));
   else if (S.catPrice === 'premium')  results = results.filter(r => [2, 3].includes(r.id));
@@ -345,6 +368,7 @@ function dShowResults() {
   }];
 
   const list = document.getElementById('d-mat-list');
+  if (!list) return;
   list.innerHTML = results.map(m => `
     <div class="d-mat-card" id="dmc-${m.id}">
       <div class="d-mat-head" onclick="dToggleMatCard(${m.id})">
@@ -378,10 +402,6 @@ function dShowResults() {
         </a>
       </div></div>
     </div>`).join('');
-
-  // Show samples divider if there are samples
-  const divider = document.getElementById('d-samples-divider');
-  if (divider) divider.style.display = S.samples.length ? '' : 'none';
 }
 
 function dToggleMatCard(mid) {
@@ -392,23 +412,18 @@ function dToggleMatCard(mid) {
 }
 
 function dApplyMat(e, mid, name, color) {
-  // Add to samples
   S.samples.push({ id: mid, name, color });
-  // Auto-apply to 3D
   S.activeSample = { id: mid, name, color, _idx: S.samples.length - 1 };
   if (typeof applyMaterialToScene === 'function') applyMaterialToScene(color);
-  // Flash button
   const btn = e.currentTarget;
   const orig = btn.textContent;
   btn.textContent = '✓';
   btn.style.background = '#444';
   setTimeout(() => { btn.textContent = orig; btn.style.background = '#000'; }, 600);
-  // Update samples view
   dRenderSwatches();
 }
 
 function dCompareMat(e, mid, name, color) {
-  // Placeholder — save to compare list
   const btn = e.currentTarget;
   btn.textContent = '✓ Запомнен';
   btn.style.fontWeight = '400';
@@ -416,7 +431,6 @@ function dCompareMat(e, mid, name, color) {
 }
 
 function dEstimateMat(e, mid, name) {
-  // Placeholder — add to estimate
   const btn = e.currentTarget;
   btn.textContent = '✓ В смете';
   btn.style.fontWeight = '400';
@@ -432,8 +446,8 @@ function dShowSummary() {
     ['Площадь', (document.getElementById('v-area')?.value || '—') + ' кв.м'],
     ['Высота этажа', (document.getElementById('v-floor')?.value || '—') + ' см'],
     ['Фундамент', (document.getElementById('v-found')?.value || '—') + ' см'],
-    ['Что строим', S.sections.length
-      ? S.sections.map(s => D_SIDEBAR_ITEMS.find(x => x.id === s)?.lbl || s).join(', ')
+    ['Настроено', dConfigured.size
+      ? [...dConfigured].map(s => D_SIDEBAR_ITEMS.find(x => x.id === s)?.lbl || s).join(', ')
       : 'не выбрано'],
     ...Object.entries(S.mats).map(([k, v]) => [
       D_SIDEBAR_ITEMS.find(x => x.id === k)?.lbl || k, v.name
@@ -450,12 +464,9 @@ function dCloseSummary() {
 }
 
 // ══════════════════════════════════════════════
-// COMPATIBILITY — overrides for functions that canvas.js & viewer3d call
+// COMPATIBILITY — overrides for mobile nav functions
 // ══════════════════════════════════════════════
-
-// The mobile nav.js defines goTo(), but we override it for desktop
-// so viewer3d-core.js or canvas.js won't break if they call goTo()
-function goTo(s) { /* no-op on desktop, all navigation via dGoTo */ }
+function goTo(s) { /* no-op on desktop */ }
 function updProg() { /* no-op */ }
 function goToConditional() { /* no-op */ }
 function goToAfter() { /* no-op */ }
@@ -465,13 +476,17 @@ function selHouse(el, name) { dSelHouse(el, name); }
 function tci(el) { el.classList.toggle('checked'); }
 function ttg(el) { el.classList.toggle('on'); }
 
-// Override renderSec for desktop (called by some init flows)
-function renderSec() { _dRenderPanelTabs(); dRenderSwatches(); }
+// Override renderSec/renderSwatches for desktop
+function renderSec() { _dRenderPanelContent(); }
 function renderSwatches() { dRenderSwatches(); }
 
-// getActive() — called by viewer3d-core.js (buildScene3d, applyMaterialToScene)
+// getActive() — returns the currently active section for material application
 function getActive() {
-  return SECS.filter(s => S.sections.length === 0 || S.sections.includes(s.req));
+  if (dActiveItem) {
+    const sec = SECS.find(s => s.id === dActiveItem);
+    if (sec) return [sec];
+  }
+  return SECS.slice(0, 1); // fallback
 }
 
 // Resize handler

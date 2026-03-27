@@ -107,6 +107,7 @@ const S = {
   samples: [],    // [{id, name, color}] — накопленные образцы
   activeSample: null, // {id, name, color} — текущий выбранный для примерки
   curSec: 0,
+  matSubMode: null,    // 'railing' when editing terrace railing material
   catColors: new Set(),
   catPrice: null,
   catShowResults: false,

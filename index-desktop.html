@@ -99,7 +99,7 @@
 <div class="d-screen" id="d-screen-3">
   <div class="d-workspace">
 
-    <!-- LEFT SIDEBAR: sections checklist + editors -->
+    <!-- LEFT SIDEBAR: button menu -->
     <div class="d-sidebar">
       <div class="d-sidebar-title">Элементы проекта</div>
       <div class="d-sidebar-list" id="d-sidebar-list">
@@ -107,7 +107,7 @@
       </div>
       <div class="d-sidebar-divider"></div>
       <div style="padding: 12px 20px;">
-        <button class="d-btn d-btn-back" style="width:100%; height:40px; font-size:14px;" onclick="dGoTo(2)">← К параметрам</button>
+        <button class="d-btn d-btn-back" style="width:100%; height:40px; font-size:14px;" onclick="dGoTo(2)">← Размеры дома</button>
       </div>
     </div>
 
@@ -163,6 +163,7 @@
               <div class="d-canvas-hint">Нажимайте точки последовательно вдоль дорожки</div>
             </div>
             <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="addBreak('paths')">＋ Новая линия</button>
               <button class="d-canvas-btn" onclick="undoPt('paths')">↩ Отменить</button>
               <button class="d-canvas-btn" onclick="clrPts('paths')">✕ Очистить</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('paths')">✓ Готово</button>
@@ -216,9 +217,10 @@
           <div class="d-canvas-header">
             <div>
               <div class="d-canvas-title">Забор — разметка</div>
-              <div class="d-canvas-hint">Точки прилипают к сетке (1 клетка = 1 м)</div>
+              <div class="d-canvas-hint">Точки прилипают к сетке (шаг 0.5 м)</div>
             </div>
             <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="addBreak('fence')">＋ Новая линия</button>
               <button class="d-canvas-btn" onclick="undoPt('fence')">↩ Отменить</button>
               <button class="d-canvas-btn" onclick="clrPts('fence')">✕ Очистить</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('fence')">✓ Готово</button>
@@ -236,10 +238,10 @@
         <div class="d-panel-title" id="d-panel-title">Материалы</div>
       </div>
       <div class="d-panel-body" id="d-panel-body">
-        <!-- Section tabs -->
-        <div class="d-panel-tabs" id="d-panel-tabs"></div>
+        <!-- Sub-toggle (Терраса / Ограждение — only for terrace) -->
+        <div class="d-panel-sub-toggle" id="d-panel-sub-toggle" style="display:none;"></div>
 
-        <!-- Color filter (always visible) -->
+        <!-- Color filter -->
         <div class="d-color-section">
           <div class="d-color-title">Цвет:</div>
           <div class="d-color-grid" id="d-color-grid"></div>
@@ -251,16 +253,14 @@
           <div class="d-price-grid" id="d-price-grid"></div>
         </div>
 
-        <button class="d-search-btn" style="margin-top:10px;" onclick="dShowResults()">ПОДОБРАТЬ</button>
+        <div class="d-filter-divider"></div>
+
+        <!-- Results (auto-shown) -->
+        <div class="d-mat-list" id="d-mat-list"></div>
 
         <div class="d-filter-divider"></div>
 
-        <!-- Results (appears after search) -->
-        <div class="d-mat-list" id="d-mat-list"></div>
-
-        <div class="d-filter-divider" id="d-samples-divider" style="display:none;"></div>
-
-        <!-- Samples (always visible below) -->
+        <!-- Samples -->
         <div class="d-samples-title" id="d-samples-lbl">Образцы:</div>
         <div class="d-samples-grid" id="d-samples-grid"></div>
       </div>
@@ -291,12 +291,12 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/EXRLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=9"></script>
-<script src="canvas.js?v=9"></script>
+<script src="state.js?v=10"></script>
+<script src="canvas.js?v=10"></script>
 <!-- 3D viewer -->
-<script src="viewer3d-core.js?v=9"></script>
-<script src="viewer3d-desktop.js?v=9"></script>
+<script src="viewer3d-core.js?v=10"></script>
+<script src="viewer3d-desktop.js?v=10"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=9"></script>
+<script src="nav-desktop.js?v=10"></script>
 </body>
 </html>

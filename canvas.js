@@ -4,7 +4,9 @@
 // PAN/ZOOM ENGINE
 // ══════════════════════════════════════════════
 const CV = {};
-const GRID = 32;
+const GRID = 32;       // total meters (canvas area)
+const SNAP = 0.5;      // snap step (meters)
+const CELLS = GRID / SNAP; // 64 grid cells
 
 function mkCvState() {
   return { scale:1, ox:0, oy:0, minScale:0.5, maxScale:4,
@@ -85,7 +87,7 @@ function initSnapCanvas(name) {
 
   attachPanZoom(wrap, name, ()=>drawSnapCanvas(name));
 
-  // Клик — добавить точку с snap
+  // Клик — добавить точку с snap (0.5m step)
   wrap.addEventListener('click', e=>{
     if (CV[name].pinching) return;
     const cvEl=document.getElementById('cv-'+name); if (!cvEl) return;
@@ -93,8 +95,8 @@ function initSnapCanvas(name) {
     const sx=(e.clientX-r.left)*dpr, sy=(e.clientY-r.top)*dpr;
     const cx=CV[name];
     const wx=(sx-cx.ox)/cx.scale, wy=(sy-cx.oy)/cx.scale;
-    const W=cvEl.width, step=W/GRID;
-    S.pts[name].push({ x:Math.round(wx/step)*step/W, y:Math.round(wy/step)*step/W });
+    const W=cvEl.width, snapStep=W/CELLS;
+    S.pts[name].push({ x:Math.round(wx/snapStep)*snapStep/W, y:Math.round(wy/snapStep)*snapStep/W });
     drawSnapCanvas(name);
   });
 }
@@ -157,35 +159,55 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
     if (secId === excludeName) continue;
     const tp = S.pts[secId];
     if (!tp || tp.length < 2) continue;
-    ctx.beginPath(); ctx.moveTo(tp[0].x*W, tp[0].y*H);
-    for (let i=1; i<tp.length; i++) ctx.lineTo(tp[i].x*W, tp[i].y*H);
-    if (tp.length > 2 && secId !== 'fence') ctx.closePath();
-    else if (secId === 'fence' && tp.length > 2) ctx.closePath();
-    if (style.fill !== 'none') { ctx.fillStyle=style.fill; ctx.fill(); }
-    ctx.strokeStyle=style.stroke; ctx.lineWidth=2/sc;
-    ctx.setLineDash([6/sc,3/sc]); ctx.stroke(); ctx.setLineDash([]);
+    const realPts = tp.filter(p=>!p.break);
+    if (realPts.length < 2) continue;
+
+    if (secId === 'fence') {
+      // Забор: несколько линий (разделены break)
+      const segs = splitAtBreaks(tp);
+      for (const seg of segs) {
+        if (seg.length < 2) continue;
+        ctx.beginPath(); ctx.moveTo(seg[0].x*W, seg[0].y*H);
+        for (let i=1;i<seg.length;i++) ctx.lineTo(seg[i].x*W, seg[i].y*H);
+        ctx.strokeStyle=style.stroke; ctx.lineWidth=2/sc;
+        ctx.setLineDash([6/sc,3/sc]); ctx.stroke(); ctx.setLineDash([]);
+      }
+    } else {
+      ctx.beginPath(); ctx.moveTo(realPts[0].x*W, realPts[0].y*H);
+      for (let i=1; i<realPts.length; i++) ctx.lineTo(realPts[i].x*W, realPts[i].y*H);
+      if (realPts.length > 2) ctx.closePath();
+      if (style.fill !== 'none') { ctx.fillStyle=style.fill; ctx.fill(); }
+      ctx.strokeStyle=style.stroke; ctx.lineWidth=2/sc;
+      ctx.setLineDash([6/sc,3/sc]); ctx.stroke(); ctx.setLineDash([]);
+    }
     // Подпись
-    const centX = tp.reduce((s,p)=>s+p.x,0)/tp.length*W;
-    const centY = tp.reduce((s,p)=>s+p.y,0)/tp.length*H;
+    const centX = realPts.reduce((s,p)=>s+p.x,0)/realPts.length*W;
+    const centY = realPts.reduce((s,p)=>s+p.y,0)/realPts.length*H;
     ctx.fillStyle=style.stroke; ctx.font=`${10/sc}px Roboto`; ctx.textAlign='center';
     ctx.fillText(style.label, centX, centY);
   }
 
-  // 3. Дорожки — рисуем как полосу указанной ширины
+  // 3. Дорожки — рисуем как полосу указанной ширины (несколько линий)
   if (excludeName !== 'paths') {
     const pp = S.pts.paths;
     if (pp && pp.length >= 2) {
       const pathWidthCm = parseFloat(document.getElementById('v-paths-width')?.value || 120);
-      const pathHalfW = (pathWidthCm / 100) / GRID * W / 2; // половина ширины в пикселях canvas
-      ctx.strokeStyle='rgba(51,102,0,.3)'; ctx.lineWidth=pathHalfW*2; ctx.lineCap='round'; ctx.lineJoin='round';
-      ctx.beginPath(); ctx.moveTo(pp[0].x*W, pp[0].y*H);
-      for (let i=1; i<pp.length; i++) ctx.lineTo(pp[i].x*W, pp[i].y*H);
-      ctx.stroke();
-      ctx.lineWidth=2/sc; // reset
-      // Подпись
-      const mid = pp[Math.floor(pp.length/2)];
-      ctx.fillStyle='rgba(51,102,0,.6)'; ctx.font=`${10/sc}px Roboto`; ctx.textAlign='center';
-      ctx.fillText('Дорожка', mid.x*W, mid.y*H - pathHalfW - 4/sc);
+      const pathHalfW = (pathWidthCm / 100) / GRID * W / 2;
+      const segs = splitAtBreaks(pp);
+      for (const seg of segs) {
+        if (seg.length < 2) continue;
+        ctx.strokeStyle='rgba(51,102,0,.3)'; ctx.lineWidth=pathHalfW*2; ctx.lineCap='round'; ctx.lineJoin='round';
+        ctx.beginPath(); ctx.moveTo(seg[0].x*W, seg[0].y*H);
+        for (let i=1; i<seg.length; i++) ctx.lineTo(seg[i].x*W, seg[i].y*H);
+        ctx.stroke();
+      }
+      ctx.lineWidth=2/sc;
+      const realPts = pp.filter(p=>!p.break);
+      if (realPts.length) {
+        const mid = realPts[Math.floor(realPts.length/2)];
+        ctx.fillStyle='rgba(51,102,0,.6)'; ctx.font=`${10/sc}px Roboto`; ctx.textAlign='center';
+        ctx.fillText('Дорожка', mid.x*W, mid.y*H - pathHalfW - 4/sc);
+      }
     }
   }
 
@@ -206,6 +228,16 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
   }
 }
 
+// Разделяет массив точек по маркерам {break:true} на сегменты
+function splitAtBreaks(pts) {
+  const segs = [[]];
+  for (const p of pts) {
+    if (p.break) segs.push([]);
+    else segs[segs.length-1].push(p);
+  }
+  return segs.filter(s => s.length > 0);
+}
+
 function drawSnapCanvas(name) {
   const cvEl=document.getElementById('cv-'+name); if (!cvEl) return;
   const ctx=cvEl.getContext('2d'), W=cvEl.width, H=cvEl.height;
@@ -215,63 +247,78 @@ function drawSnapCanvas(name) {
 
   ctx.fillStyle='#d9d9d9'; ctx.fillRect(0,0,W,H);
 
-  // Сетка
-  const step=W/GRID;
-  ctx.fillStyle='#bbb';
-  for(let r=0;r<=GRID;r++) for(let c=0;c<=GRID;c++) {
-    ctx.beginPath(); ctx.arc(c*step,r*step,2/cx.scale,0,Math.PI*2); ctx.fill();
+  // Сетка (0.5 м шаг)
+  const step=W/CELLS;
+  for(let r=0;r<=CELLS;r++) for(let c=0;c<=CELLS;c++) {
+    const isMajor = (r*SNAP)%1===0 && (c*SNAP)%1===0;
+    ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
+    ctx.beginPath(); ctx.arc(c*step,r*step,(isMajor?2:1.2)/cx.scale,0,Math.PI*2); ctx.fill();
   }
 
   // Метки метров (каждые 5м)
   ctx.fillStyle='#999'; ctx.font=`${9/cx.scale}px Roboto`; ctx.textAlign='center';
-  for(let i=5;i<=GRID;i+=5) ctx.fillText(i+'м', i*step, H-3/cx.scale);
+  for(let m=5;m<=GRID;m+=5) { const px=m/GRID*W; ctx.fillText(m+'м', px, H-3/cx.scale); }
 
-  // Ранее заданные объекты (дом, терраса, дорожки, крыльцо и т.д.)
+  // Ранее заданные объекты
   drawPreviousLayers(ctx, W, H, cx, name);
 
-  // Подсказка (если ещё нет точек)
-  if (!pts.length) {
+  // Подсказка
+  const realPts = pts.filter(p=>!p.break);
+  if (!realPts.length) {
     ctx.fillStyle='#aaa'; ctx.font=`${13/cx.scale}px Roboto`; ctx.textAlign='center';
     const hint={terrace:'Нажмите чтобы поставить угол',pool_terrace:'Нажмите чтобы поставить угол',
-                 pier:'Нажмите чтобы поставить угол',fence:'Нажмите чтобы поставить угол',
+                 pier:'Нажмите чтобы поставить угол',fence:'Нажмите чтобы поставить точку',
                  paths:'Нажмите точки вдоль дорожки'};
     ctx.fillText(hint[name]||'Нажмите чтобы поставить точку', W/2, H*0.92);
   }
 
   // Контур текущей секции
-  if (pts.length > 0) {
+  if (realPts.length > 0) {
     const color = {terrace:'#000',pool_terrace:'#0050CC',pier:'#1a7acc',paths:'#336600',fence:'#000'}[name]||'#000';
+    const segments = (name==='paths'||name==='fence') ? splitAtBreaks(pts) : [realPts];
 
     if (name === 'paths') {
-      // Дорожки — рисуем широкой полосой
       const pathWidthCm = parseFloat(document.getElementById('v-paths-width')?.value || 120);
       const pathW = (pathWidthCm / 100) / GRID * W;
-      // Полоса
-      ctx.strokeStyle='rgba(51,102,0,.25)'; ctx.lineWidth=pathW; ctx.lineCap='round'; ctx.lineJoin='round';
-      ctx.beginPath(); ctx.moveTo(pts[0].x*W, pts[0].y*H);
-      for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x*W, pts[i].y*H);
-      ctx.stroke();
-      // Центральная линия
-      ctx.strokeStyle=color; ctx.lineWidth=2/cx.scale; ctx.lineCap='butt';
-      ctx.setLineDash([6/cx.scale,3/cx.scale]);
-      ctx.beginPath(); ctx.moveTo(pts[0].x*W, pts[0].y*H);
-      for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x*W, pts[i].y*H);
-      ctx.stroke(); ctx.setLineDash([]);
+      for (const seg of segments) {
+        if (seg.length < 1) continue;
+        // Полоса
+        ctx.strokeStyle='rgba(51,102,0,.25)'; ctx.lineWidth=pathW; ctx.lineCap='round'; ctx.lineJoin='round';
+        ctx.beginPath(); ctx.moveTo(seg[0].x*W, seg[0].y*H);
+        for(let i=1;i<seg.length;i++) ctx.lineTo(seg[i].x*W, seg[i].y*H);
+        ctx.stroke();
+        // Центральная линия
+        ctx.strokeStyle=color; ctx.lineWidth=2/cx.scale; ctx.lineCap='butt';
+        ctx.setLineDash([6/cx.scale,3/cx.scale]);
+        ctx.beginPath(); ctx.moveTo(seg[0].x*W, seg[0].y*H);
+        for(let i=1;i<seg.length;i++) ctx.lineTo(seg[i].x*W, seg[i].y*H);
+        ctx.stroke(); ctx.setLineDash([]);
+      }
+    } else if (name === 'fence') {
+      for (const seg of segments) {
+        if (seg.length < 1) continue;
+        ctx.beginPath(); ctx.moveTo(seg[0].x*W,seg[0].y*H);
+        for(let i=1;i<seg.length;i++) ctx.lineTo(seg[i].x*W,seg[i].y*H);
+        ctx.strokeStyle=color; ctx.lineWidth=2.5/cx.scale; ctx.stroke();
+      }
     } else {
-      // Полигоны
-      ctx.beginPath(); ctx.moveTo(pts[0].x*W,pts[0].y*H);
-      for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x*W,pts[i].y*H);
-      if(pts.length>2) { ctx.closePath(); ctx.fillStyle='rgba(0,0,0,.08)'; ctx.fill(); }
+      // Полигоны (terrace, pool_terrace, pier)
+      ctx.beginPath(); ctx.moveTo(realPts[0].x*W,realPts[0].y*H);
+      for(let i=1;i<realPts.length;i++) ctx.lineTo(realPts[i].x*W,realPts[i].y*H);
+      if(realPts.length>2) { ctx.closePath(); ctx.fillStyle='rgba(0,0,0,.08)'; ctx.fill(); }
       ctx.strokeStyle=color; ctx.lineWidth=2.5/cx.scale; ctx.stroke();
     }
 
-    // Точки
-    pts.forEach((p,i)=>{
+    // Точки (все реальные точки с номерами)
+    let ptNum = 0;
+    pts.forEach(p=>{
+      if (p.break) return;
+      ptNum++;
       ctx.beginPath(); ctx.arc(p.x*W,p.y*H,8/cx.scale,0,Math.PI*2);
       ctx.fillStyle='#fff'; ctx.fill();
       ctx.strokeStyle=color; ctx.lineWidth=2.5/cx.scale; ctx.stroke();
       ctx.fillStyle=color; ctx.font=`bold ${10/cx.scale}px Roboto`; ctx.textAlign='center';
-      ctx.fillText(i+1,p.x*W,p.y*H+4/cx.scale);
+      ctx.fillText(ptNum,p.x*W,p.y*H+4/cx.scale);
     });
   }
 
@@ -280,6 +327,14 @@ function drawSnapCanvas(name) {
 
 function undoPt(n) { S.pts[n].pop(); drawSnapCanvas(n); }
 function clrPts(n) { S.pts[n]=[]; drawSnapCanvas(n); }
+// Новая линия (разрыв) для дорожек и забора
+function addBreak(n) {
+  const pts = S.pts[n];
+  // Не добавляем break подряд или в начало
+  if (!pts.length || pts[pts.length-1].break) return;
+  pts.push({ break: true });
+  drawSnapCanvas(n);
+}
 
 // Для дорожек - тот же snap-canvas, уже обрабатывается выше
 function initPathsCanvas() { initSnapCanvas('paths'); }
@@ -415,13 +470,19 @@ function hitPorchHandle(wx,wy,W) {
   if(wx>=x&&wx<=x+w&&wy>=y&&wy<=y+h) return 'move';
   return null;
 }
+// Snap нормализованной координаты к сетке 0.5 м
+function snapNorm(v) { return Math.round(v * GRID / SNAP) * SNAP / GRID; }
+
 function applyPorchDrag(wx,wy,W) {
-  const ds=porchDragStart, dx=(wx-ds.mx)/W, dy=(wy-ds.my)/W, mn=0.05, p=S.porch;
-  if(porchDrag==='move'){ p.x=Math.max(0,Math.min(1-ds.w,ds.x+dx)); p.y=Math.max(0,Math.min(1-ds.h,ds.y+dy)); }
-  else if(porchDrag==='se'){ p.w=Math.max(mn,ds.w+dx); p.h=Math.max(mn,ds.h+dy); }
-  else if(porchDrag==='sw'){ const nw=Math.max(mn,ds.w-dx); p.x=ds.x+ds.w-nw; p.w=nw; p.h=Math.max(mn,ds.h+dy); }
-  else if(porchDrag==='ne'){ p.w=Math.max(mn,ds.w+dx); const nh=Math.max(mn,ds.h-dy); p.y=ds.y+ds.h-nh; p.h=nh; }
-  else if(porchDrag==='nw'){ const nw2=Math.max(mn,ds.w-dx); p.x=ds.x+ds.w-nw2; p.w=nw2; const nh2=Math.max(mn,ds.h-dy); p.y=ds.y+ds.h-nh2; p.h=nh2; }
+  const ds=porchDragStart, dx=(wx-ds.mx)/W, dy=(wy-ds.my)/W, mn=SNAP/GRID, p=S.porch;
+  if(porchDrag==='move'){
+    p.x=snapNorm(Math.max(0,Math.min(1-ds.w,ds.x+dx)));
+    p.y=snapNorm(Math.max(0,Math.min(1-ds.h,ds.y+dy)));
+  }
+  else if(porchDrag==='se'){ p.w=snapNorm(Math.max(mn,ds.w+dx)); p.h=snapNorm(Math.max(mn,ds.h+dy)); }
+  else if(porchDrag==='sw'){ const nw=snapNorm(Math.max(mn,ds.w-dx)); p.x=ds.x+ds.w-nw; p.w=nw; p.h=snapNorm(Math.max(mn,ds.h+dy)); }
+  else if(porchDrag==='ne'){ p.w=snapNorm(Math.max(mn,ds.w+dx)); const nh=snapNorm(Math.max(mn,ds.h-dy)); p.y=ds.y+ds.h-nh; p.h=nh; }
+  else if(porchDrag==='nw'){ const nw2=snapNorm(Math.max(mn,ds.w-dx)); p.x=ds.x+ds.w-nw2; p.w=nw2; const nh2=snapNorm(Math.max(mn,ds.h-dy)); p.y=ds.y+ds.h-nh2; p.h=nh2; }
   drawPorchCanvas();
 }
 
@@ -433,16 +494,18 @@ function drawPorchCanvas() {
 
   ctx.fillStyle='#d9d9d9'; ctx.fillRect(0,0,W,H);
 
-  // Сетка
-  const step=W/GRID; ctx.fillStyle='#bbb';
-  for(let r=0;r<=GRID;r++) for(let c=0;c<=GRID;c++) {
-    ctx.beginPath(); ctx.arc(c*step,r*step,2/cx.scale,0,Math.PI*2); ctx.fill();
+  // Сетка (0.5 м шаг)
+  const step=W/CELLS;
+  for(let r=0;r<=CELLS;r++) for(let c=0;c<=CELLS;c++) {
+    const isMajor = (r*SNAP)%1===0 && (c*SNAP)%1===0;
+    ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
+    ctx.beginPath(); ctx.arc(c*step,r*step,(isMajor?2:1.2)/cx.scale,0,Math.PI*2); ctx.fill();
   }
   // Метки метров
   ctx.fillStyle='#999'; ctx.font=`${9/cx.scale}px Roboto`; ctx.textAlign='center';
-  for(let i=5;i<=GRID;i+=5) ctx.fillText(i+'м', i*step, H-3/cx.scale);
+  for(let m=5;m<=GRID;m+=5) { const px=m/GRID*W; ctx.fillText(m+'м', px, H-3/cx.scale); }
 
-  // Ранее заданные объекты (дом, терраса, дорожки и т.д.)
+  // Ранее заданные объекты
   drawPreviousLayers(ctx, W, H, cx, 'porch');
 
   // Крыльцо

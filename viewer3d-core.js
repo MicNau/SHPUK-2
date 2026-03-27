@@ -663,6 +663,7 @@ function buildScene3d() {
     const secId = sec ? sec.id : 'terrace';
     if      (secId === 'facade') M.wall.color.set(S.activeSample.color);
     else if (secId === 'porch')  M.step.color.set(S.activeSample.color);
+    else if (secId === 'fence')  { /* fence uses its own mat */ }
     else                         M.deck.color.set(S.activeSample.color);
   }
 
@@ -700,13 +701,13 @@ function buildScene3d() {
   if (S.sections.includes('pier') && S.pts.pier.length >= 3)
     buildTerrace3d(houseGroup, M, S.pts.pier, 0.5, houseL, houseW, 'deckMeshes');
 
-  if (S.sections.includes('paths') && S.pts.paths.length >= 2)
+  if (S.sections.includes('paths') && S.pts.paths.filter(p=>!p.break).length >= 2)
     buildPaths3d(houseGroup, M, S.pts.paths, houseL, houseW);
 
   if (S.sections.includes('porch') && !isNoHouse)
     buildPorch3d(houseGroup, M, S.porch, houseL, houseW, bh);
 
-  if (S.sections.includes('fence') && S.pts.fence.length >= 2)
+  if (S.sections.includes('fence') && S.pts.fence.filter(p=>!p.break).length >= 2)
     buildFence3d(houseGroup, M, S.pts.fence, houseL, houseW);
 
   const terraceRailingOn = document.querySelector('.tg[data-id="terrace-railing"]')?.classList.contains('on');
@@ -1005,49 +1006,53 @@ function buildPorch3d(parent,M,porch,houseL,houseW,bh){
 }
 
 function buildPaths3d(parent,M,pts,houseL,houseW){
-  if(pts.length<2)return;
-  const worldPts=canvasToWorld(pts,houseL,houseW);
+  const realPts=pts.filter(p=>!p.break);
+  if(realPts.length<2)return;
   const pathW=parseFloat(document.getElementById('v-paths-width')?.value||120)/100;
   const boardW=.14,boardH=.022,gap=.005;
   const pathGroup=new THREE.Group();
   const box=(sx,sy,sz)=>new THREE.BoxGeometry(sx,sy,sz);
   const meshFn=(geo,mat)=>{const m=new THREE.Mesh(geo,mat);m.castShadow=m.receiveShadow=true;return m;};
-  for(let i=0;i<worldPts.length-1;i++){
-    const a=worldPts[i],b=worldPts[i+1],dx=b.x-a.x,dz=b.z-a.z;
-    const segLen=Math.sqrt(dx*dx+dz*dz); if(segLen<.1)continue;
-    const angle=Math.atan2(dx,dz);
-    for(let d=boardW/2;d<segLen;d+=boardW+gap){
-      const t=d/segLen,bx=a.x+dx*t,bz=a.z+dz*t;
-      const bd=meshFn(box(pathW,boardH,boardW),M.deck);bd.position.set(bx,boardH/2,bz);bd.rotation.y=angle;pathGroup.add(bd);threeState.deckMeshes.push(bd);
+  // Разбиваем на сегменты по маркерам break
+  const segments = (typeof splitAtBreaks==='function') ? splitAtBreaks(pts) : [realPts];
+  for(const seg of segments){
+    if(seg.length<2)continue;
+    const worldPts=canvasToWorld(seg,houseL,houseW);
+    for(let i=0;i<worldPts.length-1;i++){
+      const a=worldPts[i],b=worldPts[i+1],dx=b.x-a.x,dz=b.z-a.z;
+      const segLen=Math.sqrt(dx*dx+dz*dz); if(segLen<.1)continue;
+      const angle=Math.atan2(dx,dz);
+      for(let d=boardW/2;d<segLen;d+=boardW+gap){
+        const t=d/segLen,bx=a.x+dx*t,bz=a.z+dz*t;
+        const bd=meshFn(box(pathW,boardH,boardW),M.deck);bd.position.set(bx,boardH/2,bz);bd.rotation.y=angle;pathGroup.add(bd);threeState.deckMeshes.push(bd);
+      }
     }
   }
   parent.add(pathGroup);
 }
 
 function buildFence3d(parent,M,pts,houseL,houseW){
-  if(pts.length<2)return;
-  const worldPts=canvasToWorld(pts,houseL,houseW);
+  const realPts=pts.filter(p=>!p.break);
+  if(realPts.length<2)return;
   const fenceH=1.8,postW=.1,boardH=fenceH-.2,boardT=.02;
   const fenceGroup=new THREE.Group();
   const box=(sx,sy,sz)=>new THREE.BoxGeometry(sx,sy,sz);
   const meshFn=(geo,mat)=>{const m=new THREE.Mesh(geo,mat);m.castShadow=m.receiveShadow=true;return m;};
   const fenceMat=new THREE.MeshStandardMaterial({color:0x8B7355,roughness:.80,metalness:.05});
-  for(let i=0;i<worldPts.length;i++){
-    const p=worldPts[i],postH=fenceH+.2;
-    const post=meshFn(box(postW,postH,postW),M.post);post.position.set(p.x,postH/2,p.z);fenceGroup.add(post);
-    if(i<worldPts.length-1){
-      const a=worldPts[i],b=worldPts[i+1],dx=b.x-a.x,dz=b.z-a.z;
-      const segLen=Math.sqrt(dx*dx+dz*dz); if(segLen<.2)continue;
-      const angle=Math.atan2(dx,dz),mx=(a.x+b.x)/2,mz=(a.z+b.z)/2;
-      const panel=meshFn(box(boardT,boardH,segLen-postW),fenceMat);panel.position.set(mx,.2+boardH/2,mz);panel.rotation.y=angle;fenceGroup.add(panel);threeState.fenceMeshes.push(panel);
-    }
-  }
-  if(worldPts.length>=3){
-    const a=worldPts[worldPts.length-1],b=worldPts[0],dx=b.x-a.x,dz=b.z-a.z;
-    const segLen=Math.sqrt(dx*dx+dz*dz); if(segLen>.2){
-      const angle=Math.atan2(dx,dz),mx=(a.x+b.x)/2,mz=(a.z+b.z)/2;
-      const fenceMat2=new THREE.MeshStandardMaterial({color:0x8B7355,roughness:.80,metalness:.05});
-      const panel=meshFn(box(.02,fenceH-.2,segLen-.1),fenceMat2);panel.position.set(mx,.2+(fenceH-.2)/2,mz);panel.rotation.y=angle;fenceGroup.add(panel);threeState.fenceMeshes.push(panel);
+  // Разбиваем на сегменты по маркерам break
+  const segments = (typeof splitAtBreaks==='function') ? splitAtBreaks(pts) : [realPts];
+  for(const seg of segments){
+    if(seg.length<2)continue;
+    const worldPts=canvasToWorld(seg,houseL,houseW);
+    for(let i=0;i<worldPts.length;i++){
+      const p=worldPts[i],postH=fenceH+.2;
+      const post=meshFn(box(postW,postH,postW),M.post);post.position.set(p.x,postH/2,p.z);fenceGroup.add(post);
+      if(i<worldPts.length-1){
+        const a=worldPts[i],b=worldPts[i+1],dx=b.x-a.x,dz=b.z-a.z;
+        const segLen=Math.sqrt(dx*dx+dz*dz); if(segLen<.2)continue;
+        const angle=Math.atan2(dx,dz),mx=(a.x+b.x)/2,mz=(a.z+b.z)/2;
+        const panel=meshFn(box(boardT,boardH,segLen-postW),fenceMat);panel.position.set(mx,.2+boardH/2,mz);panel.rotation.y=angle;fenceGroup.add(panel);threeState.fenceMeshes.push(panel);
+      }
     }
   }
   parent.add(fenceGroup);
@@ -1103,9 +1108,12 @@ function applyMaterialToScene(colorHex) {
   const c=new THREE.Color(colorHex);
   const sec=getActive()[S.curSec], secId=sec?sec.id:'terrace';
   let targetMeshes=[], roughness=.72;
+  // Поддержка суб-режима (терраса/ограждение)
+  const subMode = (typeof S.matSubMode !== 'undefined') ? S.matSubMode : null;
   if(secId==='facade')     { targetMeshes=threeState.wallMeshes||[];  roughness=.85; }
   else if(secId==='porch') { targetMeshes=threeState.stepMeshes||[];  roughness=.80; }
   else if(secId==='fence') { targetMeshes=threeState.fenceMeshes||[]; roughness=.80; }
+  else if(secId==='terrace' && subMode==='railing') { targetMeshes=threeState.railingMeshes||[]; roughness=.60; }
   else                     { targetMeshes=[...(threeState.deckMeshes||[]),...(threeState.porchMeshes||[])]; }
   if(!targetMeshes.length) { buildScene3d(); return; }
   const newMat=new THREE.MeshStandardMaterial({color:c,roughness,metalness:.02});
