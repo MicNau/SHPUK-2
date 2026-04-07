@@ -145,30 +145,71 @@ mod_window_wide.glb (дополнительно):
 └── (остальные — как у single)
 ```
 
-**Алгоритм трансформации окна** (целевые размеры: `w`, `h`):
+**Origin дочерних объектов окна в Blender:**
+
+Каждый дочерний объект имеет свой origin в **точке масштабирования** — точке,
+которая остаётся на месте при изменении `scale`. Модель делается в дефолтном
+размере (например, 0.90 × 1.20 м), все части расположены на своих местах.
+
+```
+Вид снаружи (⊕ = origin дочернего объекта):
+
+         Y
+         ▲
+         │  ⊕─────────────────────⊕   frame_top: origin в левом конце
+         │  │                     │
+         │  │                     │
+         │  ⊕       ⊕ glass      │   glass: origin в центре плоскости
+         │  │   (origin в центре) │   frame_left: origin внизу стойки
+         │  │                     ⊕   frame_right: origin внизу стойки
+         │  │                     │
+         ⊕──⊕─────────────────────⊕──► X
+       parent   frame_bottom       sill
+       origin   origin в лев.конце  origin в лев.конце
+       (0,0,0)
+```
+
+| Дочерний объект | Origin в Blender | Растёт при scale |
+|----------------|-----------------|:---:|
+| `frame_left` | Низ стойки (min Y), наружная грань | ↑ (scale.y) |
+| `frame_right` | Низ стойки (min Y), наружная грань | ↑ (scale.y) |
+| `frame_top` | Левый конец (min X), наружная грань | → (scale.x) |
+| `frame_bottom` | Левый конец (min X), наружная грань | → (scale.x) |
+| `sill` | Левый конец (min X) | → (scale.x) |
+| `glass` | **Центр** плоскости | ← → ↑ ↓ (scale.x, scale.y) |
+| `curtain` | **Центр** плоскости | ← → ↑ ↓ (scale.x, scale.y) |
+| `mullion_v` | Низ импоста (min Y) | ↑ (scale.y) |
+| `mullion_h` | Левый конец (min X) | → (scale.x) |
+
+**Алгоритм трансформации окна** (целевые `w`, `h`; дефолтные `dW`, `dH`):
 
 ```javascript
 // frameW — ширина профиля рамы (из дескриптора: frame_profile, обычно 0.05 м)
 // sillOH — свес подоконника за раму (из дескриптора: sill_overhang, обычно 0.03 м)
+// dW, dH — дефолтные ширина и высота из modules (например, 0.90 и 1.20)
+// dGW = dW - frameW*2, dGH = dH - frameW*2 — дефолтные размеры стекла
 
-frame_left:   position.x = 0;           scale.y = h;
-frame_right:  position.x = w;           scale.y = h;
-frame_top:    position.y = h;           scale.x = w;
-frame_bottom: position.y = 0;           scale.x = w;
-sill:         position.y = 0;           scale.x = w + sillOH * 2;
-glass:        position.set(w/2, h/2);   scale.x = w - frameW*2;  scale.y = h - frameW*2;
-curtain:      position.set(w/2, h/2);   scale.x = w;             scale.y = h;
+frame_left:   position.x = 0;           scale.y = h / dH;
+frame_right:  position.x = w;           scale.y = h / dH;
+frame_top:    position.y = h;           scale.x = w / dW;
+frame_bottom: position.y = 0;           scale.x = w / dW;
+sill:         position.y = 0;           scale.x = (w + sillOH*2) / (dW + sillOH*2);
+glass:        position.set(w/2, h/2);   scale.x = (w - frameW*2) / dGW;
+                                        scale.y = (h - frameW*2) / dGH;
+curtain:      position.set(w/2, h/2);   scale.x = w / dW;
+                                        scale.y = h / dH;
 
 // Для double — импост по центру:
-mullion_v:    position.x = w / 2;       scale.y = h;
+mullion_v:    position.x = w / 2;       scale.y = h / dH;
 
 // Для wide — крестообразный импост:
-mullion_v:    position.x = w / 2;       scale.y = h;
-mullion_h:    position.y = h / 2;       scale.x = w;
+mullion_v:    position.x = w / 2;       scale.y = h / dH;
+mullion_h:    position.y = h / 2;       scale.x = w / dW;
 ```
 
 Рама (`frame_*`) — профиль фиксированного сечения (например, 50 мм), масштабируется
-только по длине. Стекло и штора — плоскости, масштабируются по обеим осям.
+только по длине. Сечение профиля **не масштабируется**. Стекло и штора — плоскости,
+масштабируются по обеим осям симметрично от центра.
 
 #### Дверь (все типы: `door_single`, `door_onehalf`, `door_double`, `door_slide_*`)
 
@@ -203,23 +244,41 @@ mod_door_slide_double.glb (дополнительно):
 └── (остальные — как у slide_single)
 ```
 
-**Алгоритм трансформации двери** (целевые размеры: `w`, `h`):
+**Origin дочерних объектов двери в Blender:**
+
+| Дочерний объект | Origin в Blender | Растёт при scale |
+|----------------|-----------------|:---:|
+| `frame_left` | Низ стойки (min Y), наружная грань | ↑ (scale.y) |
+| `frame_right` | Низ стойки (min Y), наружная грань | ↑ (scale.y) |
+| `frame_top` | Левый конец (min X), наружная грань | → (scale.x) |
+| `threshold` | Левый конец (min X) | → (scale.x) |
+| `leaf_main` | **Нижний-левый** угол полотна (у петель) | → ↑ (scale.x, scale.y) |
+| `leaf_minor` | **Нижний-левый** угол полотна | → ↑ (scale.x, scale.y) |
+| `handle` | Точка крепления к полотну | — (не масштабируется) |
+| `rail_top` | Левый конец (min X) | → (scale.x) |
+| `rail_bottom` | Левый конец (min X) | → (scale.x) |
+
+**Алгоритм трансформации двери** (целевые `w`, `h`; дефолтные `dW`, `dH`):
 
 ```javascript
-frame_left:   position.x = 0;           scale.y = h;
-frame_right:  position.x = w;           scale.y = h;
-frame_top:    position.y = h;           scale.x = w;
-threshold:    position.y = 0;           scale.x = w;
-leaf_main:    scale.x = leafW;          scale.y = h;
+// dW, dH — дефолтные ширина и высота из modules
+// dLeafW — дефолтная ширина полотна
+// frameW — ширина профиля коробки (frame_profile)
+
+frame_left:   position.x = 0;           scale.y = h / dH;
+frame_right:  position.x = w;           scale.y = h / dH;
+frame_top:    position.y = h;           scale.x = w / dW;
+threshold:    position.y = 0;           scale.x = w / dW;
+leaf_main:    scale.x = leafW / dLeafW; scale.y = h / dH;
               // leafW зависит от типа:
               //   single:   w - frameW*2
               //   onehalf:  (w - frameW*2) * 0.67
               //   double:   (w - frameW*2) / 2
               //   slide_*:  w / leaves
-leaf_minor:   scale.x = minorW;         scale.y = h;
+leaf_minor:   scale.x = minorW / dMinorW; scale.y = h / dH;
               // onehalf:  (w - frameW*2) * 0.33
-              // double:   (w - frameW*2) / 2
-              // slide_double: w / 2
+              //   double:   (w - frameW*2) / 2
+              //   slide_double: w / 2
 handle:       // только репозиционируется, не масштабируется
 ```
 
@@ -235,7 +294,18 @@ mod_window_velux.glb:
 └── flashing        — оклад (гидроизоляционная рамка вокруг окна)
 ```
 
-Трансформация — как у обычного окна. Модуль размещается **в плоскости ската крыши**,
+**Origin дочерних объектов velux в Blender:**
+
+| Дочерний объект | Origin в Blender | Растёт при scale |
+|----------------|-----------------|:---:|
+| `frame_left` | Низ стойки (min Y) | ↑ (scale.y) |
+| `frame_right` | Низ стойки (min Y) | ↑ (scale.y) |
+| `frame_top` | Левый конец (min X) | → (scale.x) |
+| `frame_bottom` | Левый конец (min X) | → (scale.x) |
+| `glass` | **Центр** плоскости | ← → ↑ ↓ (scale.x, scale.y) |
+| `flashing` | Левый-нижний угол | → ↑ (scale.x, scale.y) |
+
+Трансформация рамы — как у обычного окна. Модуль размещается **в плоскости ската крыши**,
 код вычисляет позицию и поворот по параметрам из `roof_windows` дескриптора.
 
 При установке velux код **вырезает прямоугольник** в геометрии ската и вставляет модуль.
@@ -259,14 +329,28 @@ mod_dormer.glb:
     └── sill
 ```
 
+**Origin дочерних объектов dormer в Blender:**
+
+| Дочерний объект | Origin в Blender | Растёт при scale |
+|----------------|-----------------|:---:|
+| `wall_front` | Нижний-левый угол, нар. грань (Z = 0) | → ↑ (scale.x, scale.y) |
+| `wall_left` | Нижний-передний угол (Z = 0, X = 0) | ↑ вглубь (scale.y, scale.z) |
+| `wall_right` | Нижний-передний угол (Z = 0) | ↑ вглубь (scale.y, scale.z) |
+| `roof_left` | Нижнее ребро у стенки | → вглубь (scale.x, scale.z) |
+| `roof_right` | Нижнее ребро у стенки | → вглубь (scale.x, scale.z) |
+| `cornice` | Левый конец | → (scale.x) |
+| `window` (группа) | Нижний-левый угол рамы | как обычное окно |
+
 **Параметры dormer**: `w` (ширина фронта), `h` (высота стенки), `depth` (глубина выступа от ската).
 
 ```javascript
-wall_front:   scale.x = w;         scale.y = h;
-wall_left:    scale.z = depth;     scale.y = h;    position.x = 0;
-wall_right:   scale.z = depth;     scale.y = h;    position.x = w;
-roof_left:    scale.x = w / 2;    scale.z = depth;
-roof_right:   scale.x = w / 2;    scale.z = depth;
+// dW, dH, dD — дефолтные ширина, высота, глубина из modules
+
+wall_front:   scale.x = w / dW;       scale.y = h / dH;
+wall_left:    scale.z = depth / dD;   scale.y = h / dH;    position.x = 0;
+wall_right:   scale.z = depth / dD;   scale.y = h / dH;    position.x = w;
+roof_left:    scale.x = (w/2) / (dW/2);   scale.z = depth / dD;
+roof_right:   scale.x = (w/2) / (dW/2);   scale.z = depth / dD;
 // Встроенное окно трансформируется по тому же алгоритму, что обычное окно
 ```
 
@@ -984,33 +1068,51 @@ function buildEdgeWall(group, modules, floorModules, edge, wallH, yOffset, wt, p
   });
 }
 
-// Трансформирует дочерние объекты параметрического модуля
+// Трансформирует дочерние объекты параметрического модуля.
+// Каждый дочерний объект имеет свой origin (точку масштабирования):
+//   - вертикальные стойки: origin внизу → scale.y растит вверх
+//   - горизонтальные перекладины: origin слева → scale.x растит вправо
+//   - стекло/штора: origin в центре → scale симметрично
+//   - полотно двери: origin в нижнем-левом (у петель) → scale.x/.y
+//   - ручка: origin в точке крепления → только position, не scale
+// Scale всегда = отношение целевого размера к дефолтному (target / default).
 function transformParametricModule(moduleGroup, params) {
-  const { w, h, frame_profile: fp, sill_overhang: so } = params;
+  const { w, h, dW, dH, frame_profile: fp, sill_overhang: so } = params;
+  // dW, dH — дефолтные размеры из modules (модель сделана в этом размере)
+  const dGW = dW - fp*2, dGH = dH - fp*2; // дефолтные размеры стекла
+  const dSW = dW + (so||0)*2;             // дефолтная ширина подоконника
 
   moduleGroup.traverse(child => {
-    if (!child.isMesh) return;
+    if (!child.isMesh && !child.isGroup) return;
     switch (child.name) {
-      case 'frame_left':   child.position.x = 0;    child.scale.y = h; break;
-      case 'frame_right':  child.position.x = w;    child.scale.y = h; break;
-      case 'frame_top':    child.position.y = h;    child.scale.x = w; break;
-      case 'frame_bottom': child.position.y = 0;    child.scale.x = w; break;
-      case 'sill':         child.position.y = 0;    child.scale.x = w + (so||0)*2; break;
+      case 'frame_left':   child.position.x = 0;    child.scale.y = h / dH; break;
+      case 'frame_right':  child.position.x = w;    child.scale.y = h / dH; break;
+      case 'frame_top':    child.position.y = h;    child.scale.x = w / dW; break;
+      case 'frame_bottom': child.position.y = 0;    child.scale.x = w / dW; break;
+      case 'sill':         child.position.y = 0;    child.scale.x = (w + (so||0)*2) / dSW; break;
       case 'glass':
         child.position.set(w/2, h/2, child.position.z);
-        child.scale.set(w - fp*2, h - fp*2, 1);
+        child.scale.x = (w - fp*2) / dGW;
+        child.scale.y = (h - fp*2) / dGH;
         break;
       case 'curtain':
         child.position.set(w/2, h/2, child.position.z);
-        child.scale.set(w, h, 1);
+        child.scale.x = w / dW;
+        child.scale.y = h / dH;
         break;
-      case 'mullion_v':    child.position.x = w/2;  child.scale.y = h; break;
-      case 'mullion_h':    child.position.y = h/2;  child.scale.x = w; break;
-      case 'threshold':    child.scale.x = w; break;
-      case 'leaf_main':    child.scale.set(params.leafW, h, 1); break;
-      case 'leaf_minor':   child.scale.set(params.minorW, h, 1); break;
+      case 'mullion_v':    child.position.x = w / 2;  child.scale.y = h / dH; break;
+      case 'mullion_h':    child.position.y = h / 2;  child.scale.x = w / dW; break;
+      case 'threshold':    child.scale.x = w / dW; break;
+      case 'leaf_main':
+        child.scale.x = params.leafW / params.dLeafW;
+        child.scale.y = h / dH;
+        break;
+      case 'leaf_minor':
+        child.scale.x = params.minorW / params.dMinorW;
+        child.scale.y = h / dH;
+        break;
       case 'handle':       child.position.x = params.handleX; break;
-      // dormer-специфичные — аналогично
+      // dormer-специфичные — аналогично (scale = target / default)
     }
   });
 }
