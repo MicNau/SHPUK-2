@@ -6,19 +6,60 @@
   "constraints": {
     "base_h":         { "min": 50, "max": 120, "step": 10, "default": 70,  "unit": "cm" },
     "roof_angle":     { "min": 15, "max": 35,  "step": 5,  "default": 22,  "unit": "deg" },
-    "wall_thickness": 0.25
+    "wall_thickness": 0.25,
+    "pillar_size":    0.25
   },
 
   "roof_type": "hip",
 
   "modules": {
-    "_comment": "Размеры модулей: w=ширина, h=высота проёма, y=низ проёма от уровня пола этажа (м)",
+    "_comment": "Spec v2: размеры — range-объекты {min, max, default} в метрах",
 
-    "window_single": { "w": 0.90, "h": 1.20, "y": 0.90,  "glb": "mod_window_single.glb" },
-    "window_double": { "w": 1.40, "h": 1.20, "y": 0.90,  "glb": "mod_window_double.glb" },
-    "window_wide":   { "w": 2.40, "h": 1.50, "y": 0.60,  "glb": "mod_window_wide.glb"   },
-    "door_entrance": { "w": 1.00, "h": 2.20, "y": 0.00,  "glb": "mod_door_entrance.glb" },
-    "door_patio":    { "w": 2.00, "h": 2.30, "y": 0.00,  "glb": "mod_door_patio.glb"    }
+    "window_single": {
+      "w": { "min": 0.60, "max": 1.40, "default": 0.90 },
+      "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
+      "y": { "min": 0.30, "max": 1.50, "default": 0.90 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "glb": "mod_window_single.glb"
+    },
+    "window_double": {
+      "w": { "min": 1.00, "max": 2.00, "default": 1.40 },
+      "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
+      "y": { "min": 0.30, "max": 1.50, "default": 0.90 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "mullions": ["v"],
+      "glb": "mod_window_double.glb"
+    },
+    "window_wide": {
+      "w": { "min": 1.80, "max": 3.00, "default": 2.40 },
+      "h": { "min": 0.80, "max": 2.00, "default": 1.50 },
+      "y": { "min": 0.20, "max": 1.20, "default": 0.60 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "mullions": ["v", "h"],
+      "glb": "mod_window_wide.glb"
+    },
+
+    "door_single": {
+      "w": { "min": 0.80, "max": 1.00, "default": 1.00 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.20 },
+      "y": 0.00,
+      "leaves": 1,
+      "mechanism": "swing",
+      "frame_profile": 0.05,
+      "glb": "mod_door_single.glb"
+    },
+    "door_slide_double": {
+      "w": { "min": 1.40, "max": 3.00, "default": 2.00 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.30 },
+      "y": 0.00,
+      "leaves": 2,
+      "mechanism": "slide",
+      "frame_profile": 0.05,
+      "glb": "mod_door_slide_double.glb"
+    }
   },
 
   "floors": [
@@ -59,7 +100,7 @@
             { "wall": "fill" },
             { "window": "single" },
             { "wall": "fill" },
-            { "door": "entrance" },
+            { "door": "single" },
             { "wall": 0.6 }
           ]
         },
@@ -93,14 +134,16 @@
   },
 
   "materials_map": {
-    "mat_wall":     { "label": "Стены (штукатурка)",   "swappable": true  },
-    "mat_base":     { "label": "Цоколь",               "swappable": true  },
-    "mat_roof":     { "label": "Крыша (черепица)",      "swappable": true  },
-    "mat_frame":    { "label": "Рамы окон",            "swappable": true  },
-    "mat_glass":    { "label": "Стекло",               "swappable": false },
-    "mat_door":     { "label": "Входная дверь",        "swappable": true  },
-    "mat_wood":     { "label": "Деревянная отделка",   "swappable": true  },
-    "mat_metal":    { "label": "Металл (водосток)",    "swappable": true  },
-    "mat_curtain":  { "label": "Шторы",                "swappable": true  }
+    "mat_wall":     { "label": "Стены (штукатурка)", "swappable": true  },
+    "mat_base":     { "label": "Цоколь",             "swappable": true  },
+    "mat_roof":     { "label": "Крыша (черепица)",   "swappable": true  },
+    "mat_frame":    { "label": "Рамы окон",          "swappable": true  },
+    "mat_glass":    { "label": "Стекло",             "swappable": false },
+    "mat_door":     { "label": "Входная дверь",      "swappable": true  },
+    "mat_wood":     { "label": "Деревянная отделка", "swappable": true  },
+    "mat_metal":    { "label": "Металл (водосток)",  "swappable": true  },
+    "mat_concrete": { "label": "Бетон (ступени)",    "swappable": true  },
+    "mat_curtain":  { "label": "Шторы",              "swappable": true  },
+    "mat_flashing": { "label": "Оклад (мансардное)", "swappable": true  }
   }
 }

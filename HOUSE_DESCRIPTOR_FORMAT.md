@@ -3,6 +3,11 @@
 **Версия формата**: 2.0
 **Статус**: согласовано
 **Файлы дескрипторов**: `assets/houses/house_type_*.json`
+**Канонический пример**: `assets/houses/house_type_a.json` — обновлён под v2.0
+(размеры окон/дверей как range-объекты, корректные ID модулей по спеке `door_single`/`door_slide_double`,
+добавлены `pillar_size`, `mullions`, `leaves`, `mechanism`, `frame_profile`, материалы `mat_concrete`/`mat_flashing`).
+JS-загрузчик дескриптора (`loadHouseType`, `buildHouseFromDescriptor`) ещё не написан —
+текущий 3D-дом в коде строится процедурно (`viewer3d-core.js → buildHouseMeshes`).
 
 ### Изменения v2.0
 

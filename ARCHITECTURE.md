@@ -1,6 +1,10 @@
 # ARCHITECTURE.md — Конфигуратор загородного дома
 
-## Статус: фронтенд разбит на файлы, PBR-визуализация работает, GLB-растительность готова (ожидают ассеты), десктоп-UI создан и отлажен (sidebar-кнопки, snap-сетка 0.5 м, multi-line, collision avoidance), бэкенд не начат
+## Статус
+- **Фронтенд** разбит на файлы, PBR-визуализация работает; десктоп-UI создан и отлажен (sidebar-кнопки, snap-сетка 0.5 м, multi-line, collision avoidance).
+- **Растительность** работает с трёхуровневым fallback (GLB → PNG → процедурный canvas).
+- **Модульная система GLB** для домов (см. `HOUSE_MODULES_SPEC.md`): спецификация v2 согласована, **полный комплект из 30 GLB-модулей собран** и разложен по подпапкам (`assets/houses/modules/{walls,windows,doors,base,roof,decor,site}`); исходные `.blend`-файлы в `3d_sources/`. JS-загрузчик/сборщик дома по дескриптору **не написан** — пока работает процедурный билдер `buildHouseMeshes` как fallback.
+- **Бэкенд** не начат (план: FastAPI + расчётный модуль + БД).
 
 ---
 
@@ -8,7 +12,7 @@
 
 ```
 /frontend — мобильная версия (wizard)
-  index.html              # разметка + JS-детектор платформы, подключает viewer3d-*
+  index.html              # разметка + script-теги (детектор платформы перенесён в viewer3d-entourage.js)
   styles.css              # все стили (мобильный wizard, max-width 480px)
   nav.js                  # goTo, updProg, getStepOrder и навигационные хелперы
   ui.js                   # шаг 10: секции, образцы, примерка
@@ -23,10 +27,10 @@
   state.js                # S, SECS, SEC_SCREEN, CATALOG_COLORS, PRICE_TIERS, STUB_RESULTS
   canvas.js               # pan/zoom движок, snap-canvas, крыльцо (drag+resize)
   viewer3d-core.js        # сцена, HDRI, PBR-материалы, buildScene3d, все 3D-строители
-  viewer3d-desktop.js     # антураж десктоп: GLB-модели → PNG cross-billboard → процедурный fallback
-  viewer3d-mobile.js      # антураж мобиль: GLB-модели → PNG cross-billboard → процедурный fallback
+  viewer3d-entourage.js   # антураж (общий для обеих платформ): GLB-модели → PNG cross-billboard → процедурный fallback;
+                          # автоматически определяет IS_MOBILE (UA + ширина окна) для подбора параметров
 
-  assets/                 # текстуры, HDRI и 3D-модели растительности
+  assets/                 # текстуры, HDRI, растительность, дома и модули
     README.md             # описание соглашения по именам файлов
     environment.hdr       # HDRI карта окружения (опционально)
     wall_diff.jpg / wall_norm.jpg / wall_roug.jpg
@@ -38,6 +42,33 @@
     bush_a.png / bush_b.png           # PNG-спрайты кустов (fallback)
     tree_a.png / tree_b.png           # PNG-спрайты деревьев (fallback)
 
+    houses/               # дескрипторы домов и GLB-модули
+      house_type_a.json   # одноэтажный с вальмовой крышей (формат spec v2)
+      modules/
+        walls/    mod_wall_segment.glb, mod_pillar.glb
+        windows/  mod_window_single.glb, mod_window_double.glb, mod_window_wide.glb,
+                  mod_window_velux.glb, mod_dormer.glb
+        doors/    mod_door_single.glb, mod_door_onehalf.glb, mod_door_double.glb,
+                  mod_door_slide_single.glb, mod_door_slide_double.glb
+        base/     mod_base_segment.glb, mod_base_pillar.glb
+        roof/     mod_roof_gable_slope.glb, mod_roof_gable_front.glb,
+                  mod_roof_hip_slope.glb, mod_roof_hip_ridge.glb, mod_roof_flat_edge.glb
+        decor/    mod_cornice.glb, mod_chimney.glb, mod_gutter.glb,
+                  mod_downpipe.glb, mod_porch_column.glb, mod_porch_step.glb
+        site/     mod_fence_panel_wood.glb, mod_fence_post.glb,
+                  mod_bench_a.glb, mod_planter_a.glb, mod_lamp_a.glb
+
+3d_sources/               # исходные .blend для GLB-модулей (не отдаётся клиенту)
+  walls/, base/           # (пусто — содержимое в legacy windows/Modules.blend)
+  windows/                # Modules.blend (legacy: walls + 3 окна), mod_window_velux.blend, mod_dormer.blend
+  doors/                  # Modules_doors.blend, Modules_doors_slide.blend (legacy),
+                          # mod_door_slide_single.blend, mod_door_slide_double.blend
+  roof/                   # mod_roof_*.blend (5 шт.)
+  decor/                  # mod_cornice.blend, mod_chimney.blend, mod_gutter.blend,
+                          # mod_downpipe.blend, mod_porch_column.blend, mod_porch_step.blend
+  site/                   # mod_fence_panel_wood.blend, mod_fence_post.blend,
+                          # mod_bench_a.blend, mod_planter_a.blend, mod_lamp_a.blend
+
 /backend                  # ещё не создан
   main.py
   calculator.py
@@ -46,6 +77,8 @@
   /migrations
 
 ARCHITECTURE.md
+HOUSE_DESCRIPTOR_FORMAT.md   # формат JSON-дескриптора дома (spec v2)
+HOUSE_MODULES_SPEC.md        # спецификация модульной системы 3D-домов (spec v2)
 README.md
 ```
 
@@ -55,17 +88,17 @@ README.md
 ```
 Three.js r128 → OrbitControls → RGBELoader → EXRLoader → GLTFLoader
 state.js → nav.js → canvas.js
-→ [JS-детектор] → viewer3d-core.js → viewer3d-desktop.js | viewer3d-mobile.js
+→ viewer3d-core.js → viewer3d-entourage.js
 ui.js → catalog.js
 ```
 
 **Десктопная (index-desktop.html):**
 ```
 Three.js r128 → OrbitControls → RGBELoader → EXRLoader → GLTFLoader
-state.js → canvas.js → viewer3d-core.js → viewer3d-desktop.js → nav-desktop.js
+state.js → canvas.js → viewer3d-core.js → viewer3d-entourage.js → nav-desktop.js
 ```
 
-Все скрипты подключаются с query-string `?v=N` для сброса кэша браузера (текущая: v=13).
+Все скрипты подключаются с query-string `?v=N` для сброса кэша браузера (текущая: v=14).
 
 Детектор платформы в `index.html` (клиентский):
 ```javascript
@@ -161,13 +194,19 @@ let step = 1; // текущий шаг (число или 'catalog' | 'summary')
 - `_buildEntourage(scene)` — вызывается при инициализации.
 - `_onAnimFrame(t)` — каждый кадр.
 
-### viewer3d-desktop.js и viewer3d-mobile.js
+### viewer3d-entourage.js
 
-Обе версии используют трёхуровневую fallback-цепочку для растительности:
+Единый файл антуража для обеих платформ. Платформа определяется автоматически на старте:
+`IS_MOBILE = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768`.
+Используется и здесь (для подбора параметров), и в `viewer3d-core.js` (через `typeof IS_MOBILE !== 'undefined'`).
+
+Трёхуровневая fallback-цепочка для растительности:
 
 1. **GLB модели** (bush_a.glb, bush_b.glb, tree_a.glb, tree_b.glb) — загружаются через GLTFLoader. Автоматическое масштабирование по bounding box, центрирование по основанию, включение теней.
-2. **PNG спрайты** (bush_a.png, tree_a.png и т.д.) — cross-billboard (пересекающиеся PlaneGeometry). Mobile: 2 плоскости для кустов и деревьев. Desktop: 2 для кустов, 3 для деревьев.
+2. **PNG спрайты** (bush_a.png, tree_a.png и т.д.) — cross-billboard (пересекающиеся PlaneGeometry). Кусты: 2 плоскости. Деревья: 2 на мобиле, 3 на десктопе (больше объёма).
 3. **Процедурные canvas-текстуры** — `_fallbackBush()` и `_fallbackTree()` создают 256×256 canvas с эллиптическими кронами и стволами.
+
+Защита от stale-callback: счётчик `_vegGen` инкрементируется при каждом `_buildEntourage()`. Если GLB-загрузчик завершился после новой пересборки сцены, его модели игнорируются.
 
 Каждый тип (кусты/деревья) загружается независимо — если GLB кустов отсутствует, но GLB деревьев есть, кусты будут спрайтами, а деревья — 3D-моделями.
 
@@ -395,13 +434,47 @@ CREATE TABLE projects (
 Масштабируемые модули (стены, цоколь) моделируются как unit-блоки (1×1×0.2 м).
 Фиксированные модули (окна, двери) моделируются в реальном размере.
 
-Текущий процедурный билдер (`buildHouseMeshes`) остаётся как fallback.
+**Текущее состояние:**
+
+| Слой | Статус |
+|------|--------|
+| Спецификация модулей (HOUSE_MODULES_SPEC.md, v2) | ✅ согласована |
+| Формат дескриптора (HOUSE_DESCRIPTOR_FORMAT.md, v2) | ✅ согласован |
+| `house_type_a.json` (одноэтажный с вальмовой крышей) | ✅ обновлён под spec v2 (range-объекты, корректные ID модулей) |
+| GLB-модули | ✅ комплект из 30 модулей собран, разложен в `assets/houses/modules/<категория>/` |
+| Исходные `.blend`-файлы | ✅ в `3d_sources/<категория>/` (новые — по одному объекту в файл; legacy — агрегатные) |
+| JS-загрузчик `loadHouseType()` | ❌ не написан |
+| JS-сборщик `buildHouseFromDescriptor()` | ❌ не написан |
+| `applyMaterialOverride()` | ❌ не написан |
+| Текущий процедурный билдер `buildHouseMeshes()` | ✅ работает как fallback, остаётся до выхода модульного загрузчика |
+
+**Известное расхождение имён в legacy-GLB.** Существующие модули из `Modules.blend` (single/double/wide окна) используют `Glass` (с заглавной) и `treshold` (опечатка) вместо требуемых спекой `glass` и `threshold`. **Новые** модули, собранные после согласования v2, идут строго по спеке. При написании `transformParametricModule()` нужно либо пересобрать legacy-GLB с правильными именами, либо сделать парсер case-insensitive с alias-таблицей `{Glass:'glass', treshold:'threshold'}` — выбор за реализатором.
+
+---
+
+## Recent cleanup (tech debt)
+
+Сделано в текущей итерации (v=14):
+
+- **Дедупликация antoura**: `viewer3d-desktop.js` (283 строки) + `viewer3d-mobile.js` (275 строк) → один `viewer3d-entourage.js` с авто-детектом `IS_MOBILE` (UA + `innerWidth < 768`). Минус ~270 строк дублей.
+- **Унификация cache-bust**: моб. `?v=8` и десктоп `?v=13` → общий **`?v=14`**.
+- **Упрощение мобильного загрузчика**: IIFE с `loadScript`/детектором заменён на обычные `<script>` теги (детект перенесён внутрь `viewer3d-entourage.js`).
+- **Утечка GPU-памяти в `clearGroup`**: материалы, создаваемые в каждом `buildScene3d` (10 мат. из `getHouseMats` + `padMat` + `fenceMat` + `railMat`), не диспозились между rebuilds. Теперь `clearGroup(group, disposeMaterials)` собирает уникальные материалы в `Set` и диспозит их. Для `vegGroup` флаг `false` — там GLB-клоны шарят материал с источником в загрузчике (`THREE.Object3D.clone()` shallow-копирует материал), dispose сломал бы следующие `clone()`.
+- **Удалена отладка**: 6 `console.log('[3D]')` из `buildHouseMeshes`.
+- **`.gitignore`**: убран markdown-фрейминг, добавлен `*.blend1/2/3` (Blender autosave).
+- **3 «осиротевших» `.blend1`** из корня перенесены в подпапки `3d_sources/{windows,doors,doors}/`, где лежат их `.blend`-сиблинги.
+- **`house_type_a.json` приведён к spec v2**: размеры окон/дверей как `{min,max,default}`, ID модулей `door_entrance/door_patio` → `door_single/door_slide_double` (по спеке), добавлены `mullions`, `leaves`, `mechanism`, `frame_profile`, `pillar_size`, `mat_concrete`, `mat_flashing`.
+- **Обновлены документационные ссылки** на старые `viewer3d-{desktop,mobile}.js` в `ARCHITECTURE.md`, `HOUSE_MODULES_SPEC.md`, шапке `viewer3d-core.js`.
 
 ---
 
 ## Следующие шаги
 
-1. ~~**Десктопная версия UI**~~ ✅ — создана и отлажена (sidebar-кнопки, snap-сетка 0.5 м, multi-line, collision avoidance, sub-toggle материалов)
-2. **Подготовить GLB-модели** — растительность (assets/vegetation/) + модули дома (assets/modules/)
-3. **Написать загрузчик и сборщик модульного дома** — loadHouseType() + buildHouseFromDescriptor() + applyMaterialOverride()
-4. **Бэкенд** — FastAPI + расчётный модуль + БД
+1. ~~**Десктопная версия UI**~~ ✅ — создана и отлажена.
+2. ~~**Подготовить GLB-модели**~~ ✅ — растительность (PNG-fallback готов, GLB опционально) + 30 GLB-модулей дома собраны.
+3. **Написать загрузчик и сборщик модульного дома**:
+   - `loadHouseType(typeId)` — fetch дескриптора + параллельная загрузка всех его GLB-модулей
+   - `buildHouseFromDescriptor(desc, modules, params)` — обход периметра, инстанцирование, трансформация параметрических модулей по `transformParametricModule()`
+   - `applyMaterialOverride(group, slot, props)` — глобальная замена материалов по имени `mat_*`
+   - При написании: решить вопрос с legacy-именами `Glass`/`treshold` (см. раздел «Модульная система 3D-домов» выше).
+4. **Бэкенд** — FastAPI + расчётный модуль + БД.

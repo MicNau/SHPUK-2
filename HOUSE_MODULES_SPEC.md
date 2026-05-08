@@ -1,6 +1,14 @@
 # HOUSE_MODULES_SPEC.md — Спецификация модульной системы 3D-домов
 
-## Статус: ЧЕРНОВИК v2 — обновлено
+## Статус
+
+**Версия спецификации**: v2 (согласована).
+
+**Реализация**:
+- ✅ Все 30 GLB-модулей по разделу 2.2 собраны и разложены в `assets/houses/modules/<категория>/`. Дефолтные размеры/origin/имена дочерних объектов — по спеке.
+- ✅ Исходные `.blend`-файлы — в `3d_sources/<категория>/` (новые модули — один объект на файл; legacy-агрегатные сохранены отдельно).
+- ❌ JS-загрузчик и сборщик дома по дескриптору (`loadHouseType`, `buildHouseFromDescriptor`, `transformParametricModule`, `applyMaterialOverride`) — не написан. Спецификация описывает их интерфейс в разделах 5.1–5.4.
+- ⚠ **Legacy-расхождение имён**: модули из `Modules.blend` (single/double/wide window) используют `Glass` (с заглавной) и `treshold` (опечатка). Новые модули — строго по спеке (`glass`, `threshold`). Подробнее — в `ARCHITECTURE.md` → «Модульная система 3D-домов».
 
 ### Изменения v2
 
@@ -856,63 +864,56 @@ mat_planter_wood — дерево (короб грядки)
 
 ### 4.6. Организация файлов
 
+**Конечные ассеты для рантайма** (отдаются клиенту):
+
 ```
 assets/
   houses/
-    house_type_a.json        # Дескриптор: одноэтажный с вальмовой крышей
-    house_type_b.json        # Дескриптор: одноэтажный с двускатной
-    house_type_c.json        # Дескриптор: двухэтажный
-  modules/
-    walls/
-      mod_wall_segment.glb
-      mod_pillar.glb
-    windows/
-      mod_window_single.glb
-      mod_window_double.glb
-      mod_window_wide.glb
-      mod_window_velux.glb
-      mod_dormer.glb
-    doors/
-      mod_door_single.glb
-      mod_door_onehalf.glb
-      mod_door_double.glb
-      mod_door_slide_single.glb
-      mod_door_slide_double.glb
-    base/
-      mod_base_segment.glb
-      mod_base_pillar.glb
-    roof/
-      mod_roof_gable_slope.glb
-      mod_roof_gable_front.glb
-      mod_roof_hip_slope.glb
-      mod_roof_hip_ridge.glb
-    decor/
-      mod_cornice.glb
-      mod_chimney.glb
-      mod_gutter.glb
-      mod_downpipe.glb
-      mod_porch_column.glb
-      mod_porch_step.glb
-    site/
-      mod_fence_panel_wood.glb
-      mod_fence_panel_metal.glb
-      mod_fence_post.glb
-      mod_bench_a.glb
-      mod_planter_a.glb
-      mod_lamp_a.glb
-      mod_lamp_b.glb
+    house_type_a.json        # Дескриптор: одноэтажный с вальмовой крышей  ✅ есть
+    house_type_b.json        # Дескриптор: одноэтажный с двускатной         (план)
+    house_type_c.json        # Дескриптор: двухэтажный                      (план)
+  houses/modules/
+    walls/    mod_wall_segment.glb, mod_pillar.glb                          ✅
+    windows/  mod_window_single.glb, mod_window_double.glb,
+              mod_window_wide.glb, mod_window_velux.glb, mod_dormer.glb     ✅
+    doors/    mod_door_single.glb, mod_door_onehalf.glb, mod_door_double.glb,
+              mod_door_slide_single.glb, mod_door_slide_double.glb          ✅
+    base/     mod_base_segment.glb, mod_base_pillar.glb                     ✅
+    roof/     mod_roof_gable_slope.glb, mod_roof_gable_front.glb,
+              mod_roof_hip_slope.glb, mod_roof_hip_ridge.glb,
+              mod_roof_flat_edge.glb                                        ✅
+    decor/    mod_cornice.glb, mod_chimney.glb, mod_gutter.glb,
+              mod_downpipe.glb, mod_porch_column.glb, mod_porch_step.glb    ✅
+    site/     mod_fence_panel_wood.glb, mod_fence_post.glb,
+              mod_bench_a.glb, mod_planter_a.glb, mod_lamp_a.glb            ✅
+              mod_fence_panel_metal.glb, mod_lamp_b.glb                     (план — варианты)
   vegetation/
-    bush_a.glb
-    bush_b.glb
-    tree_a.glb
-    tree_b.glb
+    bush_a.glb, bush_b.glb, tree_a.glb, tree_b.glb
   textures/
-    wall_diff.jpg   # fallback текстуры (если процедурный режим)
-    wall_norm.jpg
-    roof_diff.jpg
-    ...
+    wall_diff.jpg, wall_norm.jpg, roof_diff.jpg, …
   environment.hdr
 ```
+
+**Исходные `.blend`-файлы** (не отдаются клиенту, не нужны в production-сборке):
+
+```
+3d_sources/
+  walls/, base/    (пусто — содержимое в legacy windows/Modules.blend)
+  windows/         Modules.blend (legacy: walls + 3 окна),
+                   mod_window_velux.blend, mod_dormer.blend
+  doors/           Modules_doors.blend, Modules_doors_slide.blend (legacy),
+                   mod_door_slide_single.blend, mod_door_slide_double.blend
+  roof/            mod_roof_*.blend (5 шт.)
+  decor/           mod_cornice.blend, mod_chimney.blend, mod_gutter.blend,
+                   mod_downpipe.blend, mod_porch_column.blend, mod_porch_step.blend
+  site/            mod_fence_panel_wood.blend, mod_fence_post.blend,
+                   mod_bench_a.blend, mod_planter_a.blend, mod_lamp_a.blend
+```
+
+**Соглашение для новых модулей**: один GLB-объект → один `.blend`-файл с тем же базовым именем
+(например, `mod_window_velux.glb` ↔ `mod_window_velux.blend`). Это упрощает поддержку и даёт
+1:1 соответствие исходник ↔ артефакт. Legacy-агрегатные `.blend` (`Modules.blend` и т.п.)
+содержат несколько модулей и сохранены без изменений до своей переборки.
 
 ---
 
@@ -1275,7 +1276,7 @@ function applyMaterialToSelected(matSlot) {
 ### 6.2. Что НЕ меняется
 
 - `viewer3d-core.js`: инициализация сцены, HDRI, освещение, OrbitControls
-- `viewer3d-mobile.js / viewer3d-desktop.js`: растительность
+- `viewer3d-entourage.js`: растительность (общий файл для обеих платформ, авто-детект IS_MOBILE)
 - `buildTerrace3d()`, `buildPorch3d()`, `buildFence3d()`, `buildRailing3d()` — отдельные конструкции (террасы, крыльцо, забор, перила — не часть дескриптора дома)
 - `canvas.js`: разметка полигонов
 - `nav.js`, `catalog.js` — навигация и каталог

@@ -6,9 +6,9 @@
 //   • PBR-материалы с загрузкой текстур из assets/
 //   • buildScene3d() — вся геометрия дома и участка
 //   • Строители: дом, терраса, крыльцо, дорожки, забор, перила
-// Антураж подключается версионным файлом:
-//   viewer3d-desktop.js  → _buildEntourage(scene)
-//   viewer3d-mobile.js   → _buildEntourage(scene)
+// Антураж подключается отдельным файлом:
+//   viewer3d-entourage.js → _buildEntourage(scene), IS_MOBILE
+//   (платформа определяется автоматически внутри entourage)
 // Зависимости: state.js, Three.js r128, OrbitControls, RGBELoader
 // ══════════════════════════════════════════════
 
@@ -651,8 +651,8 @@ function buildScene3d() {
   if (!threeState || typeof THREE === 'undefined') return;
   const { houseGroup, vegGroup, controls } = threeState;
 
-  clearGroup(houseGroup);
-  if (vegGroup) clearGroup(vegGroup);
+  clearGroup(houseGroup, true);   // диспозим материалы, мы их и создаём
+  if (vegGroup) clearGroup(vegGroup, false);   // материалы общие с GLB-источником
   threeState.wallMeshes    = [];
   threeState.deckMeshes    = [];
   threeState.porchMeshes   = [];
@@ -756,20 +756,34 @@ function buildScene3d() {
   controls.update();
 }
 
-function clearGroup(group) {
-  while (group.children.length) {
-    const c = group.children[0];
-    group.remove(c);
-    if (c.geometry) c.geometry.dispose();
-    if (c.children && c.children.length) clearGroup(c);
+// disposeMaterials: true только для групп, чьи материалы создаём мы (houseGroup).
+// Для vegGroup ставим false: GLB-клоны шарят материал с источником в загрузчике
+// (THREE.Object3D.clone() делает shallow-копию материала), и dispose сломает
+// будущие clone() при следующей пересборке сцены.
+function clearGroup(group, disposeMaterials) {
+  const mats = disposeMaterials ? new Set() : null;
+  (function recurse(g) {
+    while (g.children.length) {
+      const c = g.children[0];
+      g.remove(c);
+      if (c.geometry) c.geometry.dispose();
+      if (mats && c.material) {
+        if (Array.isArray(c.material)) c.material.forEach(m => mats.add(m));
+        else                            mats.add(c.material);
+      }
+      if (c.children && c.children.length) recurse(c);
+    }
+  })(group);
+  if (mats) {
+    mats.forEach(m => { if (m && typeof m.dispose === 'function') m.dispose(); });
   }
+  // Текстуры не диспозим — они в texCache и переиспользуются между сборками.
 }
 
 // ══════════════════════════════════════════════
 // HOUSE BUILDER
 // ══════════════════════════════════════════════
 function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
-  console.log('[3D] buildHouseMeshes start, length:', length, 'width:', width, 'wh:', wh, 'bh:', bh);
   const box  = (sx,sy,sz) => new THREE.BoxGeometry(sx,sy,sz);
   const mesh = (geo,mat)  => { const m=new THREE.Mesh(geo,mat); m.castShadow=m.receiveShadow=true; return m; };
 
@@ -777,8 +791,6 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
   bm.position.set(length/2, bh/2, width/2);
   parent.add(bm);
   _applyBoxUV(bm, 1.0);
-  console.log('[3D] цоколь создан, size:', length+.2, bh, width+.2, 'pos:', bm.position);
-  console.log('[3D] M.base.map:', M.base.map, 'visible:', bm.visible, 'material:', M.base.type);
 
   const WWIN=0.9, HWIN=1.2, YWIN=1.0, WDOOR=1.0, HDOOR=2.2;
 
@@ -881,9 +893,6 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
   const fw=zWallWithDoor(zI,true,true,wt); fw.position.set(length-wt,bh,wt); parent.add(fw);
   // Применяем box UV к стенам Z (X-стены обработаны в addW)
   [lw,rw,bk,fw].forEach(grp => _wallUVHelper(grp));
-  console.log('[3D] стены построены, wallMeshes:', threeState.wallMeshes.length);
-  console.log('[3D] M.wall.map:', M.wall.map, 'M.wall.onBeforeCompile:', M.wall.onBeforeCompile);
-  console.log('[3D] lw children:', lw.children.length, 'rw:', rw.children.length);
 
   const rh=2.0,oh=.3, x0=-oh,x1=length+oh,z0=-oh,z1=width+oh,zMid=width/2;
   const yBase=bh+wh, yPeak=bh+wh+rh;

@@ -1,4 +1,3 @@
-```
 # Dependencies
 node_modules/
 
@@ -14,4 +13,7 @@ node_modules/
 .vscode/
 .idea/
 
-```
+# Blender autosaves (user-local, never commit)
+*.blend1
+*.blend2
+*.blend3

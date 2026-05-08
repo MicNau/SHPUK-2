@@ -1,22 +1,22 @@
 // ══════════════════════════════════════════════
-// VIEWER3D-MOBILE.JS
-// Антураж для мобильных устройств:
+// VIEWER3D-ENTOURAGE.JS
+// Антураж (растительность) для обеих платформ:
 //   • 3D-модели кустов/деревьев (GLB) с fallback на cross-billboard спрайты
 //   • Цепочка: GLB → PNG cross-billboard → процедурный canvas
+//   • Платформа определяется автоматически (UA + ширина окна).
+//     На мобильных: меньше плоскостей у деревьев (экономия GPU).
 // Зависимости: viewer3d-core.js, GLTFLoader (CDN)
 // ══════════════════════════════════════════════
 
-const IS_MOBILE = true;
+// ── Платформа ─────────────────────────────────
+// IS_MOBILE используется и здесь, и в viewer3d-core.js
+// (через `typeof IS_MOBILE !== 'undefined'` — обращение из тел функций после загрузки entourage).
+const IS_MOBILE = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+               || window.innerWidth < 768;
 
-function _onAnimFrame(t) { /* no-op */ }
-
-function _buildEntourage(scene) {
-  _buildVegetation(scene);
-}
-
-// ══════════════════════════════════════════════
-// РАСТИТЕЛЬНОСТЬ: GLB → PNG → PROCEDURAL
-// ══════════════════════════════════════════════
+// ── Константы ─────────────────────────────────
+const _CROSS_PLANES_BUSH = 2;
+const _CROSS_PLANES_TREE = IS_MOBILE ? 2 : 3;
 
 const _VEG_BUSH_SPOTS = [
   [-4,0,-3],[16,0,-3],[20,0,8],[-4,0,8],
@@ -30,40 +30,50 @@ const _VEG_TREE_SPOTS = [
   [10,0,-8],[16,0,-8],[8,0,20],[18,0,20],
 ];
 
-const _CROSS_PLANES_BUSH = 2;
-const _CROSS_PLANES_TREE = 2;
+// ── Hooks для core ────────────────────────────
+function _onAnimFrame(t) { /* no-op */ }
 
-function _buildVegetation(scene) {
+let _vegGen = 0; // счётчик генерации — защита от stale-callback при пересборке сцены
+
+function _buildEntourage(scene) {
+  _vegGen++;
+  _buildVegetation(scene, _vegGen);
+}
+
+// ══════════════════════════════════════════════
+// РАСТИТЕЛЬНОСТЬ: GLB → PNG → PROCEDURAL
+// ══════════════════════════════════════════════
+
+function _buildVegetation(scene, gen) {
   const gltf = new THREE.GLTFLoader();
   const tex  = new THREE.TextureLoader();
 
-  // Загружаем GLB кустов
   _loadVegModels(gltf, tex, scene, {
     glbFiles:  ['bush_a.glb', 'bush_b.glb'],
     pngFiles:  ['bush_a.png', 'bush_b.png'],
     fallbacks: [() => _fallbackBush(0.28, 0.50), () => _fallbackBush(0.32, 0.44)],
     spots:     _VEG_BUSH_SPOTS,
     type:      'bush',
-  });
+  }, gen);
 
-  // Загружаем GLB деревьев
   _loadVegModels(gltf, tex, scene, {
     glbFiles:  ['tree_a.glb', 'tree_b.glb'],
     pngFiles:  ['tree_a.png', 'tree_b.png'],
     fallbacks: [() => _fallbackTree(0.26, 0.52), () => _fallbackTree(0.22, 0.58)],
     spots:     _VEG_TREE_SPOTS,
     type:      'tree',
-  });
+  }, gen);
 }
 
 // ── Универсальный загрузчик с fallback-цепочкой ──
-
-function _loadVegModels(gltfLoader, texLoader, scene, cfg) {
+function _loadVegModels(gltfLoader, texLoader, scene, cfg, gen) {
   const models = [null, null];
   let ready = 0;
 
   const onBothReady = () => {
     if (++ready < 2) return;
+    // Если сцена перестроилась, не добавляем устаревшую растительность
+    if (gen !== _vegGen) return;
     _placeVeg(scene, models, cfg);
   };
 
@@ -94,7 +104,6 @@ function _loadVegModels(gltfLoader, texLoader, scene, cfg) {
 }
 
 // ── Размещение по точкам ──
-
 function _placeVeg(scene, models, cfg) {
   const isBush = cfg.type === 'bush';
   const crossPlanes = isBush ? _CROSS_PLANES_BUSH : _CROSS_PLANES_TREE;
@@ -116,23 +125,31 @@ function _placeVeg(scene, models, cfg) {
   }
 }
 
+// ── Проверка пересечения с занятыми зонами ──
 function _isOccupied(x, z, margin) {
   if (!threeState || !threeState.occupiedZones) return false;
   for (const zone of threeState.occupiedZones) {
     if (zone.type === 'rect') {
-      if (x>=zone.minX-margin && x<=zone.maxX+margin && z>=zone.minZ-margin && z<=zone.maxZ+margin) return true;
+      if (x >= zone.minX - margin && x <= zone.maxX + margin &&
+          z >= zone.minZ - margin && z <= zone.maxZ + margin) return true;
     } else if (zone.type === 'poly') {
-      const xs=zone.points.map(p=>p.x),zs=zone.points.map(p=>p.z);
-      if (x>=Math.min(...xs)-margin && x<=Math.max(...xs)+margin && z>=Math.min(...zs)-margin && z<=Math.max(...zs)+margin) return true;
+      const xs = zone.points.map(p=>p.x), zs = zone.points.map(p=>p.z);
+      if (x >= Math.min(...xs)-margin && x <= Math.max(...xs)+margin &&
+          z >= Math.min(...zs)-margin && z <= Math.max(...zs)+margin) return true;
     } else if (zone.type === 'path') {
-      for(let i=0;i<zone.points.length-1;i++){
-        const a=zone.points[i],b=zone.points[i+1],dx=b.x-a.x,dz=b.z-a.z,lenSq=dx*dx+dz*dz;
-        const t=lenSq<.001?0:Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/lenSq));
-        if(Math.sqrt((x-a.x-t*dx)**2+(z-a.z-t*dz)**2)<zone.width/2+margin) return true;
+      for (let i=0;i<zone.points.length-1;i++) {
+        if (_distToSeg(x,z,zone.points[i],zone.points[i+1]) < zone.width/2 + margin) return true;
       }
     }
   }
   return false;
+}
+
+function _distToSeg(px,pz,a,b) {
+  const dx=b.x-a.x,dz=b.z-a.z,lenSq=dx*dx+dz*dz;
+  if(lenSq<.001) return Math.sqrt((px-a.x)**2+(pz-a.z)**2);
+  const t=Math.max(0,Math.min(1,((px-a.x)*dx+(pz-a.z)*dz)/lenSq));
+  return Math.sqrt((px-a.x-t*dx)**2+(pz-a.z-t*dz)**2);
 }
 
 function _placeGlb(scene, srcModel, x, z, scale, isBush) {
