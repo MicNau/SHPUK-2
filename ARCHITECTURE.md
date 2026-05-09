@@ -440,13 +440,17 @@ CREATE TABLE projects (
 |------|--------|
 | Спецификация модулей (HOUSE_MODULES_SPEC.md, v2) | ✅ согласована |
 | Формат дескриптора (HOUSE_DESCRIPTOR_FORMAT.md, v2) | ✅ согласован |
-| `house_type_a.json` (одноэтажный с вальмовой крышей) | ✅ обновлён под spec v2 (range-объекты, корректные ID модулей) |
-| GLB-модули | ✅ комплект из 30 модулей собран, разложен в `assets/houses/modules/<категория>/` |
-| Исходные `.blend`-файлы | ✅ в `3d_sources/<категория>/` (новые — по одному объекту в файл; legacy — агрегатные) |
-| JS-загрузчик `loadHouseType()` | ❌ не написан |
-| JS-сборщик `buildHouseFromDescriptor()` | ❌ не написан |
-| `applyMaterialOverride()` | ❌ не написан |
-| Текущий процедурный билдер `buildHouseMeshes()` | ✅ работает как fallback, остаётся до выхода модульного загрузчика |
+| `house_type_a.json` (одноэтажный с вальмовой) | ✅ под spec v2 |
+| `house_type_b.json` (одноэтажный с двускатной) | ✅ |
+| `house_type_d.json` (Г-образный с плоской) | ✅ |
+| GLB-модули | ✅ 30 модулей собраны в `assets/houses/modules/<категория>/` |
+| Исходные `.blend`-файлы | ✅ в `3d_sources/<категория>/` |
+| JS-загрузчик `loadHouseType()` | 🟡 реализован в `test-house.js` (изолированно) |
+| JS-сборщик `buildHouseFromDescriptor()` | 🟡 реализован в `test-house.js` (изолированно) |
+| `transformParametricModule()` | 🟡 в `test-house.js`, с детектом native размеров |
+| `applyMaterialOverride()` | 🟡 в `test-house.js` (color-пикеры по `mat_*`) |
+| Процедурный билдер `buildHouseMeshes()` | ✅ работает как fallback в основном фронтенде |
+| Портирование test-house в основной фронтенд | ❌ не сделано |
 
 **Известное расхождение имён в legacy-GLB.** Существующие модули из `Modules.blend` (single/double/wide окна) используют `Glass` (с заглавной) и `treshold` (опечатка) вместо требуемых спекой `glass` и `threshold`. **Новые** модули, собранные после согласования v2, идут строго по спеке. При написании `transformParametricModule()` нужно либо пересобрать legacy-GLB с правильными именами, либо сделать парсер case-insensitive с alias-таблицей `{Glass:'glass', treshold:'threshold'}` — выбор за реализатором.
 
@@ -473,8 +477,105 @@ CREATE TABLE projects (
 1. ~~**Десктопная версия UI**~~ ✅ — создана и отлажена.
 2. ~~**Подготовить GLB-модели**~~ ✅ — растительность (PNG-fallback готов, GLB опционально) + 30 GLB-модулей дома собраны.
 3. **Написать загрузчик и сборщик модульного дома**:
-   - `loadHouseType(typeId)` — fetch дескриптора + параллельная загрузка всех его GLB-модулей
-   - `buildHouseFromDescriptor(desc, modules, params)` — обход периметра, инстанцирование, трансформация параметрических модулей по `transformParametricModule()`
-   - `applyMaterialOverride(group, slot, props)` — глобальная замена материалов по имени `mat_*`
-   - При написании: решить вопрос с legacy-именами `Glass`/`treshold` (см. раздел «Модульная система 3D-домов» выше).
+   - 🟡 **В работе** — `test-house.html` + `test-house.js` (см. ниже). Базовая парадигма проверена на 3 типах домов (прямоугольник + hip, прямоугольник + gable, Г-образный + flat). Реализованы: стены, столбы, фундамент с отступом, окна и двери (параметрические), 3 типа крыш (hip / gable / flat-polygon), подмена материалов через `mat_*`-имена.
+   - ❌ Многоэтажность, dormer/velux, декор, hip/gable на non-rectangular контурах — TODO.
+   - После валидации — портировать `loadHouseType` / `buildHouseFromDescriptor` / `applyMaterialOverride` в основной фронтенд (`viewer3d-core.js`), интегрировать с нав-флоу шага 2 (параметры дома) вместо процедурного `buildHouseMeshes`.
 4. **Бэкенд** — FastAPI + расчётный модуль + БД.
+
+---
+
+## Тестовое приложение модульной сборки (`test-house.html`)
+
+Изолированная HTML-страница для проверки, что генерация дома по JSON-дескриптору работает как задумано (спека v2). Не интегрировано с основным конфигуратором — отдельный набор файлов. Все правки парадигмы (rotation, pillar positioning, parametric scaling) валидируются здесь до портирования в `viewer3d-core.js`.
+
+**Файлы:**
+- `test-house.html` — UI: 3D-вьюпорт + панель параметров (3 слайдера) + панель материалов + лог
+- `test-house.js` — вся логика: загрузчик, обход периметра, билдеры стен/столбов/фундамента/крыши, параметрическая трансформация, замена материалов
+
+**Как запустить:**
+```bash
+cd E:/_WORK/__Shpuk/_AI_TEST/SHPUK-Desktop
+python -m http.server 8765
+# В браузере: http://127.0.0.1:8765/test-house.html
+```
+(`file://` не подходит из-за CORS на `fetch` JSON-дескриптора и GLB.)
+
+**Демонстрируемые типы домов:**
+| ID | Название | Перимeтр | Крыша |
+|----|----------|----------|-------|
+| `type_a` | Одноэтажный с вальмовой | прямоугольник | hip |
+| `type_b` | Одноэтажный с двускатной | прямоугольник | gable |
+| `type_d` | Г-образный одноэтажный | L (turn=−90 в выступе) | flat (polygon) |
+
+### Что реализовано
+
+- **Loader** — `loadHouseType(typeId)` фетчит `assets/houses/house_<typeId>.json`, собирает уникальные module ID из периметра и `roof_type`, параллельно загружает все GLB через `GLTFLoader` с graceful degradation (отсутствующий модуль логируется warn, не валит сборку).
+- **Eval vars** — выражения `"sqrt(area * 1.5)"` и т.п. вычисляются через `new Function` (input — наш JSON, инжекций не боимся).
+- **Outline** — turtle-graphics обход периметра, поддержка `turn=±90`, проверка замкнутости. Каждому pillar присваиваются флаги `sx`/`sz` (±1) — interior-квадрант от угла, вычисленный из суммы interior-направлений соседних стен.
+- **Pillars** — позиционируются **полностью внутри периметра** в interior-квадранте (на CW-обходе: `interior = (-dz, dx)`). Это даёт корректную работу и для inward (turn=+90), и для outward (turn=−90) углов.
+- **Walls / windows / doors** — позиционируются в **конце** заполнителя с поворотом `ry = π - atan2(dz, dx)`. Эта пара (rotation + endpoint position) гарантирует, что local +Z (внешняя грань модуля) смотрит наружу здания, а local +X выстраивается в обратном направлении обхода (модуль «рисуется назад» к началу заполнителя). Подробнее — в разделе «Конвенции» ниже.
+- **Foundation** — построение по тому же outline, что и стены, но **шире на `FOUNDATION_OVERHANG = 0.10 м`** в exterior-направлении (видимый «карниз» цоколя). Pillar'ы цоколя расширены до `ps + overhang` со сдвигом тоже наружу.
+- **Roofs**:
+  - `hip` — 6 вершин (4 угла основания с eave + 2 точки конька), 6 треугольников (2 трапеции по длинным сторонам + 2 треугольника по коротким). Конёк по длинной оси, длина = `|L − W|`. Винайдинг подобран так, что нормали смотрят наружу.
+  - `gable` — конёк во всю длину (от края до края). 2 длинных прямоугольных ската (mat_roof) + 2 треугольных фронтона на торцах (mat_wall, отдельный меш — чтобы перекрашивались как стены).
+  - `flat` — **полигональная** через `THREE.Shape` + `ExtrudeGeometry` (встроенный Earcut). Корректно работает на L/П/T-формах: слаб точно повторяет outline. Без eave (Minkowski offset для произвольного полигона не реализован).
+- **Material override** — для каждого `mat_*` swappable из `materials_map` отрисовывается `<input type=color>`. Меняет `material.color` всех мешей с матчащим `material.name` в `houseGroup`. Reset-кнопка пересобирает сцену со свежими клонами материалов.
+- **Live rebuild** — debounce 120 мс на любой слайдер; чекбокс «Контур» рисует фиолетовый периметр-overlay и сферы в pillar-точках для отладки.
+
+### Конвенции (важно для будущих модулей)
+
+**GLB-ориентация после импорта в Three.js (Y-up native):**
+- X = ширина, Y = высота, Z = глубина (с подписанным знаком).
+- Origin у одного угла; тело уходит в **+X, +Y, −Z**.
+- Это значит: `local Z=0` face = **OUTER** (street-side, где Blender Y=0 → glTF Z=0 после `export_yup`).
+- `local Z=−depth` face = **INNER** (room-side).
+- `wall_segment` нативная толщина 0.2 м (Z range `[−0.2, 0]`); масштабируется до `wt` через `scale.z = wt / 0.2`.
+
+**Размещение модуля на эдже периметра** (с rotation `π − atan2(dz, dx)`):
+- Position = endpoint = `(start + (cursor + width) * dir, y, ...)` (а не start).
+- Local +X маппится на world `(−dx, 0, −dz)` (модуль рисуется обратно к началу).
+- Local +Z (наружная грань) маппится на `(dz, 0, −dx)` = exterior direction для CW-обхода. ✓ внешняя грань смотрит на улицу.
+- Этот подход выбран потому, что чистым поворотом вокруг Y невозможно одновременно совместить local +X с walking direction И local +Z с exterior — модули имеют «лево-ориентированную» локальную систему относительно нашей задачи.
+
+**Pillar position (interior-квадрант):**
+- `sx = sign(−prev.dz − next.dz)`, `sz = sign(prev.dx + next.dx)` (сумма interior-направлений соседних стен).
+- `pos.x = (sx > 0) ? item.x : item.x − ps`
+- `pos.z = (sz > 0) ? item.z + ps : item.z` (учитывается, что body GLB-pillar в local −Z).
+
+**Wall length и start/end offsets — зависят от типа соседнего pillar'а:**
+- При **inward**-углe (`turn=+90`): тело pillar'а уходит в interior-квадрант, лежащем **вдоль** перимeтра → стена должна отступить на `ps` от этого угла, чтобы не пересечь pillar.
+- При **outward**-углe (`turn=−90`, concave-corner типа inside-of-L): тело pillar'а уходит **поперёк** перимeтра вглубь здания → стена идёт прямо до угла, без отступа.
+- Формула: `startOffset = (startPillar.turn > 0) ? ps : 0`, `endOffset = (endPillar.turn > 0) ? ps : 0`, `wallLength = runLength − startOffset − endOffset`. Аннотируется в `computeOutline` после первого прохода (когда уже известны типы поворотов соседних pillar'ов).
+
+**⚠ Гочча в парсере периметра.** В `computeOutline` НЕ нужно делать early `continue` по `_comment` — он может присутствовать **рядом** с действительной командой в одном объекте (`{"turn": -90, "_comment": "..."}`) и тогда команда теряется. Правильно: проверять только `cmd.run`/`cmd.turn`, элементы без них (включая чисто `_comment`) пропускаются естественным образом. (Этот баг проявлялся именно на L-формах: один turn=−90 терялся, контур не замыкался.)
+
+**⚠ Гочча в `resolveFills` — fixedSum vs wallLength.** Если в фасаде нет `{wall: "fill"}` (`fillCount === 0`), `resolveFills` НЕ нормализует ширины — фасад строится ровно по сумме фиксированных значений. Если эта сумма не совпадает с `wallLength` (что неизбежно при изменениях `area` через UI), получится видимая **дыра** в стене (или перекрытия). Парсер теперь выдаёт warn `[fills] ⚠ no fills, but gap N м …` — но build продолжается. Best practice для дескрипторов: **всегда** добавлять хотя бы один `{wall: "fill"}`, чтобы абсорбировать разницу. Этот баг проявился в `house_type_d.json` на 3-й стене (`run: ext`) — фиксированные `0.6 + window 0.9 + 0.6 = 2.1 м` не покрывали `ext ≈ 4 м`, оставляя дыру в ~1.8 м.
+
+**Foundation overhang:**
+- Wall: `pos.x += dz * overhang`, `pos.z −= dx * overhang` (сдвиг в exterior direction); `scale.z = (wt + overhang) / 0.2`.
+- Pillar: `scale = (ps + overhang, baseH, ps + overhang)`; `pos` смещён на `overhang` от item-точки в exterior-сторону.
+
+**Параметрическая трансформация — корректировки spec section 5.2:**
+- Спека алгоритма ставит `frame_right.position.x = w` и `frame_top.position.y = h`. Это работает только если origin frame_right / frame_top на их **внешней** грани (max corner). У наших GLB origin на min corner. **Корректные формулы:** `frame_right.position.x = w − jambW`, `frame_top.position.y = h − headerH`, где `jambW`, `headerH` — реальные размеры профиля рамы из GLB.
+- `dW`, `dH` для масштабирования читаются из bbox **загруженного GLB** (`detectNativeDims`), не из `default` дескриптора — они могут разойтись (как у legacy `door_single` 0.9×2.10 vs дескриптор 1.0×2.20 ранее).
+- `glass.scale` основывается на native opening size (`dW − 2·jambW × dH − headerH − bottomH`), не на формуле через `frame_profile` (она пересчитывает по другим thickness'ам).
+- Threshold native `t.y = -0.067` (легаси door GLB) — мы переопределяем `position.y = 0`, чтобы порог сидел на верху фундамента, полностью видимый.
+
+**Legacy GLB-имена** (mod_window_single/double/wide, mod_door_single/onehalf/double): `Glass` (с заглавной), `treshold` (опечатка), `Handle` (с заглавной). В `test-house.js` маппятся через `NAME_ALIASES = { Glass: 'glass', treshold: 'threshold', Handle: 'handle' }`. Новые модули (velux, dormer, mod_door_slide_*) идут строго по спеке.
+
+### Известные ограничения
+
+- **hip / gable на non-rectangular outline**: используют bbox, дают «навес» в пустых углах L/П-форм. Корректное построение требует декомпозиции полигона на rectangles (TODO). Для L-форм сейчас рекомендуется `roof_type: "flat"` — он строится по реальному outline-полигону.
+- **Многоэтажность**: один `params.floorH` применяется ко всем этажам; межэтажные перекрытия (`0.2 м` per spec) не строятся.
+- **Dormer / velux на крыше**: модули загружаются, но позиционирование на скате не реализовано.
+- **Декор**: `chimney`, `gutters`, `cornice`, `downpipe` — модули есть, размещение по периметру не реализовано.
+- **Eave для polygon-flat-roof**: слаб ровно по периметру outline. Свес наружу для произвольного полигона требует Minkowski offset (TODO).
+
+### Реализация polygon-flat-roof
+
+Сначала использовался `THREE.ExtrudeGeometry(shape, { depth })`, но он давал странные результаты для CCW-контуров с вогнутым углом (предположительно из-за нестабильной обработки `autoClose` / отрицательного `depth` в r128). Заменено на ручной `BufferGeometry` через `THREE.ShapeUtils.triangulateShape()` (тот же Earcut под капотом, но без обёртки `Shape`/`Extrude`):
+- Top-face: триангуляция Earcut'ом по corner'ам outline.
+- Bottom-face: те же треугольники с обратным winding'ом.
+- Боковые стенки по периметру: 2 треугольника на каждое ребро.
+- Толщина слаба = 0.10 м.
+- Логирование вершин полигона и числа треугольников выводится в panel-лог для диагностики.

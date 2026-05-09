@@ -43,8 +43,8 @@
     },
 
     "door_single": {
-      "w": { "min": 0.80, "max": 1.00, "default": 1.00 },
-      "h": { "min": 2.00, "max": 2.40, "default": 2.20 },
+      "w": { "min": 0.80, "max": 1.00, "default": 0.90 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
       "y": 0.00,
       "leaves": 1,
       "mechanism": "swing",

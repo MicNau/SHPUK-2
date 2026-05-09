@@ -80,7 +80,7 @@ JSON-дескрипторы домов и GLB-модули, из которых 
 
 | Подпапка | Содержимое |
 |----------|-----------|
-| `houses/` | `house_type_*.json` — JSON-дескрипторы домов (формат: `HOUSE_DESCRIPTOR_FORMAT.md` v2). Канонический пример — `house_type_a.json`. |
+| `houses/` | `house_type_*.json` — JSON-дескрипторы домов (формат: `HOUSE_DESCRIPTOR_FORMAT.md` v2). Сейчас 3 канонических примера: `house_type_a.json` (rect + hip), `house_type_b.json` (rect + gable), `house_type_d.json` (Г-образный + flat). Демонстрируются в тестовом приложении `test-house.html`. |
 | `houses/modules/walls/`   | `mod_wall_segment.glb`, `mod_pillar.glb` |
 | `houses/modules/windows/` | `mod_window_single.glb`, `mod_window_double.glb`, `mod_window_wide.glb`, `mod_window_velux.glb`, `mod_dormer.glb` |
 | `houses/modules/doors/`   | `mod_door_single.glb`, `mod_door_onehalf.glb`, `mod_door_double.glb`, `mod_door_slide_single.glb`, `mod_door_slide_double.glb` |

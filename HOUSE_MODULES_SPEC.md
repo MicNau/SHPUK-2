@@ -7,8 +7,10 @@
 **Реализация**:
 - ✅ Все 30 GLB-модулей по разделу 2.2 собраны и разложены в `assets/houses/modules/<категория>/`. Дефолтные размеры/origin/имена дочерних объектов — по спеке.
 - ✅ Исходные `.blend`-файлы — в `3d_sources/<категория>/` (новые модули — один объект на файл; legacy-агрегатные сохранены отдельно).
-- ❌ JS-загрузчик и сборщик дома по дескриптору (`loadHouseType`, `buildHouseFromDescriptor`, `transformParametricModule`, `applyMaterialOverride`) — не написан. Спецификация описывает их интерфейс в разделах 5.1–5.4.
-- ⚠ **Legacy-расхождение имён**: модули из `Modules.blend` (single/double/wide window) используют `Glass` (с заглавной) и `treshold` (опечатка). Новые модули — строго по спеке (`glass`, `threshold`). Подробнее — в `ARCHITECTURE.md` → «Модульная система 3D-домов».
+- 🟡 **JS-загрузчик и сборщик дома** (`loadHouseType`, `buildHouseFromDescriptor`, `transformParametricModule`, `applyMaterialOverride`) — реализованы в **изолированном тестовом приложении** `test-house.html` + `test-house.js` (см. `ARCHITECTURE.md` → «Тестовое приложение модульной сборки»). Демонстрируется на 3 типах: `type_a` (rect + hip), `type_b` (rect + gable), `type_d` (Г-образный + flat). Не интегрировано в основной фронтенд (`viewer3d-core.js`).
+- ❌ В тестовом приложении пока **не реализованы**: hip/gable на non-rectangular контурах, многоэтажность, dormer/velux размещение на скате, декор (chimney/gutters/cornice/downpipe).
+- ⚠ **Legacy-расхождение имён**: модули из `Modules.blend` (single/double/wide window) используют `Glass` (с заглавной) и `treshold` (опечатка). Новые модули — строго по спеке (`glass`, `threshold`). В `test-house.js` обработано через alias-таблицу `NAME_ALIASES`.
+- ⚠ **Алгоритм section 5.2 уточнён** при реализации — см. подраздел «5.2.1. Уточнения алгоритма».
 
 ### Изменения v2
 
@@ -450,6 +452,12 @@ eachFill  = (totalRun - fixedLen) / fillCount
 ```
 
 Если `eachFill < 0.1` — ошибка в дескрипторе (элементы не помещаются).
+
+**⚠ Если `fillCount === 0`** (нет ни одного `{wall: "fill"}` в фасаде), `fixedLen` ДОЛЖНА точно совпадать с `totalRun`. Иначе:
+- `fixedLen < totalRun` → видимая дыра в фасаде на разницу метров
+- `fixedLen > totalRun` → элементы выходят за пределы стены, перекрытия
+
+`test-house.js` логирует warn в этом случае. Best practice: **всегда добавляйте хотя бы один `{wall: "fill"}`** в фасад, где есть переменные ширины (зависящие от `area` через UI). См. также `HOUSE_DESCRIPTOR_FORMAT.md` → section 6.3 «Глухая стена».
 
 ### 3.6. Автоматическое размещение окон
 
@@ -1118,6 +1126,89 @@ function transformParametricModule(moduleGroup, params) {
   });
 }
 ```
+
+### 5.2.1. Уточнения алгоритма (по результатам реализации в `test-house.js`)
+
+При практической реализации (см. `ARCHITECTURE.md` → «Тестовое приложение модульной сборки») были выявлены несколько неточностей в алгоритме section 5.2 — там, где он не учитывал реальные конвенции наших GLB. Ниже — корректировки, которые нужно учесть в продакшен-портировании.
+
+**1. Origin frame_right / frame_top — на min-corner, не на внешней грани.**
+
+Алгоритм спеки задаёт `frame_right.position.x = w` и `frame_top.position.y = h`. Это работает корректно только если origin этих частей расположен на их **внешней** грани (т.е. справа у frame_right, сверху у frame_top). У наших GLB origin на **min-corner** (стандартный Blender-моделинг), поэтому в результирующей геометрии:
+- `frame_right` уходит вправо за проём на `frame_thickness`
+- `frame_top` поднимается выше проёма на `header_thickness`, оставляя зазор между верхом полотна и низом перекладины
+
+**Корректные формулы** (с детектом нативной толщины из bbox):
+```js
+frame_right:  position.x = w − jambW;
+frame_top:    position.y = h − headerH;
+```
+где `jambW = bbox(frame_left).max.x − bbox(frame_left).min.x` и `headerH = bbox(frame_top).max.y − bbox(frame_top).min.y`.
+
+**2. `dW`/`dH` — детектировать из GLB, не из дескриптора.**
+
+Спека пишет: «`dW`, `dH` — дефолтные размеры из `modules` (модель сделана в этом размере)». Это требует, чтобы дескриптор `default` СТРОГО совпадал с нативным размером модели в GLB. На практике расхождение легко возникает (как было с `door_single` в нашем `house_type_a.json`: дескриптор 1.0×2.20, GLB 0.9×2.10).
+
+**Решение**: после клонирования модуля прочитать нативные размеры из bbox: `nativeW = frame_right.position.x + frame_right.bbox.max.x`, `nativeH = frame_top.position.y + frame_top.bbox.max.y`. Использовать их как `dW`/`dH` в алгоритме. Дескриптор `default` остаётся как «логическая ширина проёма по умолчанию», но НЕ как реф для масштабирования.
+
+**3. `glass.scale` — через native opening, не через `frame_profile`.**
+
+Формула спеки `(w − fp*2) / dGW` где `dGW = dW − fp*2` предполагает, что glass нативно был размером `dW − 2·fp × dH − 2·fp` и совпадает с opening. На практике у legacy-окон glass смоделирован чуть шире opening (для визуального overlap'а с рамой). И `frame_profile` дескриптора (0.05) не совпадает с реальной толщиной (0.07).
+
+**Решение**: использовать реальный native opening: `nativeOpenW = dW − 2·jambW`, `nativeOpenH = dH − headerH − bottomH`. Масштабировать glass = `(targetOpenW / nativeOpenW, targetOpenH / nativeOpenH)`. То же для leaf_main / leaf_minor.
+
+**4. Threshold — поднять до floor level.**
+
+Native t.y = −0.067 (легаси door GLB) загоняет порог наполовину в фундамент, делая его невидимым. Решение: явно `threshold.position.y = 0` в трансформации.
+
+**5. Pillar position — interior-квадрант, не центр угла.**
+
+Section 5.2 пишет:
+```js
+seg.position.set(pillarItem.x - ps/2, yOffset, pillarItem.z - ps/2);
+```
+Это центрирует pillar на углу — половина тела за периметром (выпирает наружу), что визуально создаёт «ступеньку» между pillar и стеной.
+
+**Корректное позиционирование** — pillar **полностью внутри** периметра, в interior-квадранте от угла. Знаки квадранта берутся как сумма interior-направлений двух соседних стен (`interior(edge) = (-edge.dz, edge.dx)` для CW-обхода):
+```js
+sx = sign(-prev.dz - next.dz)
+sz = sign(prev.dx + next.dx)
+pos.x = (sx > 0) ? item.x : item.x − ps
+pos.z = (sz > 0) ? item.z + ps : item.z   // body GLB-pillar в local −Z
+```
+
+**Wall length и start/end offsets — зависят от типа соседнего pillar'а** (inward `+90` vs outward `−90`):
+- Inward (`turn=+90`): тело pillar'а в interior-квадранте лежит **вдоль** перимeтра — занимает первый/последний `ps` стены. Стена должна отступить от этого угла на `ps`.
+- Outward (`turn=−90`, concave-corner типа inside-of-L): тело pillar'а уходит **поперёк** перимeтра вглубь здания. Стена идёт прямо до угла, без отступа.
+
+```js
+// computeOutline: после того, как все pillar'ы аннотированы их .turn:
+for (const wall of walls) {
+  const startTurn = prevPillar.turn, endTurn = nextPillar.turn;
+  wall.startOffset = (startTurn > 0) ? ps : 0;
+  wall.endOffset   = (endTurn   > 0) ? ps : 0;
+  wall.wallLength  = wall.runLength − wall.startOffset − wall.endOffset;
+}
+// buildEdgeWall:
+const startX = wall.x + wall.dx * wall.startOffset;
+```
+
+Эта схема корректно работает и для inward, и для outward углов. Простая универсальная формула `wallLength = runLength − 2·ps` тоже работает для прямоугольных контуров (где все углы inward), но даёт **видимую дыру** в стене у концевого outward-угла L/П-форм. Корректный учёт типа угла обязателен для произвольных контуров.
+
+**⚠ Парсинг `_comment` рядом с `turn`/`run`.** В JS-парсере периметра НЕЛЬЗЯ делать ранний `continue` по `_comment`: он может присутствовать в одном объекте с действительной командой (например, `{"turn": -90, "_comment": "outward"}`), и тогда команда теряется. Корректно: проверять только `cmd.run` и `cmd.turn`; элементы без них (включая чисто-комментарийные) пропускаются естественным образом if-else'ом. Лучшая практика для дескрипторов — выносить `_comment` в **отдельный** элемент массива:
+```jsonc
+{ "_comment": "═══ outward turn ═══" },
+{ "turn": -90 },
+```
+
+**6. Rotation — `π − atan2(dz, dx)`, position в endpoint.**
+
+Чистым поворотом вокруг Y невозможно одновременно совместить local +X с walking direction и local +Z (внешняя грань модуля) с world exterior — наши GLB модули имеют «лево-ориентированную» локальную систему относительно этой задачи (это следствие конвенции «origin на min corner, body в −Z»).
+
+**Решение**: `rotation.y = π − atan2(dz, dx)` маппит local +Z на world exterior (✓), но local +X маппится на world `(−dx, 0, −dz)` (против walking direction). Поэтому модуль позиционируется **в конце** заполнителя, а не в начале:
+```js
+pos = (start + (cursor + width) * dir, y, ...)
+```
+Модуль «рисуется назад» от endpoint к началу заполнителя. Геометрия в мире совпадает с ожидаемой, и внешняя грань корректно смотрит на улицу.
 
 ### 5.3. Сборка мансардных / слуховых окон
 

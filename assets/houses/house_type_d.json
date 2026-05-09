@@ -1,0 +1,104 @@
+{
+  "id": "type_d",
+  "name": "Г-образный одноэтажный",
+  "description": "Г-образный план: основной прямоугольник + восточный выступ. Плоская крыша.",
+
+  "constraints": {
+    "base_h":         { "min": 50, "max": 120, "step": 10, "default": 70,  "unit": "cm" },
+    "roof_angle":     { "min": 0,  "max": 5,   "step": 1,  "default": 0,   "unit": "deg" },
+    "wall_thickness": 0.25,
+    "pillar_size":    0.25
+  },
+
+  "roof_type": "flat",
+
+  "modules": {
+    "_comment": "Spec v2: range-объекты {min, max, default} в метрах",
+
+    "window_single": {
+      "w": { "min": 0.60, "max": 1.40, "default": 0.90 },
+      "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
+      "y": { "min": 0.30, "max": 1.50, "default": 0.90 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "glb": "mod_window_single.glb"
+    },
+    "door_single": {
+      "w": { "min": 0.80, "max": 1.00, "default": 0.90 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
+      "y": 0.00,
+      "leaves": 1,
+      "mechanism": "swing",
+      "frame_profile": 0.05,
+      "glb": "mod_door_single.glb"
+    }
+  },
+
+  "floors": [
+    {
+      "id": "floor_1",
+      "label": "Первый этаж",
+
+      "constraints": {
+        "area":    { "min": 60, "max": 140, "step": 5,  "default": 100, "unit": "m2" },
+        "floor_h": { "min": 270, "max": 330, "step": 10, "default": 300, "unit": "cm" }
+      },
+
+      "vars": {
+        "_comment": "L, W — основной прямоугольник; ext — глубина выступа (восточная пристройка); ew — её ширина по Z",
+        "L":   "sqrt(area * 1.4)",
+        "W":   "sqrt(area / 1.4)",
+        "ext": "L * 0.35",
+        "ew":  "W * 0.45"
+      },
+
+      "perimeter": [
+        { "_comment": "═══ N: северная стена основного прямоугольника →" },
+        { "run": "L", "facade": "auto_windows", "window_type": "single", "min_margin": 1.0 },
+        { "turn": 90 },
+
+        { "_comment": "═══ E1: восток основного прямоугольника, верхняя часть до выступа ↓" },
+        { "run": "W - ew", "facade": [
+          { "wall": "fill" },
+          { "window": "single" },
+          { "wall": "fill" }
+        ]},
+        { "_comment": "ВНЕШНИЙ угол — выступ начинается" },
+        { "turn": -90 },
+
+        { "_comment": "═══ N выступа →" },
+        { "run": "ext", "facade": [
+          { "wall": "fill" },
+          { "window": "single" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ E выступа ↓" },
+        { "run": "ew", "facade": [
+          { "wall": "fill" },
+          { "door": "single" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ S: южная стена (полная длина L+ext) ←" },
+        { "run": "L + ext", "facade": "auto_windows", "window_type": "single", "min_margin": 1.0 },
+        { "turn": 90 },
+
+        { "_comment": "═══ W: западная стена ↑" },
+        { "run": "W", "facade": "auto_windows", "window_type": "single", "min_margin": 0.8 },
+        { "turn": 90 }
+      ]
+    }
+  ],
+
+  "materials_map": {
+    "mat_wall":  { "label": "Стены (штукатурка)", "swappable": true  },
+    "mat_base":  { "label": "Цоколь",             "swappable": true  },
+    "mat_roof":  { "label": "Крыша (парапет)",    "swappable": true  },
+    "mat_frame": { "label": "Рамы окон",          "swappable": true  },
+    "mat_glass": { "label": "Стекло",             "swappable": false },
+    "mat_door":  { "label": "Дверь",              "swappable": true  }
+  }
+}
