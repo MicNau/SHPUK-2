@@ -1,0 +1,182 @@
+{
+  "id": "type_07",
+  "name": "П-образный дом",
+  "description": "Чёткая П-форма: длинная перекладина сверху + 2 явно разнесённые ноги вниз. Большой провал между ногами образует внутренний дворик, открытый на юг. 2 reflex-угла.",
+
+  "constraints": {
+    "base_h":         { "min": 50, "max": 120, "step": 10, "default": 70,  "unit": "cm" },
+    "roof_angle":     { "min": 15, "max": 35,  "step": 5,  "default": 22,  "unit": "deg" },
+    "wall_thickness": 0.25,
+    "pillar_size":    0.25
+  },
+
+  "roof_type": "hip",
+
+  "modules": {
+    "_comment": "Showcase 7 типов: 3 окна + 4 двери",
+
+    "window_single": {
+      "w": { "min": 0.60, "max": 1.40, "default": 0.90 },
+      "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
+      "y": { "min": 0.30, "max": 1.50, "default": 0.90 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "glb": "mod_window_single.glb"
+    },
+    "window_double": {
+      "w": { "min": 1.00, "max": 2.00, "default": 1.40 },
+      "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
+      "y": { "min": 0.30, "max": 1.50, "default": 0.90 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "mullions": ["v"],
+      "glb": "mod_window_double.glb"
+    },
+    "window_wide": {
+      "w": { "min": 1.80, "max": 3.00, "default": 2.40 },
+      "h": { "min": 0.80, "max": 2.00, "default": 1.50 },
+      "y": { "min": 0.20, "max": 1.20, "default": 0.60 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "mullions": ["v", "h"],
+      "glb": "mod_window_wide.glb"
+    },
+
+    "door_single": {
+      "w": { "min": 0.80, "max": 1.00, "default": 0.90 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
+      "y": 0.00,
+      "leaves": 1,
+      "mechanism": "swing",
+      "frame_profile": 0.05,
+      "glb": "mod_door_single.glb"
+    },
+    "door_double": {
+      "w": { "min": 1.20, "max": 1.80, "default": 1.40 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
+      "y": 0.00,
+      "leaves": 2,
+      "mechanism": "swing",
+      "frame_profile": 0.05,
+      "glb": "mod_door_double.glb"
+    },
+    "door_slide_single": {
+      "w": { "min": 0.80, "max": 1.20, "default": 1.00 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
+      "y": 0.00,
+      "leaves": 1,
+      "mechanism": "slide",
+      "frame_profile": 0.05,
+      "glb": "mod_door_slide_single.glb"
+    },
+    "door_slide_double": {
+      "w": { "min": 1.40, "max": 3.00, "default": 2.00 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.30 },
+      "y": 0.00,
+      "leaves": 2,
+      "mechanism": "slide",
+      "frame_profile": 0.05,
+      "glb": "mod_door_slide_double.glb"
+    }
+  },
+
+  "floors": [
+    {
+      "id": "floor_1",
+      "label": "Первый этаж",
+
+      "constraints": {
+        "_comment": "min=70: при меньшей площади двор между ногами становится слишком узким для slide_double",
+        "area":    { "min": 70, "max": 140, "step": 5,  "default": 95,  "unit": "m2" },
+        "floor_h": { "min": 270, "max": 330, "step": 10, "default": 300, "unit": "cm" }
+      },
+
+      "vars": {
+        "_comment": "L,W — bbox; bh — тонкая перекладина (30% W); leg_w — тонкие ноги (18% L), gap большой = ~64% L",
+        "L":     "sqrt(area * 1.5)",
+        "W":     "sqrt(area / 1.5)",
+        "bh":    "W * 0.30",
+        "leg_w": "L * 0.18"
+      },
+
+      "perimeter": [
+        { "_comment": "═══ N: верхняя стена перекладины (длинная) → ═══" },
+        { "run": "L", "facade": "auto_windows", "window_type": "double", "min_margin": 1.0 },
+        { "turn": 90 },
+
+        { "_comment": "═══ E: правая внешняя стена (вся высота W) ↓ ═══" },
+        { "run": "W", "facade": [
+          { "wall": "fill" },
+          { "window": "single" },
+          { "wall": "fill" },
+          { "door": "single" },
+          { "wall": "fill" },
+          { "window": "single" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ Низ правой ноги (узкий торец) ← ═══" },
+        { "run": "leg_w", "facade": [
+          { "wall": "fill" },
+          { "window": "single" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90, "_comment": "CONVEX: SW-угол правой ноги (полигон поворачивает наружу)" },
+
+        { "_comment": "═══ Внутренняя стена правой ноги (вокруг двора) ↑ ═══" },
+        { "run": "W - bh", "facade": [
+          { "wall": "fill" },
+          { "window": "double" },
+          { "wall": "fill" }
+        ]},
+        { "turn": -90, "_comment": "REFLEX: NE-угол двора (полигон огибает открытый дворик)" },
+
+        { "_comment": "═══ Под перекладиной: панорама во двор (раздвижная двойная) ← ═══" },
+        { "run": "L - 2*leg_w", "facade": [
+          { "wall": "fill" },
+          { "door": "slide_double" },
+          { "wall": 0.8 },
+          { "window": "wide" },
+          { "wall": "fill" }
+        ]},
+        { "turn": -90, "_comment": "REFLEX: NW-угол двора" },
+
+        { "_comment": "═══ Внутренняя стена левой ноги (вокруг двора) ↓ ═══" },
+        { "run": "W - bh", "facade": [
+          { "wall": "fill" },
+          { "window": "wide" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90, "_comment": "CONVEX: SE-угол левой ноги" },
+
+        { "_comment": "═══ Низ левой ноги (узкий торец) ← ═══" },
+        { "run": "leg_w", "facade": [
+          { "wall": "fill" },
+          { "window": "single" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ W: левая внешняя стена (вся высота W) ↑ ═══" },
+        { "run": "W", "facade": [
+          { "wall": "fill" },
+          { "door": "double" },
+          { "wall": "fill" },
+          { "door": "slide_single" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 }
+      ]
+    }
+  ],
+
+  "materials_map": {
+    "mat_wall":  { "label": "Стены (штукатурка)", "swappable": true  },
+    "mat_base":  { "label": "Цоколь",             "swappable": true  },
+    "mat_roof":  { "label": "Крыша (парапет)",    "swappable": true  },
+    "mat_frame": { "label": "Рамы окон",          "swappable": true  },
+    "mat_glass": { "label": "Стекло",             "swappable": false },
+    "mat_door":  { "label": "Двери",              "swappable": true  }
+  }
+}

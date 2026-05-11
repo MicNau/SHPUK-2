@@ -1,0 +1,134 @@
+{
+  "id": "type_09",
+  "name": "Двухэтажный прямоугольный",
+  "description": "Простой прямоугольный план, 2 этажа одинаковой формы. Двускатная крыша. Между этажами — плита перекрытия 20см.",
+
+  "constraints": {
+    "base_h":         { "min": 50, "max": 120, "step": 10, "default": 80,  "unit": "cm" },
+    "roof_angle":     { "min": 20, "max": 40,  "step": 5,  "default": 30,  "unit": "deg" },
+    "wall_thickness": 0.25,
+    "pillar_size":    0.25
+  },
+
+  "roof_type": "gable",
+
+  "modules": {
+    "window_single": {
+      "w": { "min": 0.60, "max": 1.40, "default": 0.90 },
+      "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
+      "y": { "min": 0.30, "max": 1.50, "default": 0.90 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "glb": "mod_window_single.glb"
+    },
+    "window_double": {
+      "w": { "min": 1.00, "max": 2.00, "default": 1.40 },
+      "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
+      "y": { "min": 0.30, "max": 1.50, "default": 0.90 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "mullions": ["v"],
+      "glb": "mod_window_double.glb"
+    },
+    "door_single": {
+      "w": { "min": 0.80, "max": 1.00, "default": 0.90 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
+      "y": 0.00,
+      "leaves": 1,
+      "mechanism": "swing",
+      "frame_profile": 0.05,
+      "glb": "mod_door_single.glb"
+    }
+  },
+
+  "floors": [
+    {
+      "id": "floor_1",
+      "label": "Первый этаж",
+
+      "constraints": {
+        "area":    { "min": 60, "max": 130, "step": 5,  "default": 90,  "unit": "m2" },
+        "floor_h": { "min": 270, "max": 330, "step": 10, "default": 300, "unit": "cm" }
+      },
+
+      "vars": {
+        "L": "sqrt(area * 1.5)",
+        "W": "sqrt(area / 1.5)"
+      },
+
+      "perimeter": [
+        { "_comment": "═══ N: длинная стена с двойными окнами →" },
+        { "run": "L", "facade": "auto_windows", "window_type": "double", "min_margin": 1.0 },
+        { "turn": 90 },
+
+        { "_comment": "═══ E: короткая стена с входом ↓" },
+        { "run": "W", "facade": [
+          { "wall": "fill" },
+          { "door": "single" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ S: длинная стена с авто-окнами ←" },
+        { "run": "L", "facade": "auto_windows", "window_type": "single", "min_margin": 1.0 },
+        { "turn": 90 },
+
+        { "_comment": "═══ W: короткая стена с авто-окнами ↑" },
+        { "run": "W", "facade": "auto_windows", "window_type": "single", "min_margin": 0.8 },
+        { "turn": 90 }
+      ]
+    },
+    {
+      "id": "floor_2",
+      "label": "Второй этаж",
+      "_comment": "area_factor=1.0: второй этаж полностью повторяет первый по периметру",
+
+      "constraints": {
+        "floor_h": { "min": 250, "max": 310, "step": 10, "default": 280, "unit": "cm" }
+      },
+
+      "vars": {
+        "L": "sqrt(area * 1.5)",
+        "W": "sqrt(area / 1.5)"
+      },
+
+      "perimeter": [
+        { "_comment": "═══ N второго этажа: 3 двойных окна →" },
+        { "run": "L", "facade": "auto_windows", "window_type": "double", "min_margin": 1.2 },
+        { "turn": 90 },
+
+        { "_comment": "═══ E второго этажа ↓" },
+        { "run": "W", "facade": [
+          { "wall": "fill" },
+          { "window": "single" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ S второго этажа ←" },
+        { "run": "L", "facade": "auto_windows", "window_type": "double", "min_margin": 1.2 },
+        { "turn": 90 },
+
+        { "_comment": "═══ W второго этажа ↑" },
+        { "run": "W", "facade": "auto_windows", "window_type": "single", "min_margin": 0.8 },
+        { "turn": 90 }
+      ]
+    }
+  ],
+
+  "features": {
+    "chimney": { "position": [0.4, 0.3], "model": "chimney" },
+    "cornice": true,
+    "inter_floor_cornice": true
+  },
+
+  "materials_map": {
+    "mat_wall":    { "label": "Стены (штукатурка)", "swappable": true  },
+    "mat_base":    { "label": "Цоколь",             "swappable": true  },
+    "mat_roof":    { "label": "Крыша",              "swappable": true  },
+    "mat_cornice": { "label": "Карнизы",            "swappable": true  },
+    "mat_frame":   { "label": "Рамы окон",          "swappable": true  },
+    "mat_glass":   { "label": "Стекло",             "swappable": false },
+    "mat_door":    { "label": "Дверь",              "swappable": true  }
+  }
+}

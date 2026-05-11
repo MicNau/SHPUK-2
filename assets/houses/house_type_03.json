@@ -1,16 +1,16 @@
 {
-  "id": "type_d",
+  "id": "type_03",
   "name": "Г-образный одноэтажный",
   "description": "Г-образный план: основной прямоугольник + восточный выступ. Плоская крыша.",
 
   "constraints": {
     "base_h":         { "min": 50, "max": 120, "step": 10, "default": 70,  "unit": "cm" },
-    "roof_angle":     { "min": 0,  "max": 5,   "step": 1,  "default": 0,   "unit": "deg" },
+    "roof_angle":     { "min": 15, "max": 35,  "step": 5,  "default": 22,  "unit": "deg" },
     "wall_thickness": 0.25,
     "pillar_size":    0.25
   },
 
-  "roof_type": "flat",
+  "roof_type": "hip",
 
   "modules": {
     "_comment": "Spec v2: range-объекты {min, max, default} в метрах",
@@ -93,10 +93,16 @@
     }
   ],
 
+  "features": {
+    "chimney": { "position": [0.4, 0.3], "model": "chimney" },
+    "gutters": true,
+    "cornice": true
+  },
+
   "materials_map": {
     "mat_wall":  { "label": "Стены (штукатурка)", "swappable": true  },
     "mat_base":  { "label": "Цоколь",             "swappable": true  },
-    "mat_roof":  { "label": "Крыша (парапет)",    "swappable": true  },
+    "mat_roof":  { "label": "Крыша",              "swappable": true  },
     "mat_frame": { "label": "Рамы окон",          "swappable": true  },
     "mat_glass": { "label": "Стекло",             "swappable": false },
     "mat_door":  { "label": "Дверь",              "swappable": true  }

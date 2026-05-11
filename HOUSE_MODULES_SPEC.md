@@ -7,8 +7,8 @@
 **Реализация**:
 - ✅ Все 30 GLB-модулей по разделу 2.2 собраны и разложены в `assets/houses/modules/<категория>/`. Дефолтные размеры/origin/имена дочерних объектов — по спеке.
 - ✅ Исходные `.blend`-файлы — в `3d_sources/<категория>/` (новые модули — один объект на файл; legacy-агрегатные сохранены отдельно).
-- 🟡 **JS-загрузчик и сборщик дома** (`loadHouseType`, `buildHouseFromDescriptor`, `transformParametricModule`, `applyMaterialOverride`) — реализованы в **изолированном тестовом приложении** `test-house.html` + `test-house.js` (см. `ARCHITECTURE.md` → «Тестовое приложение модульной сборки»). Демонстрируется на 3 типах: `type_a` (rect + hip), `type_b` (rect + gable), `type_d` (Г-образный + flat). Не интегрировано в основной фронтенд (`viewer3d-core.js`).
-- ❌ В тестовом приложении пока **не реализованы**: hip/gable на non-rectangular контурах, многоэтажность, dormer/velux размещение на скате, декор (chimney/gutters/cornice/downpipe).
+- 🟡 **JS-загрузчик и сборщик дома** (`loadHouseType`, `buildHouseFromDescriptor`, `transformParametricModule`, `applyMaterialOverride`, `decomposeOrthoPolygonIntoRectangles`, `buildInterFloorSlab`, `buildDecorFromFeatures`) — реализованы в **изолированном тестовом приложении** `test-house.html` + `test-house.js` (см. `ARCHITECTURE.md` → «Тестовое приложение модульной сборки»). Демонстрируется на **10 типах домов** (rect+hip/gable, L, +, T, S, П, O-с-двором, 2-этажный, 1.5-этажный). Поддерживаются: все 4 типа крыши (hip/gable/gable_cross/flat) через декомпозицию ortho-полигона, многоэтажность с per-floor offset/area_factor, декор (cornice/chimney/inter_floor_cornice). Не интегрировано в основной фронтенд (`viewer3d-core.js`) — это следующий шаг.
+- ❌ **Не реализовано** (можно делать инкрементально после портирования): porch builder (модули `mod_porch_column.glb` / `mod_porch_step.glb` есть, расстановка не написана), dormer/velux на скате крыши, mansard-крыша, угловой элемент карниза `mod_cornice_corner.glb` (требуется GLB с трапециевидным сечением — без него на convex-углах карниза остаётся зазор `cd × cd`).
 - ⚠ **Legacy-расхождение имён**: модули из `Modules.blend` (single/double/wide window) используют `Glass` (с заглавной) и `treshold` (опечатка). Новые модули — строго по спеке (`glass`, `threshold`). В `test-house.js` обработано через alias-таблицу `NAME_ALIASES`.
 - ⚠ **Алгоритм section 5.2 уточнён** при реализации — см. подраздел «5.2.1. Уточнения алгоритма».
 
@@ -86,6 +86,7 @@
 | `roof_flat_edge` | `mod_roof_flat_edge.glb` | Парапет плоской крыши | X (длина) | — |
 | **Декор** |
 | `cornice_segment` | `mod_cornice.glb` | Карнизный свес (1 п.м.) | X (длина) | — |
+| `cornice_corner` | `mod_cornice_corner.glb` *(планируется)* | Угловой элемент карниза с трапециевидным сечением (повторяет профиль `cornice_segment`), L-образный кусок для закрытия convex-углов | — | — |
 | `chimney` | `mod_chimney.glb` | Дымоход | — | — |
 | `gutter_segment` | `mod_gutter.glb` | Водосток (1 п.м.) | X | — |
 | `downpipe` | `mod_downpipe.glb` | Водосточная труба | Y (высота) | — |
@@ -877,9 +878,9 @@ mat_planter_wood — дерево (короб грядки)
 ```
 assets/
   houses/
-    house_type_a.json        # Дескриптор: одноэтажный с вальмовой крышей  ✅ есть
-    house_type_b.json        # Дескриптор: одноэтажный с двускатной         (план)
-    house_type_c.json        # Дескриптор: двухэтажный                      (план)
+    house_type_01.json       # Дескриптор: одноэтажный с вальмовой крышей  ✅ есть
+    house_type_02.json       # Дескриптор: одноэтажный с двускатной         ✅ есть
+    house_type_03.json       # Дескриптор: Г-образный + плоская крыша       ✅ есть
   houses/modules/
     walls/    mod_wall_segment.glb, mod_pillar.glb                          ✅
     windows/  mod_window_single.glb, mod_window_double.glb,
@@ -1146,7 +1147,7 @@ frame_top:    position.y = h − headerH;
 
 **2. `dW`/`dH` — детектировать из GLB, не из дескриптора.**
 
-Спека пишет: «`dW`, `dH` — дефолтные размеры из `modules` (модель сделана в этом размере)». Это требует, чтобы дескриптор `default` СТРОГО совпадал с нативным размером модели в GLB. На практике расхождение легко возникает (как было с `door_single` в нашем `house_type_a.json`: дескриптор 1.0×2.20, GLB 0.9×2.10).
+Спека пишет: «`dW`, `dH` — дефолтные размеры из `modules` (модель сделана в этом размере)». Это требует, чтобы дескриптор `default` СТРОГО совпадал с нативным размером модели в GLB. На практике расхождение легко возникает (как было с `door_single` в нашем `house_type_01.json`: дескриптор 1.0×2.20, GLB 0.9×2.10).
 
 **Решение**: после клонирования модуля прочитать нативные размеры из bbox: `nativeW = frame_right.position.x + frame_right.bbox.max.x`, `nativeH = frame_top.position.y + frame_top.bbox.max.y`. Использовать их как `dW`/`dH` в алгоритме. Дескриптор `default` остаётся как «логическая ширина проёма по умолчанию», но НЕ как реф для масштабирования.
 
@@ -1359,7 +1360,7 @@ function applyMaterialToSelected(matSlot) {
 | `buildHouseMeshes()` | Процедурная геометрия (BoxGeometry) | `buildHouseFromDescriptor()` — сборка из GLB |
 | `getHouseMats()` | Создаёт MeshStandardMaterial руками | Берёт материалы из GLB, переопределяет через `applyMaterialOverride()` |
 | `_applyBoxUV()` | Всегда для всех стен | Только для масштабированных модулей `wall_segment`, `base_segment`, `pillar` |
-| `state.js: S.houseType` | Строка `"Одноэтажный дом"` | ID дескриптора `"type_a"` |
+| `state.js: S.houseType` | Строка `"Одноэтажный дом"` | ID дескриптора `"type_01"` |
 | Шаги 1–3 в UI | Захардкожены | Динамически из `desc.constraints` |
 | Угловые элементы | `wall_corner_ext` + `wall_corner_int` | Единый `pillar` |
 | Окна/двери | Фиксированные GLB | Параметрические GLB (трансформация дочерних объектов) |
@@ -1400,7 +1401,7 @@ if (modules && Object.keys(modules).length > 0) {
 ## 7. Расширяемость
 
 ### 7.1. Новый тип дома
-1. Создать `house_type_d.json` с описанием стен, крыши, декора
+1. Создать `house_type_NN.json` (двузначная нумерация, продолжая существующую серию) с описанием стен, крыши, декора
 2. Если нужны новые модули — добавить GLB в `assets/modules/`
 3. Добавить запись в UI (шаг 1) — конфигуратор подхватит автоматически
 
@@ -1434,14 +1435,14 @@ if (modules && Object.keys(modules).length > 0) {
 | # | Задача | Зависимости |
 |---|--------|-------------|
 | 1 | Согласовать спецификацию (этот документ) | — |
-| 2 | Создать 1 JSON-дескриптор (type_a — одноэтажный) | Согласованная спецификация |
+| 2 | Создать 1 JSON-дескриптор (type_01 — одноэтажный) | Согласованная спецификация |
 | 3 | Смоделировать минимальный набор GLB: wall_segment, pillar, base_segment, window_single (параметрический), door_single (параметрический), roof_hip_slope | Blender, согласованные соглашения по именам |
 | 4 | Написать `loadHouseType()` + `buildHouseFromDescriptor()` + `transformParametricModule()` | JSON-дескриптор + GLB готовы |
 | 5 | Написать `applyMaterialOverride()` | GLB с именованными материалами |
 | 6 | Интегрировать с UI (шаги 1–3, constraints из JSON) | Код загрузки готов |
 | 7 | Добавить ещё типы окон/дверей (double, wide, onehalf, slide) | Рабочий pipeline |
 | 8 | Реализовать мансардные/слуховые окна (velux, dormer) | Рабочий pipeline + крыша |
-| 9 | Добавить ещё 2 типа дома (type_b, type_c) | Рабочий pipeline |
+| 9 | Добавить ещё 2 типа дома (type_02, type_03) | Рабочий pipeline |
 | 10 | Элементы участка (забор, мебель, грядки) | Рабочий pipeline |
 
 ---

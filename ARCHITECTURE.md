@@ -43,7 +43,9 @@
     tree_a.png / tree_b.png           # PNG-спрайты деревьев (fallback)
 
     houses/               # дескрипторы домов и GLB-модули
-      house_type_a.json   # одноэтажный с вальмовой крышей (формат spec v2)
+      house_type_01.json  # одноэтажный с вальмовой крышей (формат spec v2)
+      house_type_02.json  # одноэтажный с двускатной крышей
+      house_type_03.json  # Г-образный с плоской крышей
       modules/
         walls/    mod_wall_segment.glb, mod_pillar.glb
         windows/  mod_window_single.glb, mod_window_double.glb, mod_window_wide.glb,
@@ -439,18 +441,26 @@ CREATE TABLE projects (
 | Слой | Статус |
 |------|--------|
 | Спецификация модулей (HOUSE_MODULES_SPEC.md, v2) | ✅ согласована |
-| Формат дескриптора (HOUSE_DESCRIPTOR_FORMAT.md, v2) | ✅ согласован |
-| `house_type_a.json` (одноэтажный с вальмовой) | ✅ под spec v2 |
-| `house_type_b.json` (одноэтажный с двускатной) | ✅ |
-| `house_type_d.json` (Г-образный с плоской) | ✅ |
+| Формат дескриптора (HOUSE_DESCRIPTOR_FORMAT.md, v2) | ✅ согласован, расширен полями `floor.start_offset`, `floor.area_factor`, `features.inter_floor_cornice` |
+| Дескрипторы домов в `assets/houses/` | ✅ 10 типов: rect+hip (01), rect+gable (02), L (03), + (04), T (05), S (06), П (07), О-с-двором (08), 2-этажный (09), 1.5-этажный мансарда (10) |
 | GLB-модули | ✅ 30 модулей собраны в `assets/houses/modules/<категория>/` |
 | Исходные `.blend`-файлы | ✅ в `3d_sources/<категория>/` |
 | JS-загрузчик `loadHouseType()` | 🟡 реализован в `test-house.js` (изолированно) |
-| JS-сборщик `buildHouseFromDescriptor()` | 🟡 реализован в `test-house.js` (изолированно) |
-| `transformParametricModule()` | 🟡 в `test-house.js`, с детектом native размеров |
+| JS-сборщик `buildHouseFromDescriptor()` | 🟡 в `test-house.js`. Поддерживает: ortho-полигоны с reflex-углами, многоэтажность с per-floor offset и area_factor |
+| Декомпозиция полигона на rects + hip/gable per rect | 🟡 в `test-house.js` (`decomposeOrthoPolygonIntoRectangles`) |
+| `transformParametricModule()` | 🟡 в `test-house.js`, с детектом native bbox (X/Y/Z) для всех частей: frame_*, leaf_*, glass, curtain, mullion_*, sill, threshold |
 | `applyMaterialOverride()` | 🟡 в `test-house.js` (color-пикеры по `mat_*`) |
+| Декор: cornice / chimney / inter-floor cornice | 🟡 в `test-house.js`. Углы cornice — TODO (см. ниже) |
 | Процедурный билдер `buildHouseMeshes()` | ✅ работает как fallback в основном фронтенде |
-| Портирование test-house в основной фронтенд | ❌ не сделано |
+| Портирование test-house в основной фронтенд | ❌ **следующий шаг**: вынести общий код в `shared/house-*.js`, подключить и в test-house, и в `viewer3d-core.js` |
+
+**Открытые TODO в test-house (некритично для портирования, можно делать инкрементально):**
+- Cornice на convex-углах: нужен GLB `mod_cornice_corner.glb` с трапециевидным сечением (повторяет профиль `mod_cornice.glb`), чтобы закрыть зазор `cd × cd` на каждом convex-углу.
+- Porch (крыльцо): builder для расстановки `mod_porch_column.glb` и `mod_porch_step.glb` у входной двери. GLB-модули готовы.
+- Dormer/velux: позиционирование на наклонной плоскости + вырез отверстия в скате.
+- Mansard-крыша: наклонные стены 2-го этажа вместо вертикальных.
+- Handle двери: сейчас обрезается при `scale.x` leaf'а (handle — child of leaf в GLB). Нужна пересборка GLB с handle как sibling.
+- Per-floor UI sliders (для разной высоты/площади этажей в test-house).
 
 **Известное расхождение имён в legacy-GLB.** Существующие модули из `Modules.blend` (single/double/wide окна) используют `Glass` (с заглавной) и `treshold` (опечатка) вместо требуемых спекой `glass` и `threshold`. **Новые** модули, собранные после согласования v2, идут строго по спеке. При написании `transformParametricModule()` нужно либо пересобрать legacy-GLB с правильными именами, либо сделать парсер case-insensitive с alias-таблицей `{Glass:'glass', treshold:'threshold'}` — выбор за реализатором.
 
@@ -467,7 +477,7 @@ CREATE TABLE projects (
 - **Удалена отладка**: 6 `console.log('[3D]')` из `buildHouseMeshes`.
 - **`.gitignore`**: убран markdown-фрейминг, добавлен `*.blend1/2/3` (Blender autosave).
 - **3 «осиротевших» `.blend1`** из корня перенесены в подпапки `3d_sources/{windows,doors,doors}/`, где лежат их `.blend`-сиблинги.
-- **`house_type_a.json` приведён к spec v2**: размеры окон/дверей как `{min,max,default}`, ID модулей `door_entrance/door_patio` → `door_single/door_slide_double` (по спеке), добавлены `mullions`, `leaves`, `mechanism`, `frame_profile`, `pillar_size`, `mat_concrete`, `mat_flashing`.
+- **`house_type_01.json` приведён к spec v2**: размеры окон/дверей как `{min,max,default}`, ID модулей `door_entrance/door_patio` → `door_single/door_slide_double` (по спеке), добавлены `mullions`, `leaves`, `mechanism`, `frame_profile`, `pillar_size`, `mat_concrete`, `mat_flashing`.
 - **Обновлены документационные ссылки** на старые `viewer3d-{desktop,mobile}.js` в `ARCHITECTURE.md`, `HOUSE_MODULES_SPEC.md`, шапке `viewer3d-core.js`.
 
 ---
@@ -476,11 +486,19 @@ CREATE TABLE projects (
 
 1. ~~**Десктопная версия UI**~~ ✅ — создана и отлажена.
 2. ~~**Подготовить GLB-модели**~~ ✅ — растительность (PNG-fallback готов, GLB опционально) + 30 GLB-модулей дома собраны.
-3. **Написать загрузчик и сборщик модульного дома**:
-   - 🟡 **В работе** — `test-house.html` + `test-house.js` (см. ниже). Базовая парадигма проверена на 3 типах домов (прямоугольник + hip, прямоугольник + gable, Г-образный + flat). Реализованы: стены, столбы, фундамент с отступом, окна и двери (параметрические), 3 типа крыш (hip / gable / flat-polygon), подмена материалов через `mat_*`-имена.
-   - ❌ Многоэтажность, dormer/velux, декор, hip/gable на non-rectangular контурах — TODO.
-   - После валидации — портировать `loadHouseType` / `buildHouseFromDescriptor` / `applyMaterialOverride` в основной фронтенд (`viewer3d-core.js`), интегрировать с нав-флоу шага 2 (параметры дома) вместо процедурного `buildHouseMeshes`.
-4. **Бэкенд** — FastAPI + расчётный модуль + БД.
+3. ~~**Написать загрузчик и сборщик модульного дома**~~ ✅ — `test-house.html` + `test-house.js`. 10 типов домов (rect+hip, rect+gable, L, +, T, S, П, O-с-двором, 2-этажный, 1.5-этажный). Все 4 типа крыши (hip/gable/gable_cross/flat) через декомпозицию ortho-полигона на прямоугольники. Многоэтажность с per-floor `start_offset`/`area_factor`. Декор (cornice, chimney, inter_floor_cornice). Material override через `mat_*`.
+4. **Портировать общий код в основной фронтенд** — **следующий шаг**:
+   - Вынести `loadHouseType` / `buildHouseFromDescriptor` / `transformParametricModule` / `applyMaterialOverride` / `decomposeOrthoPolygonIntoRectangles` и т.д. в `shared/house-*.js`.
+   - Подключить shared-модуль и в `test-house.html` (как playground), и в `index-desktop.html` через `viewer3d-core.js`.
+   - В `viewer3d-core.js` заменить процедурный `buildHouseMeshes` на `buildHouseFromDescriptor`.
+   - Связать UI: `dSelHouse` (выбор типа дома) → загрузка дескриптора; слайдеры шага 2 (area, floor_h, foundation_h) → rebuild.
+5. **Доработки модульной системы (некритично, инкрементально после портирования)**:
+   - `mod_cornice_corner.glb` — GLB-модуль с трапециевидным сечением для закрытия convex-углов карниза.
+   - Porch builder (расстановка `mod_porch_column.glb` + `mod_porch_step.glb` у двери).
+   - Dormer/velux на скате крыши.
+   - Mansard-крыша (наклонные стены 2-го этажа).
+   - Пересборка GLB дверей: handle как sibling leaf_main (не child), чтобы handle не масштабировался вместе со створкой.
+6. **Бэкенд** — FastAPI + расчётный модуль + БД (в работе у команды бэкенда).
 
 ---
 
@@ -503,9 +521,9 @@ python -m http.server 8765
 **Демонстрируемые типы домов:**
 | ID | Название | Перимeтр | Крыша |
 |----|----------|----------|-------|
-| `type_a` | Одноэтажный с вальмовой | прямоугольник | hip |
-| `type_b` | Одноэтажный с двускатной | прямоугольник | gable |
-| `type_d` | Г-образный одноэтажный | L (turn=−90 в выступе) | flat (polygon) |
+| `type_01` | Одноэтажный с вальмовой | прямоугольник | hip |
+| `type_02` | Одноэтажный с двускатной | прямоугольник | gable |
+| `type_03` | Г-образный одноэтажный | L (turn=−90 в выступе) | flat (polygon) |
 
 ### Что реализовано
 
@@ -549,7 +567,7 @@ python -m http.server 8765
 
 **⚠ Гочча в парсере периметра.** В `computeOutline` НЕ нужно делать early `continue` по `_comment` — он может присутствовать **рядом** с действительной командой в одном объекте (`{"turn": -90, "_comment": "..."}`) и тогда команда теряется. Правильно: проверять только `cmd.run`/`cmd.turn`, элементы без них (включая чисто `_comment`) пропускаются естественным образом. (Этот баг проявлялся именно на L-формах: один turn=−90 терялся, контур не замыкался.)
 
-**⚠ Гочча в `resolveFills` — fixedSum vs wallLength.** Если в фасаде нет `{wall: "fill"}` (`fillCount === 0`), `resolveFills` НЕ нормализует ширины — фасад строится ровно по сумме фиксированных значений. Если эта сумма не совпадает с `wallLength` (что неизбежно при изменениях `area` через UI), получится видимая **дыра** в стене (или перекрытия). Парсер теперь выдаёт warn `[fills] ⚠ no fills, but gap N м …` — но build продолжается. Best practice для дескрипторов: **всегда** добавлять хотя бы один `{wall: "fill"}`, чтобы абсорбировать разницу. Этот баг проявился в `house_type_d.json` на 3-й стене (`run: ext`) — фиксированные `0.6 + window 0.9 + 0.6 = 2.1 м` не покрывали `ext ≈ 4 м`, оставляя дыру в ~1.8 м.
+**⚠ Гочча в `resolveFills` — fixedSum vs wallLength.** Если в фасаде нет `{wall: "fill"}` (`fillCount === 0`), `resolveFills` НЕ нормализует ширины — фасад строится ровно по сумме фиксированных значений. Если эта сумма не совпадает с `wallLength` (что неизбежно при изменениях `area` через UI), получится видимая **дыра** в стене (или перекрытия). Парсер теперь выдаёт warn `[fills] ⚠ no fills, but gap N м …` — но build продолжается. Best practice для дескрипторов: **всегда** добавлять хотя бы один `{wall: "fill"}`, чтобы абсорбировать разницу. Этот баг проявился в `house_type_03.json` на 3-й стене (`run: ext`) — фиксированные `0.6 + window 0.9 + 0.6 = 2.1 м` не покрывали `ext ≈ 4 м`, оставляя дыру в ~1.8 м.
 
 **Foundation overhang:**
 - Wall: `pos.x += dz * overhang`, `pos.z −= dx * overhang` (сдвиг в exterior direction); `scale.z = (wt + overhang) / 0.2`.

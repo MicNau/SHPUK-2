@@ -1,0 +1,192 @@
+{
+  "id": "type_06",
+  "name": "S-образный (Z) дом",
+  "description": "План-зигзаг: верхний прямоугольник смещён вправо, нижний — влево, между ними соединитель. 2 reflex-угла.",
+
+  "constraints": {
+    "base_h":         { "min": 50, "max": 120, "step": 10, "default": 70,  "unit": "cm" },
+    "roof_angle":     { "min": 15, "max": 35,  "step": 5,  "default": 22,  "unit": "deg" },
+    "wall_thickness": 0.25,
+    "pillar_size":    0.25
+  },
+
+  "roof_type": "hip",
+
+  "modules": {
+    "_comment": "Showcase всех 8 параметрических типов проёмов",
+
+    "window_single": {
+      "w": { "min": 0.60, "max": 1.40, "default": 0.90 },
+      "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
+      "y": { "min": 0.30, "max": 1.50, "default": 0.90 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "glb": "mod_window_single.glb"
+    },
+    "window_double": {
+      "w": { "min": 1.00, "max": 2.00, "default": 1.40 },
+      "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
+      "y": { "min": 0.30, "max": 1.50, "default": 0.90 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "mullions": ["v"],
+      "glb": "mod_window_double.glb"
+    },
+    "window_wide": {
+      "w": { "min": 1.80, "max": 3.00, "default": 2.40 },
+      "h": { "min": 0.80, "max": 2.00, "default": 1.50 },
+      "y": { "min": 0.20, "max": 1.20, "default": 0.60 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "mullions": ["v", "h"],
+      "glb": "mod_window_wide.glb"
+    },
+
+    "door_single": {
+      "w": { "min": 0.80, "max": 1.00, "default": 0.90 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
+      "y": 0.00,
+      "leaves": 1,
+      "mechanism": "swing",
+      "frame_profile": 0.05,
+      "glb": "mod_door_single.glb"
+    },
+    "door_onehalf": {
+      "w": { "min": 1.10, "max": 1.40, "default": 1.20 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
+      "y": 0.00,
+      "leaves": 1.5,
+      "mechanism": "swing",
+      "frame_profile": 0.05,
+      "glb": "mod_door_onehalf.glb"
+    },
+    "door_double": {
+      "w": { "min": 1.20, "max": 1.80, "default": 1.40 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
+      "y": 0.00,
+      "leaves": 2,
+      "mechanism": "swing",
+      "frame_profile": 0.05,
+      "glb": "mod_door_double.glb"
+    },
+    "door_slide_single": {
+      "w": { "min": 0.80, "max": 1.20, "default": 1.00 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
+      "y": 0.00,
+      "leaves": 1,
+      "mechanism": "slide",
+      "frame_profile": 0.05,
+      "glb": "mod_door_slide_single.glb"
+    },
+    "door_slide_double": {
+      "w": { "min": 1.40, "max": 3.00, "default": 2.00 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.30 },
+      "y": 0.00,
+      "leaves": 2,
+      "mechanism": "slide",
+      "frame_profile": 0.05,
+      "glb": "mod_door_slide_double.glb"
+    }
+  },
+
+  "floors": [
+    {
+      "id": "floor_1",
+      "label": "Первый этаж",
+
+      "constraints": {
+        "area":    { "min": 70, "max": 140, "step": 5,  "default": 90,  "unit": "m2" },
+        "floor_h": { "min": 270, "max": 330, "step": 10, "default": 300, "unit": "cm" }
+      },
+
+      "vars": {
+        "_comment": "L,W — bbox; bh — высота top/bot прямоугольника; offX — смещение между ними. Реальная площадь меньше bbox на 2*offX*bh",
+        "L":     "sqrt(area * 2.6)",
+        "W":     "sqrt(area * 1.15)",
+        "offX":  "L * 0.33",
+        "bh":    "W * 0.40"
+      },
+
+      "perimeter": [
+        { "_comment": "═══ Верх: верхняя стена top-блока (run = L-offX) → ═══" },
+        { "run": "L - offX", "facade": "auto_windows", "window_type": "wide", "min_margin": 1.0 },
+        { "turn": 90 },
+
+        { "_comment": "═══ Правая стенка top-блока (run = bh) ↓ ═══" },
+        { "run": "bh", "facade": [
+          { "wall": "fill" },
+          { "window": "double" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ Низ правой части top-блока (run = offX) ← ═══" },
+        { "run": "offX", "facade": [
+          { "wall": "fill" },
+          { "window": "single" },
+          { "wall": 1.2 },
+          { "window": "single" },
+          { "wall": "fill" }
+        ]},
+        { "turn": -90, "_comment": "REFLEX: вход в connector + bot-блок" },
+
+        { "_comment": "═══ Правая стенка connector + bot-блока (run = W-bh) ↓ ═══" },
+        { "run": "W - bh", "facade": [
+          { "wall": "fill" },
+          { "door": "single" },
+          { "wall": "fill" },
+          { "window": "double" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ Низ bot-блока (run = L-offX) ← ═══" },
+        { "run": "L - offX", "facade": [
+          { "wall": "fill" },
+          { "window": "double" },
+          { "wall": 0.5 },
+          { "door": "double" },
+          { "wall": 0.5 },
+          { "window": "double" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ Левая стенка bot-блока (run = bh) ↑ ═══" },
+        { "run": "bh", "facade": [
+          { "wall": "fill" },
+          { "window": "wide" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ Верх левой части bot-блока (run = offX) → ═══" },
+        { "run": "offX", "facade": [
+          { "wall": "fill" },
+          { "door": "slide_double" },
+          { "wall": "fill" }
+        ]},
+        { "turn": -90, "_comment": "REFLEX: вход в connector + top-блок" },
+
+        { "_comment": "═══ Левая стенка connector + top-блока (run = W-bh) ↑ ═══" },
+        { "run": "W - bh", "facade": [
+          { "wall": "fill" },
+          { "window": "wide" },
+          { "wall": "fill" },
+          { "door": "slide_single" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 }
+      ]
+    }
+  ],
+
+  "materials_map": {
+    "mat_wall":  { "label": "Стены (штукатурка)", "swappable": true  },
+    "mat_base":  { "label": "Цоколь",             "swappable": true  },
+    "mat_roof":  { "label": "Крыша (парапет)",    "swappable": true  },
+    "mat_frame": { "label": "Рамы окон",          "swappable": true  },
+    "mat_glass": { "label": "Стекло",             "swappable": false },
+    "mat_door":  { "label": "Двери",              "swappable": true  }
+  }
+}
