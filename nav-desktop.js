@@ -62,6 +62,14 @@ function dSelHouse(el, name) {
   document.querySelectorAll('.d-house-card').forEach(c => c.classList.remove('selected'));
   el.classList.add('selected');
   S.houseType = name;
+  // Запускаем загрузку дескриптора заранее, чтобы при переходе на шаг 2 сцена была готова.
+  // ensureHouseLoaded определена в viewer3d-core.js. Если houseType не маппится (например,
+  // «Участок без дома»), функция вернёт null без ошибки.
+  if (typeof ensureHouseLoaded === 'function') {
+    ensureHouseLoaded().then(() => {
+      if (typeof threeState !== 'undefined' && threeState) buildScene3d();
+    }).catch(()=>{});
+  }
 }
 
 // ══════════════════════════════════════════════

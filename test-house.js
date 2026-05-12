@@ -1,10 +1,17 @@
 // ══════════════════════════════════════════════
 // TEST-HOUSE.JS
-// Тестовое приложение для проверки модульной системы 3D-домов.
-// Загружает JSON-дескриптор из assets/houses/<typeId>.json,
-// параллельно тянет все референсированные GLB-модули,
-// реализует обход периметра (turtle graphics), параметрическую
-// трансформацию окон/дверей и подмену материалов mat_*.
+// UI и инициализация тестового приложения (песочница для модульной сборки 3D-домов).
+//
+// Вся geometric/loader/render-логика вынесена в shared/house-builder.js (namespace HouseBuilder).
+// Этот файл содержит:
+//   • Сцена (renderer, camera, OrbitControls, освещение, земля)
+//   • Логгер в panel (HouseBuilder.setLogger перенаправляет shared-логи сюда)
+//   • UI-обвязка: выбор типа дома, слайдеры area/floor_h/base_h, material color pickers
+//   • rebuild() — вызывает HouseBuilder.loadHouseType + HouseBuilder.buildHouseFromDescriptor
+//
+// В коде ниже остались **дубли** функций из shared (loadHouseType, buildHouseFromDescriptor,
+// transformParametricModule, buildRoof, и т.д.) — это dead code, оставлен для безопасности
+// перехода. Будет удалён в следующей итерации после стабилизации.
 //
 // СПЕЦИФИКАЦИИ:
 //   HOUSE_DESCRIPTOR_FORMAT.md (v2.0)
@@ -2163,7 +2170,7 @@ function setupMaterialControls(desc) {
     picker.value = _state.materialOverrides[slot] || '#cccccc';
     picker.oninput = () => {
       _state.materialOverrides[slot] = picker.value;
-      const n = applyMaterialOverride(slot, picker.value);
+      const n = HouseBuilder.applyMaterialOverride(houseGroup, slot, picker.value);
       log(`[mat] ${slot} → ${picker.value} (${n} mesh${n === 1 ? '' : 'es'})`, 'dim');
     };
 
@@ -2211,7 +2218,8 @@ async function rebuild() {
   const typeId = $('houseTypeSel').value;
   if (!_state.desc || _state.desc.id !== typeId) {
     try {
-      const loaded = await loadHouseType(typeId);
+      // Используем shared HouseBuilder вместо локальной loadHouseType
+      const loaded = await HouseBuilder.loadHouseType(typeId);
       _state.desc = loaded.desc;
       _state.modules = loaded.modules;
       _state.materialOverrides = {}; // сбрасываем при смене типа
@@ -2227,7 +2235,13 @@ async function rebuild() {
     floorH: parseFloat($('floorH').value),
     baseH: parseFloat($('baseH').value),
   };
-  buildHouseFromDescriptor(_state.desc, _state.modules, params);
+  // Используем shared HouseBuilder — он принимает houseGroup как параметр.
+  HouseBuilder.buildHouseFromDescriptor(houseGroup, _state.desc, _state.modules, params, {
+    outlineGroup,
+    showOutline: $('showOutline').checked,
+    controls,
+    materialOverrides: _state.materialOverrides,
+  });
 }
 
 function bindRange(rangeId, displayId) {
@@ -2242,6 +2256,8 @@ function bindRange(rangeId, displayId) {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  // Перенаправляем логи shared/house-builder в panel-логгер test-house.
+  if (typeof HouseBuilder !== 'undefined') HouseBuilder.setLogger(log);
   initScene();
   bindRange('area', 'vArea');
   bindRange('floorH', 'vFloor');

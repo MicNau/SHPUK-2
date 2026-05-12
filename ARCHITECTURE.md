@@ -26,9 +26,18 @@
 /frontend — общие файлы (используются обеими версиями)
   state.js                # S, SECS, SEC_SCREEN, CATALOG_COLORS, PRICE_TIERS, STUB_RESULTS
   canvas.js               # pan/zoom движок, snap-canvas, крыльцо (drag+resize)
-  viewer3d-core.js        # сцена, HDRI, PBR-материалы, buildScene3d, все 3D-строители
+  viewer3d-core.js        # сцена, HDRI, PBR-материалы, buildScene3d.
+                          # Дом строится через HouseBuilder.buildHouseFromDescriptor (см. shared/house-builder.js);
+                          # старый процедурный buildHouseMeshes остаётся как fallback пока loadHouseType в полёте.
+                          # HOUSE_TYPE_MAP маппит S.houseType → typeId дескриптора.
+                          # ensureHouseLoaded() — async-кэш дескриптора и GLB-модулей.
   viewer3d-entourage.js   # антураж (общий для обеих платформ): GLB-модели → PNG cross-billboard → процедурный fallback;
                           # автоматически определяет IS_MOBILE (UA + ширина окна) для подбора параметров
+  shared/house-builder.js # ⭐ Общий модуль модульной сборки дома по JSON-дескриптору.
+                          # IIFE namespace HouseBuilder: { setLogger, loadHouseType,
+                          # buildHouseFromDescriptor, applyMaterialOverride, drawOutlineOverlay,
+                          # decomposeOrthoPolygonIntoRectangles }. Подключается и в test-house,
+                          # и в основной фронт. См. «Тестовое приложение модульной сборки» ниже.
 
   assets/                 # текстуры, HDRI, растительность, дома и модули
     README.md             # описание соглашения по именам файлов
@@ -97,8 +106,19 @@ ui.js → catalog.js
 **Десктопная (index-desktop.html):**
 ```
 Three.js r128 → OrbitControls → RGBELoader → EXRLoader → GLTFLoader
-state.js → canvas.js → viewer3d-core.js → viewer3d-entourage.js → nav-desktop.js
+state.js → canvas.js
+→ shared/house-builder.js
+→ viewer3d-core.js → viewer3d-entourage.js → nav-desktop.js
 ```
+
+**Тестовая песочница (test-house.html):**
+```
+Three.js r128 → OrbitControls → GLTFLoader
+→ shared/house-builder.js → test-house.js
+```
+
+В обоих случаях `shared/house-builder.js` подключается **до** кода, который его использует.
+Test-house инжектит свой panel-логгер через `HouseBuilder.setLogger(log)`.
 
 Все скрипты подключаются с query-string `?v=N` для сброса кэша браузера (текущая: v=14).
 
@@ -445,14 +465,14 @@ CREATE TABLE projects (
 | Дескрипторы домов в `assets/houses/` | ✅ 10 типов: rect+hip (01), rect+gable (02), L (03), + (04), T (05), S (06), П (07), О-с-двором (08), 2-этажный (09), 1.5-этажный мансарда (10) |
 | GLB-модули | ✅ 30 модулей собраны в `assets/houses/modules/<категория>/` |
 | Исходные `.blend`-файлы | ✅ в `3d_sources/<категория>/` |
-| JS-загрузчик `loadHouseType()` | 🟡 реализован в `test-house.js` (изолированно) |
-| JS-сборщик `buildHouseFromDescriptor()` | 🟡 в `test-house.js`. Поддерживает: ortho-полигоны с reflex-углами, многоэтажность с per-floor offset и area_factor |
-| Декомпозиция полигона на rects + hip/gable per rect | 🟡 в `test-house.js` (`decomposeOrthoPolygonIntoRectangles`) |
-| `transformParametricModule()` | 🟡 в `test-house.js`, с детектом native bbox (X/Y/Z) для всех частей: frame_*, leaf_*, glass, curtain, mullion_*, sill, threshold |
-| `applyMaterialOverride()` | 🟡 в `test-house.js` (color-пикеры по `mat_*`) |
-| Декор: cornice / chimney / inter-floor cornice | 🟡 в `test-house.js`. Углы cornice — TODO (см. ниже) |
-| Процедурный билдер `buildHouseMeshes()` | ✅ работает как fallback в основном фронтенде |
-| Портирование test-house в основной фронтенд | ❌ **следующий шаг**: вынести общий код в `shared/house-*.js`, подключить и в test-house, и в `viewer3d-core.js` |
+| JS-загрузчик `loadHouseType()` | ✅ в `shared/house-builder.js` (общий для test-house и основного фронта) |
+| JS-сборщик `buildHouseFromDescriptor()` | ✅ в `shared/house-builder.js`. Поддерживает: ortho-полигоны с reflex-углами, многоэтажность с per-floor offset и area_factor |
+| Декомпозиция полигона на rects + hip/gable per rect | ✅ `decomposeOrthoPolygonIntoRectangles` в shared |
+| `transformParametricModule()` | ✅ в shared, с детектом native bbox (X/Y/Z) для всех частей: frame_*, leaf_*, glass, curtain, mullion_*, sill, threshold |
+| `applyMaterialOverride()` | ✅ в shared (принимает parent, color-пикеры по `mat_*`) |
+| Декор: cornice / chimney / inter-floor cornice | ✅ в shared. Углы cornice — TODO (требуется GLB cornice_corner) |
+| Процедурный билдер `buildHouseMeshes()` | ✅ в `viewer3d-core.js`, используется как fallback пока `ensureHouseLoaded()` в полёте |
+| Подключение в основной фронтенд (`viewer3d-core.js` + `nav-desktop.js`) | ✅ `HOUSE_TYPE_MAP` + `ensureHouseLoaded` + `dSelHouse` запускает preload; в `buildScene3d()` вызывается `HouseBuilder.buildHouseFromDescriptor` |
 
 **Открытые TODO в test-house (некритично для портирования, можно делать инкрементально):**
 - Cornice на convex-углах: нужен GLB `mod_cornice_corner.glb` с трапециевидным сечением (повторяет профиль `mod_cornice.glb`), чтобы закрыть зазор `cd × cd` на каждом convex-углу.
@@ -468,7 +488,15 @@ CREATE TABLE projects (
 
 ## Recent cleanup (tech debt)
 
-Сделано в текущей итерации (v=14):
+Сделано в итерации v=15 (портирование test-house → основной фронт):
+
+- **Создан `shared/house-builder.js`** (~1080 строк, IIFE namespace `HouseBuilder`). Содержит всю geometric/loader/render логику модульной сборки дома. Используется и в test-house (как playground), и в основном фронте.
+- **`test-house.js`**: `rebuild()` теперь вызывает `HouseBuilder.loadHouseType()` и `HouseBuilder.buildHouseFromDescriptor(houseGroup, ..., {outlineGroup, controls, materialOverrides})`. Локальные дубли функций сохранены как dead code, но не используются (можно удалить в следующей итерации).
+- **`viewer3d-core.js`**: добавлены `HOUSE_TYPE_MAP` (S.houseType → typeId), `_houseCache`, `ensureHouseLoaded()` (async с дедупликацией), `rebuildHouseAsync()`. В `buildScene3d()` вызывается `HouseBuilder.buildHouseFromDescriptor` если кэш готов; иначе fallback на старый процедурный `buildHouseMeshes` пока loader в полёте.
+- **`nav-desktop.js`**: `dSelHouse()` запускает `ensureHouseLoaded()` сразу при выборе типа дома (preload пока пользователь смотрит step 1), затем `buildScene3d()` для отрисовки.
+- **Cache-bust**: `viewer3d-core.js?v=15`, `nav-desktop.js?v=15`, `shared/house-builder.js?v=1`.
+
+Сделано ранее (v=14):
 
 - **Дедупликация antoura**: `viewer3d-desktop.js` (283 строки) + `viewer3d-mobile.js` (275 строк) → один `viewer3d-entourage.js` с авто-детектом `IS_MOBILE` (UA + `innerWidth < 768`). Минус ~270 строк дублей.
 - **Унификация cache-bust**: моб. `?v=8` и десктоп `?v=13` → общий **`?v=14`**.
@@ -487,17 +515,16 @@ CREATE TABLE projects (
 1. ~~**Десктопная версия UI**~~ ✅ — создана и отлажена.
 2. ~~**Подготовить GLB-модели**~~ ✅ — растительность (PNG-fallback готов, GLB опционально) + 30 GLB-модулей дома собраны.
 3. ~~**Написать загрузчик и сборщик модульного дома**~~ ✅ — `test-house.html` + `test-house.js`. 10 типов домов (rect+hip, rect+gable, L, +, T, S, П, O-с-двором, 2-этажный, 1.5-этажный). Все 4 типа крыши (hip/gable/gable_cross/flat) через декомпозицию ortho-полигона на прямоугольники. Многоэтажность с per-floor `start_offset`/`area_factor`. Декор (cornice, chimney, inter_floor_cornice). Material override через `mat_*`.
-4. **Портировать общий код в основной фронтенд** — **следующий шаг**:
-   - Вынести `loadHouseType` / `buildHouseFromDescriptor` / `transformParametricModule` / `applyMaterialOverride` / `decomposeOrthoPolygonIntoRectangles` и т.д. в `shared/house-*.js`.
-   - Подключить shared-модуль и в `test-house.html` (как playground), и в `index-desktop.html` через `viewer3d-core.js`.
-   - В `viewer3d-core.js` заменить процедурный `buildHouseMeshes` на `buildHouseFromDescriptor`.
-   - Связать UI: `dSelHouse` (выбор типа дома) → загрузка дескриптора; слайдеры шага 2 (area, floor_h, foundation_h) → rebuild.
-5. **Доработки модульной системы (некритично, инкрементально после портирования)**:
+4. ~~**Портировать общий код в основной фронтенд**~~ ✅ — `shared/house-builder.js` создан (~1080 строк), IIFE namespace `HouseBuilder`. Подключён и в `test-house.html`, и в `index-desktop.html`. В `viewer3d-core.js`: `HOUSE_TYPE_MAP` маппит `S.houseType` → typeId, `ensureHouseLoaded()` кэширует дескриптор + GLB-модули, в `buildScene3d()` вызывается `HouseBuilder.buildHouseFromDescriptor()` (с fallback на старый `buildHouseMeshes` пока loader в полёте). `dSelHouse` в `nav-desktop.js` запускает preload при выборе типа.
+   - **Замечание**: пока используется маппинг **варианта A** (4 карточки шага 1 → 3 типа дескрипторов). Полный набор (10 типов) доступен только в test-house. В будущем UI шага 1 → «карусель» с превью всех типов.
+5. **Доработки модульной системы (некритично, инкрементально):**
    - `mod_cornice_corner.glb` — GLB-модуль с трапециевидным сечением для закрытия convex-углов карниза.
    - Porch builder (расстановка `mod_porch_column.glb` + `mod_porch_step.glb` у двери).
    - Dormer/velux на скате крыши.
    - Mansard-крыша (наклонные стены 2-го этажа).
    - Пересборка GLB дверей: handle как sibling leaf_main (не child), чтобы handle не масштабировался вместе со створкой.
+   - Карусель типов домов в UI шага 1 (вместо 4 карточек — превью всех 10 дескрипторов).
+   - Per-floor sliders area/floor_h (для гибкого тюнинга многоэтажных домов в UI).
 6. **Бэкенд** — FastAPI + расчётный модуль + БД (в работе у команды бэкенда).
 
 ---

@@ -25,6 +25,60 @@ let threeState = null;
 //   currentSlot, animId }
 
 // ══════════════════════════════════════════════
+// МАППИНГ S.houseType → typeId дескриптора
+// (Шаг 1 UI использует «человеческие» имена; дескрипторы лежат под typeId='type_NN'.)
+// «Участок без дома» → null (дом не рендерится).
+// ══════════════════════════════════════════════
+const HOUSE_TYPE_MAP = {
+  'Одноэтажный дом':  'type_01',
+  'Двухэтажный дом':  'type_09',
+  'Дом с мансардой':  'type_10',
+  'Участок без дома': null,
+};
+
+function getHouseTypeId() {
+  const name = (typeof S !== 'undefined') ? S.houseType : null;
+  if (!name) return null;
+  if (name in HOUSE_TYPE_MAP) return HOUSE_TYPE_MAP[name];
+  // Если houseType — это уже typeId (например, для тестов), пропускаем напрямую
+  if (/^type_\d+$/.test(name)) return name;
+  return null;
+}
+
+// Кэш загруженного дескриптора и GLB-модулей. Один за раз — пересоздаётся при смене типа.
+// Загрузка async, но buildScene3d синхронный: если desc ещё не загружен, дом не рендерится,
+// после завершения промиса rebuildHouseAsync() пересоберёт сцену.
+const _houseCache = { typeId: null, desc: null, modules: null, loadingPromise: null };
+
+async function ensureHouseLoaded() {
+  const typeId = getHouseTypeId();
+  if (!typeId) { _houseCache.typeId = null; _houseCache.desc = null; _houseCache.modules = null; return null; }
+  if (_houseCache.typeId === typeId && _houseCache.desc) return _houseCache;
+  if (_houseCache.loadingPromise && _houseCache.typeId === typeId) return _houseCache.loadingPromise;
+  _houseCache.typeId = typeId;
+  _houseCache.desc = null;
+  _houseCache.modules = null;
+  _houseCache.loadingPromise = (typeof HouseBuilder !== 'undefined' ? HouseBuilder.loadHouseType(typeId) : Promise.reject(new Error('HouseBuilder not loaded')))
+    .then(loaded => {
+      _houseCache.desc = loaded.desc;
+      _houseCache.modules = loaded.modules;
+      _houseCache.loadingPromise = null;
+      return _houseCache;
+    })
+    .catch(err => {
+      console.error('[3D] ensureHouseLoaded fail:', err);
+      _houseCache.loadingPromise = null;
+      throw err;
+    });
+  return _houseCache.loadingPromise;
+}
+
+// Удобный вспомогательный wrapper для смены типа дома: запускает loader, после успеха перестраивает сцену.
+function rebuildHouseAsync() {
+  ensureHouseLoaded().then(() => { if (threeState) buildScene3d(); }).catch(()=>{});
+}
+
+// ══════════════════════════════════════════════
 // ЗАГРУЗКА ТЕКСТУР
 // Возвращает текстуру из файла или null (тихо).
 // Кэш: повторные вызовы с тем же путём отдают тот же объект.
@@ -686,7 +740,24 @@ function buildScene3d() {
   const bh     = foundH;
 
   if (!isNoHouse) {
-    buildHouseMeshes(houseGroup, M, houseL, houseW, wh, bh, wt);
+    // Используем модульную сборку по дескриптору, если он загружен (см. ensureHouseLoaded).
+    // Если ещё нет — fallback на старый процедурный билдер (timeout пока async).
+    if (typeof HouseBuilder !== 'undefined' && _houseCache.desc && _houseCache.modules) {
+      HouseBuilder.buildHouseFromDescriptor(
+        houseGroup,
+        _houseCache.desc,
+        _houseCache.modules,
+        { area, floorH: floorRaw, baseH: foundRaw },
+        { controls }
+      );
+    } else {
+      // Дескриптор ещё не загружен — рисуем процедурный fallback и запускаем загрузку.
+      buildHouseMeshes(houseGroup, M, houseL, houseW, wh, bh, wt);
+      if (typeof HouseBuilder !== 'undefined') {
+        // Async-loader, после успеха сцена будет перестроена через rebuildHouseAsync.
+        rebuildHouseAsync();
+      }
+    }
     // Площадка под домом: выступает на 5 см над землёй, на 30 см шире фундамента
     const padW = houseL + 0.6, padD = houseW + 0.6, padH = 0.05;
     const padGeo = new THREE.BoxGeometry(padW, padH, padD);
