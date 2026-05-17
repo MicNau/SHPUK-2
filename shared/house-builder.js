@@ -78,13 +78,24 @@ function collectModuleIds(desc) {
       }
     }
   }
+  // Мансардные / слуховые окна
+  if (desc.roof_windows) {
+    for (const rw of desc.roof_windows) {
+      if (rw.module) ids.add(rw.module);
+      if (rw.module === 'dormer' && rw.window && rw.window.type) {
+        ids.add('window_' + rw.window.type);
+      }
+    }
+  }
   return ids;
 }
 
 async function loadHouseType(typeId) {
   const url = `assets/houses/house_${typeId}.json`;
   log(`[loader] Fetch descriptor: ${url}`);
-  const desc = await fetch(url).then(r => {
+  // cache: 'no-store' чтобы дескриптор не кэшировался агрессивно браузером:
+  // часто правится при разработке, и старая версия может «застрять» в кэше даже после hard reload скриптов.
+  const desc = await fetch(url, { cache: 'no-store' }).then(r => {
     if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText} — ${url}`);
     return r.json();
   });
@@ -245,6 +256,7 @@ function makeDoorFill(modulesDef, variant, override) {
   return {
     type: 'door', model: 'door_' + variant,
     width: override.w !== undefined ? override.w : dW,
+    main: override.main === true,
     params: {
       w:  override.w !== undefined ? override.w : dW,
       h:  override.h !== undefined ? override.h : dH,
@@ -617,6 +629,413 @@ function buildBaseFromOutline(parent, modules, outline, baseH, wt, ps, overhang)
       setupShadows(seg);
       parent.add(seg);
     }
+  }
+}
+
+// ══════════════════════════════════════════════
+// PORCH: поиск главной двери + сборка крыльца
+// ══════════════════════════════════════════════
+
+// Найти главную дверь в outline 1-го этажа.
+// Возвращает { edge, cursor, doorWidth, doorHeight } или null.
+// Приоритет: door с main:true > первая дверь в обходе.
+function findMainDoorPlacement(outline, modulesDef) {
+  let firstFound = null;
+  for (const edge of outline.items) {
+    if (edge.type !== 'wall') continue;
+    const fills = resolveFills(edge, modulesDef);
+    let cursor = 0;
+    for (const f of fills) {
+      if (f.type === 'door') {
+        const hit = { edge, cursor, doorWidth: f.width, doorHeight: f.params.h };
+        if (f.main) return hit;
+        if (!firstFound) firstFound = hit;
+      }
+      cursor += f.width;
+    }
+  }
+  return firstFound;
+}
+
+// Локальная система координат двери (на наружной грани стены):
+//   along  = направление стены (dx, dz)
+//   normal = exterior (dz, -dx)  — наружу здания
+// offsetAlong — смещение центра крыльца вдоль стены от центра двери, м (может быть < 0).
+function getDoorWorldFrame(door, offsetAlong) {
+  const { edge, cursor, doorWidth } = door;
+  const dx = edge.dx, dz = edge.dz;
+  const c = edge.startOffset + cursor + doorWidth / 2 + (offsetAlong || 0);
+  return {
+    cx: edge.x + dx * c,
+    cz: edge.z + dz * c,
+    alongX: dx, alongZ: dz,
+    normalX: dz, normalZ: -dx,
+  };
+}
+
+// Подобрать имя слота материала: предпочитает специфичные (mat_porch_*),
+// fallback на общие (mat_wood/mat_concrete/mat_metal/mat_wall). При отсутствии — возвращает специфичное имя
+// (т.к. applyMaterialOverride просто не найдёт и не упадёт).
+function pickPorchMatName(materialsMap, preferred, fallbacks) {
+  if (materialsMap && materialsMap[preferred]) return preferred;
+  for (const fb of fallbacks) {
+    if (materialsMap && materialsMap[fb]) return fb;
+  }
+  return preferred;
+}
+
+function addBoxAt(parent, sizeX, sizeY, sizeZ, cx, cy, cz, ry, matName, color) {
+  const geo = new THREE.BoxGeometry(sizeX, sizeY, sizeZ);
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.0 });
+  mat.name = matName;
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(cx, cy, cz);
+  if (ry) mesh.rotation.y = ry;
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+
+function buildPorch(parent, desc, outlineFloor0, modulesDef, materialsMap, baseH) {
+  const cfg = desc.features && desc.features.porch;
+  if (!cfg) return;
+
+  const door = findMainDoorPlacement(outlineFloor0, modulesDef);
+  if (!door) { log('[porch] нет дверей в фасаде — крыльцо не построено', 'warn'); return; }
+
+  const w = cfg.width;
+  const dep = cfg.depth;
+  const stepRise   = cfg.step_rise   !== undefined ? cfg.step_rise   : 0.18;
+  const stepRun    = cfg.step_run    !== undefined ? cfg.step_run    : 0.30;
+  const hasCanopy  = cfg.has_canopy  !== false; // default true
+  const canopyH    = cfg.canopy_height !== undefined ? cfg.canopy_height : 2.40;
+  const canopySlp  = cfg.canopy_slope  !== undefined ? cfg.canopy_slope  : 0.12;
+  const hasRail    = cfg.has_railing !== false; // default true
+  const railH      = cfg.railing_height !== undefined ? cfg.railing_height : 0.95;
+
+  const offsetAlong = (cfg.offset_along !== undefined) ? cfg.offset_along : 0;
+
+  if (w <= 0.1 || dep <= 0.1) { log('[porch] ⚠ width/depth должны быть > 0.1', 'warn'); return; }
+  if (w < door.doorWidth) log(`[porch] ⚠ width (${w}) меньше ширины двери (${door.doorWidth.toFixed(2)})`, 'warn');
+
+  const frame = getDoorWorldFrame(door, offsetAlong);
+  // ry такой же, как у стены, чтобы локальная X-ось box'ов шла вдоль стены, +Z — наружу
+  const ry = edgeRotation(frame.alongX, frame.alongZ);
+
+  // Центр площадки крыльца в плане (в координатах X,Z):
+  //  - со стороны стены: центр двери (frame.cx, frame.cz) — это точка НА наружной грани
+  //  - площадка выступает на dep наружу: центр платформы = центр + normal * (dep/2)
+  const platCx = frame.cx + frame.normalX * (dep / 2);
+  const platCz = frame.cz + frame.normalZ * (dep / 2);
+
+  // ── ГЕОМЕТРИЧЕСКИЕ КОНСТАНТЫ ────────────────────
+  const colSize    = 0.18;
+  const cheekThick = colSize; // 0.18 — колонна полностью на щеке, не свисает
+  const axialMidFor = (side) => side * (w / 2 + cheekThick / 2);
+  // Проступь (deck slab):
+  const nosing      = 0.02;   // выступ ВПЕРЁД от тела, м
+  const nosingSide  = 0.02;   // выступ В СТОРОНЫ от щёк, м
+  const nosingThick = 0.02;   // толщина проступи по Y, м
+  // Полная ширина проступи (тело w + щёки 2*cheekThick + боковой выступ 2*nosingSide)
+  const deckW = w + 2 * cheekThick + 2 * nosingSide;
+  // Опустим крыльцо вниз на толщину проступи: верх проступи платформы = baseH - nosingThick.
+  // Внутри дома пол на baseH (= верх фундамента), переход на крыльцо — небольшая ступенька вниз.
+  const porchTopY = baseH - nosingThick;
+
+  // ── МАТЕРИАЛЫ ──────────────────────────────────
+  // Тело ступеней / подступенки / тело платформы / щёки — один материал ("риски").
+  const stepMat = pickPorchMatName(materialsMap, 'mat_porch_step', ['mat_concrete', 'mat_base']);
+  // Верхние плиты (проступи и верх платформы) — другой материал ("декинг").
+  const deckMat = pickPorchMatName(materialsMap, 'mat_porch_deck', ['mat_wood', 'mat_porch_step']);
+
+  // ── СТУПЕНИ ────────────────────────────────────
+  // stepCount = число rise'ов между порчTopY и землёй. Видимых tread'ов: stepCount-1.
+  // (Последний rise — body самой нижней ступени, от Y=0 до её проступи).
+  const stepCount = Math.max(1, Math.ceil(porchTopY / stepRise));
+  const realRise = porchTopY / stepCount;
+  const frontX = frame.cx + frame.normalX * dep;
+  const frontZ = frame.cz + frame.normalZ * dep;
+  // Tread i (i = 1..stepCount-1):
+  //   проступь top Y = porchTopY - i*realRise.
+  //   body под проступью (top = проступь_bottom = проступь_top - nosingThick, bottom = next_проступь_top or 0).
+  for (let i = 1; i < stepCount; i++) {
+    const stepTopY = porchTopY - i * realRise; // верх проступи
+    const stepBodyBottomY = (i === stepCount - 1) ? 0 : (porchTopY - (i + 1) * realRise);
+    const stepBodyTopY = stepTopY - nosingThick;
+    const stepBodyH = stepBodyTopY - stepBodyBottomY;
+    const stepBodyCY = (stepBodyTopY + stepBodyBottomY) / 2;
+    const nearFromPlatform = (i - 1) * stepRun;
+    const farFromPlatform  = i * stepRun;
+    const stepCenterFromPlatform = (nearFromPlatform + farFromPlatform) / 2;
+    const cx = frontX + frame.normalX * stepCenterFromPlatform;
+    const cz = frontZ + frame.normalZ * stepCenterFromPlatform;
+    // Тело ступени (под проступью), ширина w
+    addBoxAt(parent, w, stepBodyH, stepRun, cx, stepBodyCY, cz, ry, stepMat, 0xb8b3aa);
+    // Проступь (deck slab): по бокам шире на cheekThick + nosingSide, вперёд — nosing
+    const nosingCY = stepTopY - nosingThick / 2;
+    const nosingDepth = stepRun + nosing;
+    const nosingShift = nosing / 2;
+    const nx = cx + frame.normalX * nosingShift;
+    const nz = cz + frame.normalZ * nosingShift;
+    addBoxAt(parent, deckW, nosingThick, nosingDepth, nx, nosingCY, nz, ry, deckMat, 0xa68868);
+  }
+  const stairsEndU = dep + (stepCount - 1) * stepRun;
+
+  // ── ПЛАТФОРМА ─────────────────────────────────
+  // Body платформы: ширина w, depth = dep, верх на (porchTopY - nosingThick).
+  const platBodyThick = realRise;
+  const platBodyTopY = porchTopY - nosingThick;
+  const platBodyCY = platBodyTopY - platBodyThick / 2;
+  addBoxAt(parent, w, platBodyThick, dep, platCx, platBodyCY, platCz, ry, stepMat, 0xb8b3aa);
+  // Верхняя проступь платформы: расширена на cheekThick+nosingSide по бокам и nosing вперёд.
+  const platDeckCY = porchTopY - nosingThick / 2;
+  const platDeckDepth = dep + nosing;
+  const platDeckShift = nosing / 2;
+  const platDeckX = platCx + frame.normalX * platDeckShift;
+  const platDeckZ = platCz + frame.normalZ * platDeckShift;
+  addBoxAt(parent, deckW, nosingThick, platDeckDepth, platDeckX, platDeckCY, platDeckZ, ry, deckMat, 0xa68868);
+
+  // ── КОЛОННЫ (на оси щёк и перил) ────────────────
+  const colMat = pickPorchMatName(materialsMap, 'mat_porch_column', ['mat_wood', 'mat_wall']);
+  const colH = canopyH;
+  for (const side of [-1, +1]) {
+    const axMid = axialMidFor(side);
+    // Передняя грань колонны = передняя грань платформы (u = dep), стоит на verkhе проступи (porchTopY)
+    const cx = frame.cx + frame.alongX * axMid + frame.normalX * (dep - colSize / 2);
+    const cz = frame.cz + frame.alongZ * axMid + frame.normalZ * (dep - colSize / 2);
+    addBoxAt(parent, colSize, colH, colSize, cx, porchTopY + colH / 2, cz, ry, colMat, 0xc8b89c);
+  }
+
+  // ── НАВЕС (плоская плита с наклоном) ─────────────
+  if (hasCanopy) {
+    const canopyMat = pickPorchMatName(materialsMap, 'mat_porch_canopy', ['mat_roof']);
+    // Задний край упирается ровно в стену (u=0) — без врастания.
+    // Передний край выходит за колонны (u = dep + frontOverhang).
+    const frontOverhang = 0.30;
+    const sideOverhang  = 0.10;
+    const canopyBackU   = 0.0;
+    const canopyFrontU  = dep + frontOverhang;
+    const canopySizeZ   = canopyFrontU - canopyBackU; // длина по normal
+    const canopySizeX   = deckW + 2 * sideOverhang;   // навес шире щёк
+    const canopySizeY   = 0.08;
+    const alpha = Math.atan2(canopySlp, canopySizeZ);
+    const yCenter = porchTopY + canopyH + canopySlp / 2;
+    const uCenter = (canopyBackU + canopyFrontU) / 2;
+    const cxCanopy = frame.cx + frame.normalX * uCenter;
+    const czCanopy = frame.cz + frame.normalZ * uCenter;
+    const geo = new THREE.BoxGeometry(canopySizeX, canopySizeY, canopySizeZ);
+    const mat = new THREE.MeshStandardMaterial({ color: 0x8b3a3a, roughness: 0.6, metalness: 0.0 });
+    mat.name = canopyMat;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(cxCanopy, yCenter, czCanopy);
+    mesh.rotation.order = 'YXZ';
+    mesh.rotation.y = ry;
+    mesh.rotation.x = alpha;
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    parent.add(mesh);
+  }
+
+  // ── БОКОВЫЕ ЩЁКИ (СНАРУЖИ тела ступеней, с двух сторон) ────
+  const cheekMat = pickPorchMatName(materialsMap, 'mat_porch_step', ['mat_concrete', 'mat_base']);
+  for (const side of [-1, +1]) {
+    buildPorchCheek(parent, frame, porchTopY, nosingThick, nosing, dep, stepCount, realRise, stepRun, w, side, cheekThick, cheekMat, 0xb8b3aa);
+  }
+
+  // ── ПЕРИЛА с балясинами + поручень (горизонтальные, по бокам платформы) ───
+  if (hasRail) {
+    const railMat = pickPorchMatName(materialsMap, 'mat_porch_railing', ['mat_wood', 'mat_metal']);
+    const railUStart = 0.0;
+    const railUEnd   = dep;
+    const baluRange = { uStart: 0.10, uEnd: dep - colSize - 0.02 };
+    for (const side of [-1, +1]) {
+      const axMid = axialMidFor(side);
+      buildPorchBalustradeHoriz(parent, frame, side, porchTopY, porchTopY + railH, railUStart, railUEnd, baluRange, axMid, ry, railMat, 0x8a6d4a);
+    }
+
+    // ── НАКЛОННЫЕ ПЕРИЛА вдоль ступеней ─────
+    for (const side of [-1, +1]) {
+      const axMid = axialMidFor(side);
+      buildPorchBalustradeRake(parent, frame, side, porchTopY, dep, stepCount, realRise, stepRun, railH, axMid, ry, railMat, 0x8a6d4a);
+    }
+  }
+
+  // ── PAD ПОД КРЫЛЬЦОМ ────
+  // Стыкуется с pad-ом дома (строится в buildHouseFromDescriptor по реальному outline).
+  // Y и offset согласованы: padThick=0.05, Y центра=padThick/2, offset=0.30.
+  const padOffset = 0.30;
+  const padThick  = 0.05;
+  const padUStart = -padOffset; // заходим под дом на padOffset, в зону pad-а дома
+  const padUEnd   = stairsEndU + padOffset;
+  const padSizeZ  = padUEnd - padUStart;
+  const padSizeX  = deckW + 2 * padOffset;
+  const uCenterPad = (padUStart + padUEnd) / 2;
+  const padCx = frame.cx + frame.normalX * uCenterPad;
+  const padCz = frame.cz + frame.normalZ * uCenterPad;
+  const padMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.95, metalness: 0.0 });
+  padMat.name = 'mat_porch_pad';
+  const padGeo = new THREE.BoxGeometry(padSizeX, padThick, padSizeZ);
+  const padMesh = new THREE.Mesh(padGeo, padMat);
+  padMesh.position.set(padCx, padThick / 2, padCz);
+  padMesh.rotation.y = ry;
+  padMesh.receiveShadow = true;
+  parent.add(padMesh);
+
+  log(`[porch] ✓ door@(${frame.cx.toFixed(2)},${frame.cz.toFixed(2)}) w=${w}m, d=${dep}m, steps=${stepCount}×${realRise.toFixed(3)}m`, 'ok');
+}
+
+// Боковая щека крыльца — стенка-сэндвич с лестничным профилем.
+// Верх щеки идёт по «body top» каждого уровня (= низ проступи). Проступи свешиваются над щекой
+// как nosing — это нормально для лестницы (передняя грань щеки = передняя грань body подступенка).
+function buildPorchCheek(parent, frame, porchTopY, nosingThick, nosing, dep, stepCount, realRise, stepRun, w, side, T, matName, color) {
+  const pts2D = [];
+  pts2D.push(new THREE.Vector2(0, 0));                          // back-bottom (у стены, на земле)
+  pts2D.push(new THREE.Vector2(0, porchTopY - nosingThick));    // back-top body платформы
+  pts2D.push(new THREE.Vector2(dep, porchTopY - nosingThick));  // front-top body платформы (= перед body, без nosing)
+  for (let i = 1; i < stepCount; i++) {
+    const bodyTopY = porchTopY - i * realRise - nosingThick;
+    pts2D.push(new THREE.Vector2(dep + (i - 1) * stepRun, bodyTopY)); // back-top body step i
+    pts2D.push(new THREE.Vector2(dep +  i      * stepRun, bodyTopY)); // front-top body step i
+  }
+  // Последний vertical drop к земле — на передней грани body нижней ступени.
+  pts2D.push(new THREE.Vector2(dep + (stepCount - 1) * stepRun, 0));
+
+  const triangles = THREE.ShapeUtils.triangulateShape(pts2D, []);
+  if (!triangles.length) return;
+
+  // Inner axial = край тела ступени (axial = ±w/2),
+  // outer axial = ±(w/2 + T). Щёки находятся СНАРУЖИ тела ступеней.
+  const axialInner = side * (w / 2);
+  const axialOuter = side * (w / 2 + T);
+  const toWorld = (u, v, axial) => ({
+    x: frame.cx + frame.normalX * u + frame.alongX * axial,
+    y: v,
+    z: frame.cz + frame.normalZ * u + frame.alongZ * axial,
+  });
+
+  const positions = [];
+  const N = pts2D.length;
+  for (const p of pts2D) { const w3 = toWorld(p.x, p.y, axialInner); positions.push(w3.x, w3.y, w3.z); }
+  for (const p of pts2D) { const w3 = toWorld(p.x, p.y, axialOuter); positions.push(w3.x, w3.y, w3.z); }
+
+  const indices = [];
+  for (const t of triangles) indices.push(t[0], t[1], t[2]);
+  for (const t of triangles) indices.push(t[0] + N, t[2] + N, t[1] + N);
+  for (let i = 0; i < N; i++) {
+    const j = (i + 1) % N;
+    indices.push(i, j + N, i + N);
+    indices.push(i, j, j + N);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0, side: THREE.DoubleSide, flatShading: true });
+  mat.name = matName;
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  parent.add(mesh);
+}
+
+// Горизонтальные перила (на платформе): верхний поручень + балясины с шагом.
+// Поручень идёт от uStart до uEnd (включая заход в стену и колонну).
+// baluRange — диапазон u, где можно ставить балясины (внутри: чтобы избежать стены/колонны).
+// axialPos — координата вдоль стены (фиксированная).
+// baseY — низ балясин (= Y верха платформы); topY — верх перил.
+// Нижняя планка убрана — её роль играет верхняя грань боковой щеки.
+function buildPorchBalustradeHoriz(parent, frame, side, baseY, topY, uStart, uEnd, baluRange, axialPos, ry, matName, color) {
+  const railLength = uEnd - uStart;
+  if (railLength < 0.1) return;
+  const handrailH   = 0.06;
+  const handrailW   = 0.08;
+  const baluT       = 0.04;
+  const baluSpacing = 0.26; // вдвое реже, чем было (0.13)
+  const baluBaseY = baseY;
+  const baluTopY  = topY - handrailH;
+  if (baluTopY <= baluBaseY) return;
+
+  // Верхний поручень — на всю длину (от стены до колонны)
+  const uRailCenter = (uStart + uEnd) / 2;
+  const cxRail = frame.cx + frame.normalX * uRailCenter + frame.alongX * axialPos;
+  const czRail = frame.cz + frame.normalZ * uRailCenter + frame.alongZ * axialPos;
+  addBoxAt(parent, handrailW, handrailH, railLength, cxRail, topY - handrailH / 2, czRail, ry, matName, color);
+
+  // Балясины внутри baluRange
+  const baluLength = baluRange.uEnd - baluRange.uStart;
+  if (baluLength < baluSpacing) return;
+  const count = Math.max(2, Math.round(baluLength / baluSpacing));
+  const stepU = baluLength / count;
+  const baluH = baluTopY - baluBaseY;
+  for (let i = 0; i <= count; i++) {
+    const u = baluRange.uStart + i * stepU;
+    const bx = frame.cx + frame.normalX * u + frame.alongX * axialPos;
+    const bz = frame.cz + frame.normalZ * u + frame.alongZ * axialPos;
+    addBoxAt(parent, baluT, baluH, baluT, bx, baluBaseY + baluH / 2, bz, ry, matName, color);
+  }
+}
+
+// Наклонные перила вдоль ступеней: поручень наклонный, балясины разной высоты на каждой ступени.
+// baseH здесь — это уровень верха платформы (porchTopY у вызывающего кода).
+function buildPorchBalustradeRake(parent, frame, side, baseH, dep, stepCount, realRise, stepRun, railH, axialPos, ry, matName, color) {
+  if (stepCount < 2) return; // нужно как минимум 1 видимая ступень
+  const handrailH = 0.06;
+  const handrailW = 0.08;
+  const baluT = 0.04;
+
+  // Поручень: от (u=dep, Y=baseH+railH) до (u=stairsEndU, Y=railH).
+  const stairsEndU = dep + (stepCount - 1) * stepRun;
+  const uStart = dep;
+  const uEnd = stairsEndU;
+  const yStart = baseH + railH;
+  const yEnd = railH;
+  const du = uEnd - uStart;
+  const dy = yEnd - yStart; // отрицательно
+  const railLen3D = Math.hypot(du, dy);
+  const slopeAngle = Math.atan2(-dy, du); // положительный угол наклона передней части ВНИЗ
+
+  // Центр поручня
+  const uCenter = (uStart + uEnd) / 2;
+  const yCenter = (yStart + yEnd) / 2 - handrailH / 2; // центр Y учитывает толщину
+  const cxRail = frame.cx + frame.normalX * uCenter + frame.alongX * axialPos;
+  const czRail = frame.cz + frame.normalZ * uCenter + frame.alongZ * axialPos;
+
+  // BoxGeometry: длина по local Z = railLen3D (вдоль normal в плане), толщина по Y, ширина по X
+  const geo = new THREE.BoxGeometry(handrailW, handrailH, railLen3D);
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0 });
+  mat.name = matName;
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(cxRail, yCenter, czRail);
+  mesh.rotation.order = 'YXZ';
+  mesh.rotation.y = ry;
+  mesh.rotation.x = slopeAngle; // передний край (+Z) опускается
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  parent.add(mesh);
+
+  // Балясины: i = 1..stepCount-2 (последняя ступень получает newel вместо балясины — иначе они дублируются).
+  for (let i = 1; i < stepCount - 1; i++) {
+    const u = dep + i * stepRun - 0.02;
+    const stepTopY = baseH - i * realRise;
+    const yRailAtU = yStart + dy * (u - uStart) / du;
+    const baluTopY = yRailAtU - handrailH;
+    const baluH = baluTopY - stepTopY;
+    if (baluH < 0.05) continue;
+    const bx = frame.cx + frame.normalX * u + frame.alongX * axialPos;
+    const bz = frame.cz + frame.normalZ * u + frame.alongZ * axialPos;
+    addBoxAt(parent, baluT, baluH, baluT, bx, stepTopY + baluH / 2, bz, ry, matName, color);
+  }
+  // Нижний newel post — на ВЕРХУ нижней ступени (не на земле перед ней),
+  // чтобы не «протыкать» проступь.
+  {
+    const u = stairsEndU - 0.04; // на верху нижней ступени, чуть за её передним краем
+    const stepTopY = baseH - (stepCount - 1) * realRise; // = realRise
+    const yRailAtU = yStart + dy * (u - uStart) / du;
+    const postBottom = stepTopY;
+    const postTop = yRailAtU + 0.05; // на 5 см выше поручня
+    const postH = postTop - postBottom;
+    const postT = baluT * 1.6;
+    const bx = frame.cx + frame.normalX * u + frame.alongX * axialPos;
+    const bz = frame.cz + frame.normalZ * u + frame.alongZ * axialPos;
+    addBoxAt(parent, postT, postH, postT, bx, postBottom + postH / 2, bz, ry, matName, color);
   }
 }
 
@@ -1089,6 +1508,363 @@ function buildRoof(parent, baseY, bbox, outline, roofType, angleDeg, eave) {
 }
 
 // ══════════════════════════════════════════════
+// ROOF WINDOWS: velux (накладной) + dormer (процедурный, с утоплением)
+// ══════════════════════════════════════════════
+
+// Возвращает «фрейм» ската: 4 вершины (eaveLeft, eaveRight, ridgeRight, ridgeLeft) +
+// единичные оси (axisAlong вдоль карниза, axisUp вверх по скату, normal наружу).
+// Для триangular-ската (hip end-slope) ridgeLeft === ridgeRight === вершина.
+// roofType: 'hip' | 'gable' | 'gable_cross'. slope: 'north' | 'south' | 'east' | 'west'.
+// Возвращает null для несовместимых сочетаний (например, gable + east/west — это фронтоны).
+function getSlopeFrame(slope, rectBbox, longAxisX, angleDeg, baseY, eave, roofType) {
+  const x0 = rectBbox.minX - eave, x1 = rectBbox.maxX + eave;
+  const z0 = rectBbox.minZ - eave, z1 = rectBbox.maxZ + eave;
+  const L = x1 - x0, W = z1 - z0;
+  const tanA = Math.tan(angleDeg * Math.PI / 180);
+
+  let eaveLeft, eaveRight, ridgeLeft, ridgeRight, ridgeY;
+
+  if (roofType === 'hip') {
+    const halfShort = (longAxisX ? W : L) / 2;
+    ridgeY = baseY + halfShort * tanA;
+    const ridgeLen = Math.abs(L - W);
+    if (longAxisX) {
+      const rx0 = x0 + (L - ridgeLen) / 2, rx1 = rx0 + ridgeLen;
+      const ridgeZ = (z0 + z1) / 2;
+      switch (slope) {
+        case 'north':
+          eaveLeft=[x0,baseY,z0]; eaveRight=[x1,baseY,z0];
+          ridgeLeft=[rx0,ridgeY,ridgeZ]; ridgeRight=[rx1,ridgeY,ridgeZ]; break;
+        case 'south':
+          eaveLeft=[x1,baseY,z1]; eaveRight=[x0,baseY,z1];
+          ridgeLeft=[rx1,ridgeY,ridgeZ]; ridgeRight=[rx0,ridgeY,ridgeZ]; break;
+        case 'east': // треугольный скат на восточном торце
+          eaveLeft=[x1,baseY,z0]; eaveRight=[x1,baseY,z1];
+          ridgeLeft=[rx1,ridgeY,ridgeZ]; ridgeRight=[rx1,ridgeY,ridgeZ]; break;
+        case 'west':
+          eaveLeft=[x0,baseY,z1]; eaveRight=[x0,baseY,z0];
+          ridgeLeft=[rx0,ridgeY,ridgeZ]; ridgeRight=[rx0,ridgeY,ridgeZ]; break;
+        default: return null;
+      }
+    } else {
+      const rz0 = z0 + (W - ridgeLen) / 2, rz1 = rz0 + ridgeLen;
+      const ridgeX = (x0 + x1) / 2;
+      switch (slope) {
+        case 'east':
+          eaveLeft=[x1,baseY,z0]; eaveRight=[x1,baseY,z1];
+          ridgeLeft=[ridgeX,ridgeY,rz0]; ridgeRight=[ridgeX,ridgeY,rz1]; break;
+        case 'west':
+          eaveLeft=[x0,baseY,z1]; eaveRight=[x0,baseY,z0];
+          ridgeLeft=[ridgeX,ridgeY,rz1]; ridgeRight=[ridgeX,ridgeY,rz0]; break;
+        case 'north':
+          eaveLeft=[x0,baseY,z0]; eaveRight=[x1,baseY,z0];
+          ridgeLeft=[ridgeX,ridgeY,rz0]; ridgeRight=[ridgeX,ridgeY,rz0]; break;
+        case 'south':
+          eaveLeft=[x1,baseY,z1]; eaveRight=[x0,baseY,z1];
+          ridgeLeft=[ridgeX,ridgeY,rz1]; ridgeRight=[ridgeX,ridgeY,rz1]; break;
+        default: return null;
+      }
+    }
+  } else if (roofType === 'gable' || roofType === 'gable_cross') {
+    const halfShort = (longAxisX ? W : L) / 2;
+    ridgeY = baseY + halfShort * tanA;
+    if (longAxisX) {
+      const ridgeZ = (z0 + z1) / 2;
+      switch (slope) {
+        case 'north':
+          eaveLeft=[x0,baseY,z0]; eaveRight=[x1,baseY,z0];
+          ridgeLeft=[x0,ridgeY,ridgeZ]; ridgeRight=[x1,ridgeY,ridgeZ]; break;
+        case 'south':
+          eaveLeft=[x1,baseY,z1]; eaveRight=[x0,baseY,z1];
+          ridgeLeft=[x1,ridgeY,ridgeZ]; ridgeRight=[x0,ridgeY,ridgeZ]; break;
+        case 'east': case 'west':
+          log(`[roof-win] gable longAxisX: slope=${slope} — это фронтон (стена), не скат`, 'warn');
+          return null;
+        default: return null;
+      }
+    } else {
+      const ridgeX = (x0 + x1) / 2;
+      switch (slope) {
+        case 'east':
+          eaveLeft=[x1,baseY,z0]; eaveRight=[x1,baseY,z1];
+          ridgeLeft=[ridgeX,ridgeY,z0]; ridgeRight=[ridgeX,ridgeY,z1]; break;
+        case 'west':
+          eaveLeft=[x0,baseY,z1]; eaveRight=[x0,baseY,z0];
+          ridgeLeft=[ridgeX,ridgeY,z1]; ridgeRight=[ridgeX,ridgeY,z0]; break;
+        case 'north': case 'south':
+          log(`[roof-win] gable longAxisZ: slope=${slope} — это фронтон, не скат`, 'warn');
+          return null;
+        default: return null;
+      }
+    }
+  } else {
+    log(`[roof-win] неподдерживаемый roof_type=${roofType}`, 'warn');
+    return null;
+  }
+
+  const eL = new THREE.Vector3(...eaveLeft);
+  const eR = new THREE.Vector3(...eaveRight);
+  const rL = new THREE.Vector3(...ridgeLeft);
+  const rR = new THREE.Vector3(...ridgeRight);
+  const axisAlong = new THREE.Vector3().subVectors(eR, eL);
+  const lengthAlong = axisAlong.length();
+  axisAlong.normalize();
+  const eaveCenter = new THREE.Vector3().addVectors(eL, eR).multiplyScalar(0.5);
+  const ridgeCenter = new THREE.Vector3().addVectors(rL, rR).multiplyScalar(0.5);
+  const axisUp = new THREE.Vector3().subVectors(ridgeCenter, eaveCenter);
+  const lengthUp = axisUp.length();
+  axisUp.normalize();
+  // Outward normal = axisUp × axisAlong (для CCW-обхода скаt с верху наружного нормал)
+  const normal = new THREE.Vector3().crossVectors(axisUp, axisAlong).normalize();
+
+  return { eL, eR, rL, rR, axisAlong, axisUp, normal, lengthAlong, lengthUp };
+}
+
+// Точка центра окна на скате по нормированным координатам:
+//   positionAlong ∈ [0, 1] — вдоль конька (0 — eave_left, 1 — eave_right)
+//   positionUp    ∈ [0, 1] — вверх по скату (0 — eave, 1 — ridge)
+// Для трапеции: ширина по карнизу > ширины по коньку (hip). Интерполируем углы между eave и ridge.
+function slopePointAt(frame, positionAlong, positionUp) {
+  const t = positionUp, p = positionAlong;
+  const leftAtT  = new THREE.Vector3().lerpVectors(frame.eL, frame.rL, t);
+  const rightAtT = new THREE.Vector3().lerpVectors(frame.eR, frame.rR, t);
+  return new THREE.Vector3().lerpVectors(leftAtT, rightAtT, p);
+}
+
+// Размещает velux на скате: GLB ориентирован в плоскости ската.
+// Используется ПРАВОСТОРОННИЙ базис: xAxis = yAxis × zAxis (где yAxis=axisUp, zAxis=outward normal).
+// Дополнительно добавляется ПЛОСКАЯ glass-плита параллельно скату (приподнята над скатом),
+// т.к. GLB-стекло устроено как горизонтальная плита в XZ-плоскости и после поворота уходит
+// перпендикулярно скату — не видно сверху.
+function placeVelux(parent, modules, modulesDef, frame, posAlong, posUp, w, h) {
+  const def = modulesDef && modulesDef.window_velux;
+  if (!def) { log('[roof-win] нет modules.window_velux в дескрипторе', 'warn'); return; }
+  const vel = cloneModule(modules, 'window_velux');
+  if (!vel) return;
+  const dW = asValue(def.w, 0.78), dH = asValue(def.h, 0.98);
+  transformParametricModule(vel, {
+    w, h, dW, dH,
+    frame_profile: def.frame_profile || 0.04,
+    sill_overhang: 0,
+  }, 'window_velux');
+  const center = slopePointAt(frame, posAlong, posUp);
+  const yAxis = frame.axisUp.clone();
+  const zAxis = frame.normal.clone();
+  const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis).normalize();
+  const basis = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
+  vel.quaternion.setFromRotationMatrix(basis);
+  const liftFrame = 0.06; // приподнимаем раму над скатом
+  const shift = new THREE.Vector3()
+    .addScaledVector(xAxis, -w / 2)
+    .addScaledVector(yAxis, -h / 2)
+    .addScaledVector(zAxis, liftFrame);
+  vel.position.copy(center).add(shift);
+  setupShadows(vel);
+  parent.add(vel);
+
+  // Плоская glass-плита параллельно скату, чуть выше рамы
+  const fp = def.frame_profile || 0.04;
+  const glassW = Math.max(0.05, w - 2 * fp);
+  const glassH = Math.max(0.05, h - 2 * fp);
+  const glassGeo = new THREE.PlaneGeometry(glassW, glassH);
+  const glassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x4a6878, opacity: 0.38, metalness: 0.82, roughness: 0.1,
+    transparent: true, side: THREE.DoubleSide,
+  });
+  glassMat.name = 'mat_glass';
+  const glassMesh = new THREE.Mesh(glassGeo, glassMat);
+  glassMesh.position.copy(center).addScaledVector(zAxis, liftFrame + 0.025);
+  glassMesh.quaternion.setFromRotationMatrix(basis);
+  parent.add(glassMesh);
+
+  log(`[roof-win] ✓ velux at (along=${posAlong.toFixed(2)}, up=${posUp.toFixed(2)}) ${w}×${h}`, 'dim');
+}
+
+// Размещает dormer: процедурная коробка (стены + двускатная мини-крыша) с встроенным окном.
+// Используется ПРАВОСТОРОННИЙ базис (right-handed): xAxis × yAxis = zAxis, det=+1 — это даёт
+// валидную ротацию. Сечение xAxis = up × normalHoriz (направлен «вправо» при взгляде наружу со ската).
+function placeDormer(parent, modules, modulesDef, frame, dormerSpec, baseY, materialsMap) {
+  const w = dormerSpec.w, h = dormerSpec.h, d = dormerSpec.depth;
+  if (!w || !h || !d) { log('[roof-win] dormer: нужны w, h, depth', 'err'); return; }
+  const posAlong = dormerSpec.position_along || 0.5;
+  const posUp    = dormerSpec.position_up    || 0.3;
+  const basePt = slopePointAt(frame, posAlong, posUp);
+
+  // Скат наклонный, dormer вертикальный: front bottom висит над скатом на (d/2)*tan(angle).
+  // Опускаем basePt.y на эту величину — front bottom сядет на скат, back утопится в скат.
+  const slopeTan = frame.axisUp.y / Math.sqrt(frame.axisUp.x ** 2 + frame.axisUp.z ** 2);
+  basePt.y -= (d / 2) * slopeTan;
+
+  // Right-handed basis: +Z = normalHoriz (outward), +Y = world up, +X = +Y × +Z
+  const yAxis = new THREE.Vector3(0, 1, 0);
+  const zAxis = new THREE.Vector3(frame.normal.x, 0, frame.normal.z).normalize(); // = normalHoriz
+  const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis).normalize();
+  const basis = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
+  const dormerQuat = new THREE.Quaternion().setFromRotationMatrix(basis);
+
+  // local (lx, ly, lz) → world (с центром в basePt)
+  const localToWorld = (lx, ly, lz) => new THREE.Vector3(
+    basePt.x + xAxis.x * lx + zAxis.x * lz,
+    basePt.y + ly,
+    basePt.z + xAxis.z * lx + zAxis.z * lz,
+  );
+
+  const wallMat = pickPorchMatName(materialsMap, 'mat_wall', ['mat_wall']);
+  const roofMat = pickPorchMatName(materialsMap, 'mat_roof', ['mat_roof']);
+
+  // 1) Стены dormer'а — box (front/sides/back walls). Не CSG, внутрь не заглядываем.
+  const wallsGeo = new THREE.BoxGeometry(w, h, d);
+  const wallsMat3 = new THREE.MeshStandardMaterial({ color: 0xf5e6c8, roughness: 0.85, metalness: 0 });
+  wallsMat3.name = wallMat;
+  const walls = new THREE.Mesh(wallsGeo, wallsMat3);
+  walls.position.copy(localToWorld(0, h/2, 0));
+  walls.quaternion.copy(dormerQuat);
+  walls.castShadow = true; walls.receiveShadow = true;
+  parent.add(walls);
+
+  // 2) Мини-двускатная крыша. Конёк перпендикулярен главному коньку (вдоль +Z = глубина dormer'а).
+  // Угол ската мини-крыши = углу главной крыши (slopeTan), чтобы выглядело гармонично.
+  const dormerRoofRise = (w / 2) * slopeTan;
+  const dormerRoofVerts = [
+    localToWorld(-w/2, h, -d/2),                  // 0: back-left top of wall
+    localToWorld(+w/2, h, -d/2),                  // 1: back-right top of wall
+    localToWorld(+w/2, h, +d/2),                  // 2: front-right top of wall
+    localToWorld(-w/2, h, +d/2),                  // 3: front-left top of wall
+    localToWorld(0,    h + dormerRoofRise, -d/2), // 4: ridge-back
+    localToWorld(0,    h + dormerRoofRise, +d/2), // 5: ridge-front
+  ];
+  const slopeIndices = [
+    0, 5, 4,  0, 3, 5, // левый скат (x = -w/2 → ridge)
+    1, 4, 5,  1, 5, 2, // правый скат (x = +w/2 → ridge)
+  ];
+  const gableIndices = [
+    3, 2, 5, // передний фронтон (+Z = +d/2 = front)
+    0, 4, 1, // задний фронтон (-Z)
+  ];
+  function buildSubMesh(vertsAll, indices, matName, color) {
+    const positions = [];
+    for (const v of vertsAll) positions.push(v.x, v.y, v.z);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({
+      color, roughness: 0.85, metalness: 0, side: THREE.DoubleSide, flatShading: true,
+    });
+    mat.name = matName;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    parent.add(mesh);
+  }
+  buildSubMesh(dormerRoofVerts, slopeIndices, roofMat, 0x8b3a3a);
+  buildSubMesh(dormerRoofVerts, gableIndices, wallMat, 0xf5e6c8);
+
+  // 3) Встроенное окно во фронтальном фронтоне (на front face: lz = +d/2).
+  // Раму ВЫДВИГАЕМ ВПЕРЁД (5 см) — фронт-фасад dormer'а сплошной, рама должна быть снаружи.
+  // Дополнительно строим custom glass-плиту в плоскости фронта (GLB-стекло горизонтальное и
+  // после поворота уходит вглубь стены — не видно).
+  const winSpec = dormerSpec.window || { type: 'single', w: w * 0.6, h: h * 0.7 };
+  const winType = winSpec.type || 'single';
+  const winW = winSpec.w || w * 0.6;
+  const winH = winSpec.h || h * 0.7;
+  const winModel = 'window_' + winType;
+  const winDef = modulesDef && modulesDef['window_' + winType];
+  const frameOffset = 0.10; // рама полностью ПЕРЕД стеной dormer'а (frame depth = 0.10)
+  if (winDef && modules[winModel]) {
+    const win = cloneModule(modules, winModel);
+    if (win) {
+      const dW = asValue(winDef.w, winW), dH = asValue(winDef.h, winH);
+      transformParametricModule(win, {
+        w: winW, h: winH, dW, dH,
+        frame_profile: winDef.frame_profile || 0.05,
+        sill_overhang: winDef.sill_overhang || 0.03,
+      }, winModel);
+      // Скрываем GLB-glass (он горизонтальная плита, конфликтует с custom-стеклом)
+      win.traverse(c => {
+        if (c.isMesh && canonName(c.name) === 'glass') c.visible = false;
+      });
+      const winCorner = localToWorld(-winW / 2, h / 2 - winH / 2, d / 2 + frameOffset);
+      win.position.copy(winCorner);
+      win.quaternion.copy(dormerQuat);
+      setupShadows(win);
+      parent.add(win);
+    }
+  } else if (winDef) {
+    log(`[roof-win] dormer: GLB модуль ${winModel} не загружен`, 'warn');
+  }
+
+  // Custom glass-плита в плоскости фронтального фасада dormer'а, ПЕРЕД стеной
+  if (winDef) {
+    const fp = winDef.frame_profile || 0.05;
+    const glassW = Math.max(0.05, winW - 2 * fp);
+    const glassH = Math.max(0.05, winH - 2 * fp);
+    const glassGeo = new THREE.PlaneGeometry(glassW, glassH);
+    const glassMat = new THREE.MeshPhysicalMaterial({
+      color: 0x4a6878, opacity: 0.38, metalness: 0.82, roughness: 0.1,
+      transparent: true, side: THREE.DoubleSide,
+    });
+    glassMat.name = 'mat_glass';
+    const glassMesh = new THREE.Mesh(glassGeo, glassMat);
+    // Чётко перед стеной (5 см), внутри рамы по глубине
+    glassMesh.position.copy(localToWorld(0, h / 2, d / 2 + 0.05));
+    glassMesh.quaternion.copy(dormerQuat);
+    parent.add(glassMesh);
+  }
+  log(`[roof-win] ✓ dormer at (along=${posAlong.toFixed(2)}, up=${posUp.toFixed(2)}) ${w}×${h}×${d}`, 'dim');
+}
+
+// Главный билдер roof_windows
+function buildRoofWindows(parent, modules, desc, outline, baseY, angleDeg, eave) {
+  if (!desc.roof_windows || !desc.roof_windows.length) return;
+  const roofType = desc.roof_type || 'hip';
+  if (roofType === 'flat') {
+    log('[roof-win] flat roof не поддерживает velux/dormer', 'warn');
+    return;
+  }
+  // Декомпозиция полигона на прямоугольники (для hip/gable/gable_cross). Sort by area desc.
+  const rects = decomposeOrthoPolygonIntoRectangles(outline);
+  if (!rects.length) { log('[roof-win] decomposition failed', 'warn'); return; }
+  rects.sort((a, b) => ((b.maxX - b.minX) * (b.maxZ - b.minZ)) - ((a.maxX - a.minX) * (a.maxZ - a.minZ)));
+
+  for (const spec of desc.roof_windows) {
+    const rectIdx = (spec.rect_index !== undefined) ? spec.rect_index : 0;
+    if (rectIdx < 0 || rectIdx >= rects.length) {
+      log(`[roof-win] rect_index=${rectIdx} вне диапазона (0..${rects.length - 1})`, 'warn');
+      continue;
+    }
+    const rect = rects[rectIdx];
+    const rectBbox = { minX: rect.minX, maxX: rect.maxX, minZ: rect.minZ, maxZ: rect.maxZ };
+    const longAxisX = (rectBbox.maxX - rectBbox.minX) >= (rectBbox.maxZ - rectBbox.minZ);
+    const frame = getSlopeFrame(spec.slope, rectBbox, longAxisX, angleDeg, baseY, eave, roofType);
+    if (!frame) continue;
+
+    const count = spec.count || 1;
+    const spacing = spec.spacing || 1.5;
+    const baseAlong = spec.position_along !== undefined ? spec.position_along : 0.5;
+    const posUp     = spec.position_up    !== undefined ? spec.position_up    : 0.5;
+
+    for (let i = 0; i < count; i++) {
+      // Распределяем count окон вокруг baseAlong с шагом spacing (в м, конвертируем в normalized)
+      const offsetM = (i - (count - 1) / 2) * spacing;
+      const offsetNormalized = offsetM / frame.lengthAlong;
+      const posAlong = baseAlong + offsetNormalized;
+      if (posAlong < 0.05 || posAlong > 0.95) {
+        log(`[roof-win] окно ${i} вне диапазона (along=${posAlong.toFixed(2)})`, 'warn');
+        continue;
+      }
+      if (spec.module === 'window_velux') {
+        placeVelux(parent, modules, desc.modules, frame, posAlong, posUp, spec.w, spec.h);
+      } else if (spec.module === 'dormer') {
+        placeDormer(parent, modules, desc.modules, frame,
+          { ...spec, position_along: posAlong, position_up: posUp }, baseY, desc.materials_map);
+      } else {
+        log(`[roof-win] неизвестный module=${spec.module}`, 'warn');
+      }
+    }
+  }
+}
+
+// ══════════════════════════════════════════════
 // MAIN BUILDER — обновлён: принимает houseGroup как параметр
 // options: { outlineGroup, showOutline, controls, materialOverrides }
 // ══════════════════════════════════════════════
@@ -1107,6 +1883,7 @@ function buildHouseFromDescriptor(houseGroup, desc, modules, params, options = {
 
   let yOffset = baseH;
   let lastOutline = null;
+  let firstOutline = null;
   let totalWallH = 0;
   let prevOutline = null;
 
@@ -1165,6 +1942,7 @@ function buildHouseFromDescriptor(houseGroup, desc, modules, params, options = {
     yOffset += wallH;
     prevOutline = outline;
     lastOutline = outline;
+    if (fi === 0) firstOutline = outline;
   }
 
   if (lastOutline) {
@@ -1172,6 +1950,31 @@ function buildHouseFromDescriptor(houseGroup, desc, modules, params, options = {
     const angleDeg = (angleDef && angleDef.default !== undefined) ? angleDef.default : 22;
     buildRoof(houseGroup, yOffset, lastOutline.bbox, lastOutline, desc.roof_type || 'hip', angleDeg, ROOF_EAVE);
     buildDecorFromFeatures(houseGroup, modules, desc, lastOutline, baseH, yOffset, angleDeg, ROOF_EAVE, sharedCorniceMat);
+    // Мансардные / слуховые окна на скатах (после крыши)
+    buildRoofWindows(houseGroup, modules, desc, lastOutline, yOffset, angleDeg, ROOF_EAVE);
+  }
+
+  // PAD ПОД ДОМОМ — строится по реальному bbox outline (а не по houseL/houseW в viewer3d-core,
+  // которые могут не совпадать с формулами из дескриптора).
+  if (firstOutline && firstOutline.bbox) {
+    const padOffset = 0.30, padThick = 0.05;
+    const bb = firstOutline.bbox;
+    const padW = (bb.maxX - bb.minX) + 2 * padOffset;
+    const padD = (bb.maxZ - bb.minZ) + 2 * padOffset;
+    const padCx = (bb.minX + bb.maxX) / 2;
+    const padCz = (bb.minZ + bb.maxZ) / 2;
+    const padGeo = new THREE.BoxGeometry(padW, padThick, padD);
+    const padMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.95, metalness: 0.0 });
+    padMat.name = 'mat_house_pad';
+    const padMesh = new THREE.Mesh(padGeo, padMat);
+    padMesh.position.set(padCx, padThick / 2, padCz);
+    padMesh.receiveShadow = true;
+    houseGroup.add(padMesh);
+  }
+
+  // Крыльцо привязывается к двери 1-го этажа
+  if (firstOutline && desc.features && desc.features.porch) {
+    buildPorch(houseGroup, desc, firstOutline, desc.modules, desc.materials_map, baseH);
   }
 
   // Контур-overlay (если показан)

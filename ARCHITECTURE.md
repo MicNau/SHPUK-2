@@ -471,22 +471,35 @@ CREATE TABLE projects (
 | `transformParametricModule()` | ✅ в shared, с детектом native bbox (X/Y/Z) для всех частей: frame_*, leaf_*, glass, curtain, mullion_*, sill, threshold |
 | `applyMaterialOverride()` | ✅ в shared (принимает parent, color-пикеры по `mat_*`) |
 | Декор: cornice / chimney / inter-floor cornice | ✅ в shared. Углы cornice — TODO (требуется GLB cornice_corner) |
+| Porch (крыльцо) | ✅ в shared. Привязка к двери (с флагом `"main": true`), процедурная сборка: ступени с nosing, щёки с лестничным контуром, 2 колонны, плоский навес с наклоном, перила с балясинами + поручни, наклонные перила вдоль ступеней, чёрный pad. См. `buildPorch` в `shared/house-builder.js`. |
+| Pad под домом | ✅ в shared. Строится по реальному bbox outline (`firstOutline.bbox`), стыкуется с pad крыльца. В `viewer3d-core.js` pad строится только как fallback при процедурном `buildHouseMeshes`. |
+| Velux на скате | ✅ в shared. GLB-модуль трансформируется параметрически + правосторонний базис ската (`axisAlong, axisUp, normal`). Размещение БЕЗ выреза в скате (frame поднят на 6 см над плоскостью, custom flat glass на 8.5 см). |
+| Dormer на скате | ✅ в shared. Процедурная сборка: walls (BoxGeometry) + 2 ската мини-крыши + 2 фронтона. Конёк перпендикулярен главному, угол совпадает с углом главной крыши. `basePt.y` опускается на `(d/2)*tan(angle)` чтобы передняя часть села на скат. Размеры подбираются так, чтобы задняя стенка ушла под скат (`d ≥ h/tan + w/2`). Окно во фронтоне с custom flat glass перед стеной. |
 | Процедурный билдер `buildHouseMeshes()` | ✅ в `viewer3d-core.js`, используется как fallback пока `ensureHouseLoaded()` в полёте |
 | Подключение в основной фронтенд (`viewer3d-core.js` + `nav-desktop.js`) | ✅ `HOUSE_TYPE_MAP` + `ensureHouseLoaded` + `dSelHouse` запускает preload; в `buildScene3d()` вызывается `HouseBuilder.buildHouseFromDescriptor` |
 
-**Открытые TODO в test-house (некритично для портирования, можно делать инкрементально):**
+**Открытые TODO (некритично, инкрементально):**
 - Cornice на convex-углах: нужен GLB `mod_cornice_corner.glb` с трапециевидным сечением (повторяет профиль `mod_cornice.glb`), чтобы закрыть зазор `cd × cd` на каждом convex-углу.
-- Porch (крыльцо): builder для расстановки `mod_porch_column.glb` и `mod_porch_step.glb` у входной двери. GLB-модули готовы.
-- Dormer/velux: позиционирование на наклонной плоскости + вырез отверстия в скате.
 - Mansard-крыша: наклонные стены 2-го этажа вместо вертикальных.
 - Handle двери: сейчас обрезается при `scale.x` leaf'а (handle — child of leaf в GLB). Нужна пересборка GLB с handle как sibling.
 - Per-floor UI sliders (для разной высоты/площади этажей в test-house).
+- Карусель типов домов в UI шага 1 (вместо 4 карточек — превью всех 10 дескрипторов).
 
 **Известное расхождение имён в legacy-GLB.** Существующие модули из `Modules.blend` (single/double/wide окна) используют `Glass` (с заглавной) и `treshold` (опечатка) вместо требуемых спекой `glass` и `threshold`. **Новые** модули, собранные после согласования v2, идут строго по спеке. При написании `transformParametricModule()` нужно либо пересобрать legacy-GLB с правильными именами, либо сделать парсер case-insensitive с alias-таблицей `{Glass:'glass', treshold:'threshold'}` — выбор за реализатором.
 
 ---
 
 ## Recent cleanup (tech debt)
+
+Сделано в итерациях v=16 (porch + velux/dormer + pad-стыковка):
+
+- **Porch builder** (`buildPorch` в `shared/house-builder.js`) — реализован «с нуля» процедурно, без GLB. Привязка к двери: поиск через `findMainDoorPlacement` по items outline 1-го этажа, приоритет — флаг `"main": true`. Параметризация через `features.porch` в дескрипторе: `width`, `depth`, `offset_along`, `step_rise`, `step_run`, `has_canopy`, `canopy_height`, `canopy_slope`, `has_railing`, `railing_height`. Геометрия: ступени с nosing-плитой (выступ вперёд и по бокам), щёки с лестничным контуром через `ShapeUtils.triangulateShape`, 2 колонны на оси щёк, плоский навес с наклоном к ступеням, перила платформы (поручень + балясины с шагом 26 см), наклонные перила вдоль ступеней (балясины на каждой ступени + newel post). Материалы: `mat_porch_step` (тела ступеней/щёк), `mat_porch_deck` (проступи/плиты), `mat_porch_column`, `mat_porch_canopy`, `mat_porch_railing`.
+- **Pad дома перенесён в HouseBuilder** — теперь строится по реальному bbox `firstOutline.bbox`, не по формулам `houseL/houseW` в `viewer3d-core.js` (которые рассчитывались с другим RATIO и не совпадали с координатами дескриптора). Pad крыльца стыкуется с pad дома: заходит на 30 см под стену, Y центра = `padThick/2`. В `viewer3d-core.js` pad остался только в fallback-ветке (когда HouseBuilder ещё не загружен).
+- **Velux** (`placeVelux`) — мансардное окно в плоскости ската. Использует **правосторонний** базис ската: `xAxis = axisUp × normal` (важно — `makeBasis(alongHoriz, up, normalHoriz)` даёт ЛЕВОСТОРОННИЙ базис с `det=-1`, и `setFromRotationMatrix` для такого возвращает невалидный quaternion). GLB рамы поднят на 6 см над скатом, поверх — custom plane glass на 8.5 см над скатом (GLB-стекло native — горизонтальная плита в XZ, после ротации уходит перпендикулярно скату — не работает).
+- **Dormer** (`placeDormer`) — слуховое окно «дом-образный». Процедурный: walls + 2 ската + 2 фронтона, конёк ПЕРПЕНДИКУЛЯРЕН главному коньку (`+Z = глубина dormer'а`), угол ската мини-крыши = `(w/2) * slopeTan` (= углу главной крыши). `basePt.y -= (d/2) * slopeTan` — передняя нижняя часть садится на скат, задняя глубже в скате. Условие скрытия задней крыши: `h + (w/2)*slopeTan ≤ d*slopeTan` ⇒ `d ≥ h/slopeTan + w/2`. GLB-стекло окна скрыто (`visible = false`), вместо него custom flat plane на 5 см впереди стены (рама на 10 см впереди — фрейм полностью снаружи).
+- **Расширение спеки дескриптора** (`HOUSE_DESCRIPTOR_FORMAT.md`): `features.porch.*` (полный набор полей), `door.main` (флаг главного входа), `roof_windows[].rect_index`. В `house_type_01.json` добавлен `features.porch` (с `offset_along: -0.20` чтобы крыльцо не вылезало за южный угол) и 2 `roof_windows`: 2 velux на южном скате + 1 dormer на северном.
+- **fetch дескриптора с `cache: 'no-store'`** — иначе браузер может «застрять» на старой версии JSON даже после hard reload скриптов.
+- **Cache-bust**: `shared/house-builder.js?v=16`, `viewer3d-core.js?v=16`.
 
 Сделано в итерации v=15 (портирование test-house → основной фронт):
 
@@ -518,13 +531,14 @@ CREATE TABLE projects (
 4. ~~**Портировать общий код в основной фронтенд**~~ ✅ — `shared/house-builder.js` создан (~1080 строк), IIFE namespace `HouseBuilder`. Подключён и в `test-house.html`, и в `index-desktop.html`. В `viewer3d-core.js`: `HOUSE_TYPE_MAP` маппит `S.houseType` → typeId, `ensureHouseLoaded()` кэширует дескриптор + GLB-модули, в `buildScene3d()` вызывается `HouseBuilder.buildHouseFromDescriptor()` (с fallback на старый `buildHouseMeshes` пока loader в полёте). `dSelHouse` в `nav-desktop.js` запускает preload при выборе типа.
    - **Замечание**: пока используется маппинг **варианта A** (4 карточки шага 1 → 3 типа дескрипторов). Полный набор (10 типов) доступен только в test-house. В будущем UI шага 1 → «карусель» с превью всех типов.
 5. **Доработки модульной системы (некритично, инкрементально):**
+   - ~~Porch builder~~ ✅ (`buildPorch` в `shared/house-builder.js`, привязка к двери с флагом `"main": true`, процедурно с ступенями/nosing/щёками/колоннами/навесом/перилами).
+   - ~~Dormer/velux на скате крыши~~ ✅ (`buildRoofWindows` в `shared/house-builder.js`, velux через GLB в плоскости ската + custom flat glass; dormer процедурный с правосторонним базисом и автоматическим утоплением).
    - `mod_cornice_corner.glb` — GLB-модуль с трапециевидным сечением для закрытия convex-углов карниза.
-   - Porch builder (расстановка `mod_porch_column.glb` + `mod_porch_step.glb` у двери).
-   - Dormer/velux на скате крыши.
    - Mansard-крыша (наклонные стены 2-го этажа).
    - Пересборка GLB дверей: handle как sibling leaf_main (не child), чтобы handle не масштабировался вместе со створкой.
    - Карусель типов домов в UI шага 1 (вместо 4 карточек — превью всех 10 дескрипторов).
    - Per-floor sliders area/floor_h (для гибкого тюнинга многоэтажных домов в UI).
+   - CSG-вырез отверстия в скате под velux/dormer (сейчас velux лежит сверху на скате, dormer пересекается со скатом без выреза — визуально работает, но не геометрически чисто).
 6. **Бэкенд** — FastAPI + расчётный модуль + БД (в работе у команды бэкенда).
 
 ---

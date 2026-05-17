@@ -742,7 +742,9 @@ function buildScene3d() {
   if (!isNoHouse) {
     // Используем модульную сборку по дескриптору, если он загружен (см. ensureHouseLoaded).
     // Если ещё нет — fallback на старый процедурный билдер (timeout пока async).
-    if (typeof HouseBuilder !== 'undefined' && _houseCache.desc && _houseCache.modules) {
+    const usingHouseBuilder = (typeof HouseBuilder !== 'undefined' && _houseCache.desc && _houseCache.modules);
+    if (usingHouseBuilder) {
+      // Pad дома и pad крыльца HouseBuilder строит САМ — по реальному bbox outline.
       HouseBuilder.buildHouseFromDescriptor(
         houseGroup,
         _houseCache.desc,
@@ -757,15 +759,15 @@ function buildScene3d() {
         // Async-loader, после успеха сцена будет перестроена через rebuildHouseAsync.
         rebuildHouseAsync();
       }
+      // Pad под процедурным домом (старый fallback) — по houseL/houseW.
+      const padW = houseL + 0.6, padD = houseW + 0.6, padH = 0.05;
+      const padGeo = new THREE.BoxGeometry(padW, padH, padD);
+      const padMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.95, metalness: 0.0 });
+      const padMesh = new THREE.Mesh(padGeo, padMat);
+      padMesh.position.set(houseL/2, padH/2, houseW/2);
+      padMesh.receiveShadow = true;
+      houseGroup.add(padMesh);
     }
-    // Площадка под домом: выступает на 5 см над землёй, на 30 см шире фундамента
-    const padW = houseL + 0.6, padD = houseW + 0.6, padH = 0.05;
-    const padGeo = new THREE.BoxGeometry(padW, padH, padD);
-    const padMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.95, metalness: 0.0 });
-    const padMesh = new THREE.Mesh(padGeo, padMat);
-    padMesh.position.set(houseL/2, padH/2, houseW/2);
-    padMesh.receiveShadow = true;
-    houseGroup.add(padMesh);
   }
 
   if (S.sections.includes('terrace') && S.pts.terrace.length >= 3)
