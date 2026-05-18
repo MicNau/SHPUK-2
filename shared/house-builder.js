@@ -55,6 +55,7 @@ function collectModuleIds(desc) {
     hip:         ['roof_hip_slope', 'roof_hip_ridge'],
     gable:       ['roof_gable_slope', 'roof_gable_front'],
     gable_cross: ['roof_gable_slope', 'roof_gable_front'],
+    mansard:     ['roof_gable_slope', 'roof_gable_front'], // мансарда строится как gable
     flat:        ['roof_flat_edge'],
   };
   (roofMods[desc.roof_type] || []).forEach(m => ids.add(m));
@@ -1325,7 +1326,7 @@ function buildHipRoof(parent, baseY, bbox, angleDeg, eave) {
   geo.setIndex(indices);
   geo.computeVertexNormals();
   const mat = new THREE.MeshStandardMaterial({
-    color: 0x8b3a3a, roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide,
+    color: 0x8b3a3a, roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide, flatShading: true,
   });
   mat.name = 'mat_roof';
   const mesh = new THREE.Mesh(geo, mat);
@@ -1373,7 +1374,7 @@ function buildGableRoof(parent, baseY, bbox, angleDeg, eave) {
     geo.setIndex(indices);
     geo.computeVertexNormals();
     const mat = new THREE.MeshStandardMaterial({
-      color, roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide,
+      color, roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide, flatShading: true,
     });
     mat.name = matName;
     const mesh = new THREE.Mesh(geo, mat);
@@ -1450,7 +1451,7 @@ function buildFlatRoofPoly(parent, baseY, outline, eave) {
   geo.setIndex(indices);
   geo.computeVertexNormals();
   const mat = new THREE.MeshStandardMaterial({
-    color: 0x707070, roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide,
+    color: 0x707070, roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide, flatShading: true,
   });
   mat.name = 'mat_roof';
   const mesh = new THREE.Mesh(geo, mat);
@@ -1459,7 +1460,142 @@ function buildFlatRoofPoly(parent, baseY, outline, eave) {
   log(`[roof] flat (polygon): ${N} corners, ${triangles.length} triangles`, 'dim');
 }
 
-function buildRoof(parent, baseY, bbox, outline, roofType, angleDeg, eave) {
+// Ломаная мансардная крыша (Mansard roof) — два угла наклона:
+// нижний (крутой ~60-70°) до излома, верхний (пологий ~25-35°) до конька.
+// Фронтоны — пятиугольники (5 вершин с изломом). Все материалы — flat shading.
+function buildBrokenMansardRoof(parent, baseY, bbox, eave, mansardSpec) {
+  const x0 = bbox.minX - eave, x1 = bbox.maxX + eave;
+  const z0 = bbox.minZ - eave, z1 = bbox.maxZ + eave;
+  const L = x1 - x0, W = z1 - z0;
+  const longAxisX = L >= W;
+
+  const lowerAngle  = (mansardSpec.lower_angle  !== undefined) ? mansardSpec.lower_angle  : 70;
+  const upperAngle  = (mansardSpec.upper_angle  !== undefined) ? mansardSpec.upper_angle  : 30;
+  const lowerHeight = (mansardSpec.lower_height !== undefined) ? mansardSpec.lower_height : 2.0;
+  const tanLower = Math.tan(lowerAngle * Math.PI / 180);
+  const tanUpper = Math.tan(upperAngle * Math.PI / 180);
+
+  if (tanLower < 0.01) { log('[roof] mansard: lower_angle too shallow', 'warn'); return; }
+
+  const halfShort = (longAxisX ? W : L) / 2;
+  const horizontalLower = lowerHeight / tanLower;
+  if (horizontalLower >= halfShort - 0.05) {
+    log(`[roof] mansard: lower_height ${lowerHeight}m too tall для half-width ${halfShort.toFixed(2)}m — fallback to gable`, 'warn');
+    return buildGableRoof(parent, baseY, bbox, lowerAngle, eave);
+  }
+  const kinkY = baseY + lowerHeight;
+  const ridgeY = kinkY + (halfShort - horizontalLower) * tanUpper;
+
+  let verts, slopeTris, gableTris;
+  if (longAxisX) {
+    const kinkZNorth = z0 + horizontalLower;
+    const kinkZSouth = z1 - horizontalLower;
+    const ridgeZ = (z0 + z1) / 2;
+    verts = [
+      [x0, baseY, z0],          // 0: NW base
+      [x1, baseY, z0],          // 1: NE base
+      [x1, baseY, z1],          // 2: SE base
+      [x0, baseY, z1],          // 3: SW base
+      [x0, kinkY, kinkZNorth],  // 4: NW kink
+      [x1, kinkY, kinkZNorth],  // 5: NE kink
+      [x1, kinkY, kinkZSouth],  // 6: SE kink
+      [x0, kinkY, kinkZSouth],  // 7: SW kink
+      [x0, ridgeY, ridgeZ],     // 8: W ridge
+      [x1, ridgeY, ridgeZ],     // 9: E ridge
+    ];
+    slopeTris = [
+      [0, 1, 5], [0, 5, 4],     // N lower
+      [3, 7, 6], [3, 6, 2],     // S lower
+      [4, 5, 9], [4, 9, 8],     // N upper
+      [7, 8, 9], [7, 9, 6],     // S upper
+    ];
+    gableTris = [
+      [1, 2, 6], [1, 6, 9], [1, 9, 5],   // E pentagon
+      [0, 4, 8], [0, 8, 7], [0, 7, 3],   // W pentagon
+    ];
+  } else {
+    const kinkXWest = x0 + horizontalLower;
+    const kinkXEast = x1 - horizontalLower;
+    const ridgeX = (x0 + x1) / 2;
+    verts = [
+      [x0, baseY, z0],          // 0: NW
+      [x1, baseY, z0],          // 1: NE
+      [x1, baseY, z1],          // 2: SE
+      [x0, baseY, z1],          // 3: SW
+      [kinkXWest, kinkY, z0],   // 4: NW kink
+      [kinkXEast, kinkY, z0],   // 5: NE kink
+      [kinkXEast, kinkY, z1],   // 6: SE kink
+      [kinkXWest, kinkY, z1],   // 7: SW kink
+      [ridgeX, ridgeY, z0],     // 8: N ridge
+      [ridgeX, ridgeY, z1],     // 9: S ridge
+    ];
+    slopeTris = [
+      [0, 3, 7], [0, 7, 4],     // W lower
+      [1, 5, 6], [1, 6, 2],     // E lower
+      [4, 7, 9], [4, 9, 8],     // W upper
+      [5, 8, 9], [5, 9, 6],     // E upper
+    ];
+    gableTris = [
+      [0, 4, 8], [0, 8, 5], [0, 5, 1],   // N pentagon
+      [3, 2, 6], [3, 6, 9], [3, 9, 7],   // S pentagon
+    ];
+  }
+
+  function makeMesh(triangles, color, matName) {
+    const positions = [], indices = [];
+    for (const v of verts) positions.push(...v);
+    for (const t of triangles) indices.push(...t);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({
+      color, roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide, flatShading: true,
+    });
+    mat.name = matName;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    parent.add(mesh);
+  }
+  makeMesh(slopeTris, 0x8b3a3a, 'mat_roof');
+  makeMesh(gableTris, 0xf5e6c8, 'mat_wall');
+  log(`[roof] mansard broken: lower=${lowerAngle}°/${lowerHeight}m, upper=${upperAngle}°, ridge_h=${(ridgeY - baseY).toFixed(2)}m`, 'dim');
+}
+
+// Knee wall — низкая вертикальная стенка по периметру outline (для мансарды).
+// Использует GLB-модули `wall_segment` и `pillar` (без окон/дверей).
+function buildKneeWall(parent, modules, outline, baseY, kneeHeight, wt, ps) {
+  if (kneeHeight <= 0.01) return;
+  for (const item of outline.items) {
+    if (item.type === 'pillar') {
+      const p = cloneModule(modules, 'pillar');
+      if (!p) continue;
+      p.scale.set(ps, kneeHeight, ps);
+      const pos = pillarPosition(item, ps);
+      p.position.set(pos.x, baseY, pos.z);
+      setupShadows(p);
+      parent.add(p);
+    } else if (item.type === 'wall') {
+      const wallLength = item.wallLength;
+      if (wallLength <= 0.01) continue;
+      const seg = cloneModule(modules, 'wall_segment');
+      if (!seg) continue;
+      seg.scale.set(wallLength, kneeHeight, wt / 0.2);
+      const startX = item.x + item.dx * item.startOffset;
+      const startZ = item.z + item.dz * item.startOffset;
+      const endX = startX + item.dx * wallLength;
+      const endZ = startZ + item.dz * wallLength;
+      seg.position.set(endX, baseY, endZ);
+      seg.rotation.y = edgeRotation(item.dx, item.dz);
+      setupShadows(seg);
+      parent.add(seg);
+    }
+  }
+  log(`[roof] knee wall: h=${kneeHeight.toFixed(2)}m`, 'dim');
+}
+
+function buildRoof(parent, baseY, bbox, outline, roofType, angleDeg, eave, options) {
+  options = options || {};
   if (roofType === 'flat')  return buildFlatRoofPoly(parent, baseY, outline, eave);
 
   if (roofType === 'hip') {
@@ -1477,14 +1613,41 @@ function buildRoof(parent, baseY, bbox, outline, roofType, angleDeg, eave) {
     }
     return;
   }
-  if (roofType === 'gable' || roofType === 'gable_cross') {
+  if (roofType === 'mansard') {
+    const mansardSpec = options.mansardSpec || {};
+    const kneeHeight = (mansardSpec.knee_height !== undefined) ? mansardSpec.knee_height : 0;
+    if (kneeHeight > 0 && options.modules) {
+      buildKneeWall(parent, options.modules, outline, baseY, kneeHeight, options.wt || 0.2, options.ps || 0.2);
+    }
+    const roofBaseY = baseY + kneeHeight;
     const rects = decomposeOrthoPolygonIntoRectangles(outline);
     if (rects.length === 0) {
-      log('[roof] gable: decomposition failed, fallback на bbox', 'warn');
+      log('[roof] mansard: decomposition failed, fallback на bbox', 'warn');
+      return buildBrokenMansardRoof(parent, roofBaseY, bbox, eave, mansardSpec);
+    }
+    rects.sort((a, b) => ((b.maxX - b.minX) * (b.maxZ - b.minZ)) - ((a.maxX - a.minX) * (a.maxZ - a.minZ)));
+    log(`[roof] mansard: ${rects.length} rect (1 mansard main + ${rects.length - 1} hip)`, 'dim');
+    // Пристройки получают hip с углом, близким к нижнему скату мансарды (для визуальной целостности).
+    const subAngle = (mansardSpec.lower_angle !== undefined) ? mansardSpec.lower_angle : angleDeg;
+    for (let i = 1; i < rects.length; i++) {
+      const r = rects[i];
+      const rectBbox = { minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ };
+      buildHipRoof(parent, roofBaseY + (i - 1) * 0.001, rectBbox, subAngle, eave);
+    }
+    const main = rects[0];
+    const mainBbox = { minX: main.minX, maxX: main.maxX, minZ: main.minZ, maxZ: main.maxZ };
+    buildBrokenMansardRoof(parent, roofBaseY + (rects.length - 1) * 0.001, mainBbox, eave, mansardSpec);
+    return;
+  }
+  if (roofType === 'gable' || roofType === 'gable_cross') {
+    const isGableCross = (roofType === 'gable_cross');
+    const rects = decomposeOrthoPolygonIntoRectangles(outline);
+    if (rects.length === 0) {
+      log(`[roof] ${roofType}: decomposition failed, fallback на bbox`, 'warn');
       return buildGableRoof(parent, baseY, bbox, angleDeg, eave);
     }
     rects.sort((a, b) => ((b.maxX - b.minX) * (b.maxZ - b.minZ)) - ((a.maxX - a.minX) * (a.maxZ - a.minZ)));
-    if (roofType === 'gable_cross') {
+    if (isGableCross) {
       log(`[roof] gable_cross: ${rects.length} rect, все gable`, 'dim');
       for (let i = 0; i < rects.length; i++) {
         const r = rects[i];
@@ -1514,9 +1677,10 @@ function buildRoof(parent, baseY, bbox, outline, roofType, angleDeg, eave) {
 // Возвращает «фрейм» ската: 4 вершины (eaveLeft, eaveRight, ridgeRight, ridgeLeft) +
 // единичные оси (axisAlong вдоль карниза, axisUp вверх по скату, normal наружу).
 // Для триangular-ската (hip end-slope) ridgeLeft === ridgeRight === вершина.
-// roofType: 'hip' | 'gable' | 'gable_cross'. slope: 'north' | 'south' | 'east' | 'west'.
-// Возвращает null для несовместимых сочетаний (например, gable + east/west — это фронтоны).
-function getSlopeFrame(slope, rectBbox, longAxisX, angleDeg, baseY, eave, roofType) {
+// Для mansard (ломаной крыши) frame описывает НИЖНИЙ крутой скат от eave до kink-линии
+// (использует mansardSpec.lower_height и lower_angle).
+// roofType: 'hip' | 'gable' | 'gable_cross' | 'mansard'. slope: 'north' | 'south' | 'east' | 'west'.
+function getSlopeFrame(slope, rectBbox, longAxisX, angleDeg, baseY, eave, roofType, mansardSpec) {
   const x0 = rectBbox.minX - eave, x1 = rectBbox.maxX + eave;
   const z0 = rectBbox.minZ - eave, z1 = rectBbox.maxZ + eave;
   const L = x1 - x0, W = z1 - z0;
@@ -1565,6 +1729,47 @@ function getSlopeFrame(slope, rectBbox, longAxisX, angleDeg, baseY, eave, roofTy
         default: return null;
       }
     }
+  } else if (roofType === 'mansard') {
+    // Mansard: frame описывает НИЖНИЙ крутой скат от eave до kink-линии.
+    // ridgeLeft/ridgeRight здесь — концы kink-линии, не настоящий конёк.
+    const mSpec = mansardSpec || {};
+    const lowerAngle  = (mSpec.lower_angle  !== undefined) ? mSpec.lower_angle  : 70;
+    const lowerHeight = (mSpec.lower_height !== undefined) ? mSpec.lower_height : 2.0;
+    const tanLower = Math.tan(lowerAngle * Math.PI / 180);
+    if (tanLower < 0.01) return null;
+    const horizontalLower = lowerHeight / tanLower;
+    const kinkY = baseY + lowerHeight;
+    if (longAxisX) {
+      const kinkZNorth = z0 + horizontalLower;
+      const kinkZSouth = z1 - horizontalLower;
+      switch (slope) {
+        case 'north':
+          eaveLeft=[x0,baseY,z0]; eaveRight=[x1,baseY,z0];
+          ridgeLeft=[x0,kinkY,kinkZNorth]; ridgeRight=[x1,kinkY,kinkZNorth]; break;
+        case 'south':
+          eaveLeft=[x1,baseY,z1]; eaveRight=[x0,baseY,z1];
+          ridgeLeft=[x1,kinkY,kinkZSouth]; ridgeRight=[x0,kinkY,kinkZSouth]; break;
+        case 'east': case 'west':
+          log(`[roof-win] mansard longAxisX: slope=${slope} — это фронтон, не скат`, 'warn');
+          return null;
+        default: return null;
+      }
+    } else {
+      const kinkXWest = x0 + horizontalLower;
+      const kinkXEast = x1 - horizontalLower;
+      switch (slope) {
+        case 'east':
+          eaveLeft=[x1,baseY,z0]; eaveRight=[x1,baseY,z1];
+          ridgeLeft=[kinkXEast,kinkY,z0]; ridgeRight=[kinkXEast,kinkY,z1]; break;
+        case 'west':
+          eaveLeft=[x0,baseY,z1]; eaveRight=[x0,baseY,z0];
+          ridgeLeft=[kinkXWest,kinkY,z1]; ridgeRight=[kinkXWest,kinkY,z0]; break;
+        case 'north': case 'south':
+          log(`[roof-win] mansard longAxisZ: slope=${slope} — это фронтон, не скат`, 'warn');
+          return null;
+        default: return null;
+      }
+    }
   } else if (roofType === 'gable' || roofType === 'gable_cross') {
     const halfShort = (longAxisX ? W : L) / 2;
     ridgeY = baseY + halfShort * tanA;
@@ -1578,7 +1783,7 @@ function getSlopeFrame(slope, rectBbox, longAxisX, angleDeg, baseY, eave, roofTy
           eaveLeft=[x1,baseY,z1]; eaveRight=[x0,baseY,z1];
           ridgeLeft=[x1,ridgeY,ridgeZ]; ridgeRight=[x0,ridgeY,ridgeZ]; break;
         case 'east': case 'west':
-          log(`[roof-win] gable longAxisX: slope=${slope} — это фронтон (стена), не скат`, 'warn');
+          log(`[roof-win] ${roofType} longAxisX: slope=${slope} — это фронтон (стена), не скат`, 'warn');
           return null;
         default: return null;
       }
@@ -1592,7 +1797,7 @@ function getSlopeFrame(slope, rectBbox, longAxisX, angleDeg, baseY, eave, roofTy
           eaveLeft=[x0,baseY,z1]; eaveRight=[x0,baseY,z0];
           ridgeLeft=[ridgeX,ridgeY,z1]; ridgeRight=[ridgeX,ridgeY,z0]; break;
         case 'north': case 'south':
-          log(`[roof-win] gable longAxisZ: slope=${slope} — это фронтон, не скат`, 'warn');
+          log(`[roof-win] ${roofType} longAxisZ: slope=${slope} — это фронтон, не скат`, 'warn');
           return null;
         default: return null;
       }
@@ -1780,8 +1985,11 @@ function placeDormer(parent, modules, modulesDef, frame, dormerSpec, baseY, mate
         sill_overhang: winDef.sill_overhang || 0.03,
       }, winModel);
       // Скрываем GLB-glass (он горизонтальная плита, конфликтует с custom-стеклом)
+      // и sill (подоконник) — для dormer-окна не нужен.
       win.traverse(c => {
-        if (c.isMesh && canonName(c.name) === 'glass') c.visible = false;
+        if (!c.isMesh) return;
+        const n = canonName(c.name);
+        if (n === 'glass' || n === 'sill') c.visible = false;
       });
       const winCorner = localToWorld(-winW / 2, h / 2 - winH / 2, d / 2 + frameOffset);
       win.position.copy(winCorner);
@@ -1835,7 +2043,7 @@ function buildRoofWindows(parent, modules, desc, outline, baseY, angleDeg, eave)
     const rect = rects[rectIdx];
     const rectBbox = { minX: rect.minX, maxX: rect.maxX, minZ: rect.minZ, maxZ: rect.maxZ };
     const longAxisX = (rectBbox.maxX - rectBbox.minX) >= (rectBbox.maxZ - rectBbox.minZ);
-    const frame = getSlopeFrame(spec.slope, rectBbox, longAxisX, angleDeg, baseY, eave, roofType);
+    const frame = getSlopeFrame(spec.slope, rectBbox, longAxisX, angleDeg, baseY, eave, roofType, desc.mansard);
     if (!frame) continue;
 
     const count = spec.count || 1;
@@ -1866,6 +2074,13 @@ function buildRoofWindows(parent, modules, desc, outline, baseY, angleDeg, eave)
 
 // ══════════════════════════════════════════════
 // MAIN BUILDER — обновлён: принимает houseGroup как параметр
+// params: {
+//   area:       общая площадь (м²), используется как fallback для floorAreas[]
+//   floorH:     общая высота этажа (см), fallback для floorHs[]
+//   baseH:      высота фундамента (см)
+//   floorAreas: [a0, a1, ...] — массив площадей по этажам, м² (опционально, override per-floor)
+//   floorHs:    [h0, h1, ...] — массив высот этажей по этажам, см (опционально)
+// }
 // options: { outlineGroup, showOutline, controls, materialOverrides }
 // ══════════════════════════════════════════════
 function buildHouseFromDescriptor(houseGroup, desc, modules, params, options = {}) {
@@ -1907,13 +2122,20 @@ function buildHouseFromDescriptor(houseGroup, desc, modules, params, options = {
 
   for (let fi = 0; fi < desc.floors.length; fi++) {
     const floor = desc.floors[fi];
-    const wallH = params.floorH / 100;
+    // Высота этажа: per-floor override → общий → дефолт
+    const floorHCm = (params.floorHs && params.floorHs[fi] !== undefined)
+                     ? params.floorHs[fi]
+                     : params.floorH;
+    const wallH = floorHCm / 100;
     totalWallH += wallH;
 
+    // Площадь этажа: per-floor override → общий area × area_factor
     const areaFactor = (floor.area_factor !== undefined) ? floor.area_factor : 1.0;
-    const floorArea = params.area * areaFactor;
+    const floorArea = (params.floorAreas && params.floorAreas[fi] !== undefined)
+                      ? params.floorAreas[fi]
+                      : params.area * areaFactor;
     const vars = evalVars(floor.vars, { area: floorArea });
-    log(`[builder] floor ${fi} (area_factor=${areaFactor}, area=${floorArea.toFixed(1)}): ${Object.entries(vars).map(([k,v])=>`${k}=${v.toFixed(2)}`).join(', ')}`, 'dim');
+    log(`[builder] floor ${fi} (h=${floorHCm}cm, area=${floorArea.toFixed(1)}m²): ${Object.entries(vars).map(([k,v])=>`${k}=${v.toFixed(2)}`).join(', ')}`, 'dim');
 
     const offsetSpec = floor.start_offset || { x: 0, z: 0 };
     const startX = evalExpr(offsetSpec.x !== undefined ? offsetSpec.x : 0, vars);
@@ -1948,10 +2170,17 @@ function buildHouseFromDescriptor(houseGroup, desc, modules, params, options = {
   if (lastOutline) {
     const angleDef = desc.constraints.roof_angle;
     const angleDeg = (angleDef && angleDef.default !== undefined) ? angleDef.default : 22;
-    buildRoof(houseGroup, yOffset, lastOutline.bbox, lastOutline, desc.roof_type || 'hip', angleDeg, ROOF_EAVE);
+    const roofType = desc.roof_type || 'hip';
+    // Для мансарды: roof+windows расположены выше на knee_height (knee wall между потолком и скатом)
+    const mansardKnee = (roofType === 'mansard' && desc.mansard && desc.mansard.knee_height) || 0;
+    const roofBaseY = yOffset + mansardKnee;
+    buildRoof(houseGroup, yOffset, lastOutline.bbox, lastOutline, roofType, angleDeg, ROOF_EAVE, {
+      mansardSpec: desc.mansard, modules, wt, ps,
+    });
+    // Декор (cornice) идёт по верху основных стен — на yOffset (не сдвигается)
     buildDecorFromFeatures(houseGroup, modules, desc, lastOutline, baseH, yOffset, angleDeg, ROOF_EAVE, sharedCorniceMat);
-    // Мансардные / слуховые окна на скатах (после крыши)
-    buildRoofWindows(houseGroup, modules, desc, lastOutline, yOffset, angleDeg, ROOF_EAVE);
+    // Мансардные / слуховые окна на скатах — используют roofBaseY (с учётом knee)
+    buildRoofWindows(houseGroup, modules, desc, lastOutline, roofBaseY, angleDeg, ROOF_EAVE);
   }
 
   // PAD ПОД ДОМОМ — строится по реальному bbox outline (а не по houseL/houseW в viewer3d-core,

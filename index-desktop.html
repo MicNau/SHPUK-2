@@ -20,20 +20,12 @@
 <div class="d-screen active" id="d-screen-1">
   <div class="d-select-wrap">
     <div class="d-select-title">Выберите тип дома</div>
-    <div class="d-select-grid">
-      <div class="d-house-card" onclick="dSelHouse(this,'Одноэтажный дом')">
-        <div class="hcp"><div class="ic">🏠</div>Картинка с домом, описание</div>
-        <div class="hcl">Одноэтажный дом</div>
-      </div>
-      <div class="d-house-card" onclick="dSelHouse(this,'Двухэтажный дом')">
-        <div class="hcp"><div class="ic">🏡</div>Картинка с домом, описание</div>
-        <div class="hcl">Двухэтажный дом</div>
-      </div>
-      <div class="d-house-card" onclick="dSelHouse(this,'Дом с мансардой')">
-        <div class="hcp"><div class="ic">🏘</div>Картинка с домом, описание</div>
-        <div class="hcl">Дом с мансардой</div>
-      </div>
-      <div class="d-house-card" onclick="dSelHouse(this,'Участок без дома')">
+    <div class="d-house-grid" id="d-house-grid">
+      <!-- Карточки генерируются динамически из assets/houses/index.json. По клику —
+           немедленный переход на step 2 (без отдельной кнопки «Дальше»). -->
+    </div>
+    <div class="d-house-extra">
+      <div class="d-house-card-empty" onclick="dSelectHouseAndGo('no_house')">
         <div class="hcp"><div class="ic">🌿</div>Пустой участок, без строений</div>
         <div class="hcl">Участок без дома</div>
       </div>
@@ -42,7 +34,6 @@
         <span>📷</span><span>Загрузите фото дома или участка</span>
       </label>
     </div>
-    <button class="d-select-next" onclick="dGoTo(2)">ДАЛЬШЕ <span>→</span></button>
   </div>
 </div>
 
@@ -53,22 +44,14 @@
     <div class="d-params-left">
       <div class="d-params-title">Параметры дома</div>
 
-      <div class="d-param-group">
-        <div class="d-param-label">Общая площадь (кв.м)</div>
+      <!-- Глобальные параметры -->
+      <div class="d-param-group" id="d-area-group">
+        <div class="d-param-label">Общая площадь дома (кв.м)</div>
         <input class="d-param-input" type="number" id="v-area" value="80" min="40" max="100"
-               oninput="dOnParam()">
+               oninput="dOnAreaTotal()">
         <input class="d-param-range" type="range" id="r-area" value="80" min="40" max="100" step="5"
-               oninput="document.getElementById('v-area').value=this.value; dOnParam()">
-        <div class="d-param-unit">40 — 100 кв.м</div>
-      </div>
-
-      <div class="d-param-group">
-        <div class="d-param-label">Высота этажа (см)</div>
-        <input class="d-param-input" type="number" id="v-floor" value="300" min="270" max="360"
-               oninput="dOnParam()">
-        <input class="d-param-range" type="range" id="r-floor" value="300" min="270" max="360" step="10"
-               oninput="document.getElementById('v-floor').value=this.value; dOnParam()">
-        <div class="d-param-unit">270 — 360 см</div>
+               oninput="document.getElementById('v-area').value=this.value; dOnAreaTotal()">
+        <div class="d-param-unit" id="d-area-range-hint">40 — 100 кв.м</div>
       </div>
 
       <div class="d-param-group">
@@ -79,6 +62,9 @@
                oninput="document.getElementById('v-found').value=this.value; dOnParam()">
         <div class="d-param-unit">50 — 120 см</div>
       </div>
+
+      <!-- Per-floor параметры (генерируются динамически на основе дескриптора) -->
+      <div id="d-floors-params"></div>
 
       <div class="d-params-actions">
         <button class="d-btn d-btn-back" onclick="dGoTo(1)">← Назад</button>
@@ -294,11 +280,11 @@
 <script src="state.js?v=14"></script>
 <script src="canvas.js?v=14"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
-<script src="shared/house-builder.js?v=16"></script>
+<script src="shared/house-builder.js?v=22"></script>
 <!-- 3D viewer -->
-<script src="viewer3d-core.js?v=16"></script>
+<script src="viewer3d-core.js?v=17"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=15"></script>
+<script src="nav-desktop.js?v=18"></script>
 </body>
 </html>

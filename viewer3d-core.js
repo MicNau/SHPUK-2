@@ -727,11 +727,22 @@ function buildScene3d() {
   }
 
   const isNoHouse = (S.houseType === 'Участок без дома');
-  const areaRaw  = parseFloat(document.getElementById('v-area')?.value  || 80);
-  const floorRaw = parseFloat(document.getElementById('v-floor')?.value || 300);
-  const foundRaw = parseFloat(document.getElementById('v-found')?.value || 80);
-  const area   = Math.min(100, Math.max(40, areaRaw));
-  const wallH  = Math.min(3.6, Math.max(2.7, floorRaw / 100));
+  // Параметры собираем через dCollectParams (nav-desktop.js) — поддерживает per-floor массивы.
+  // Если она недоступна (например, мобильная версия) — fallback на legacy DOM-id'и.
+  const collected = (typeof dCollectParams === 'function')
+    ? dCollectParams()
+    : {
+        area:   parseFloat(document.getElementById('v-area')?.value  || 80),
+        floorH: parseFloat(document.getElementById('v-floor')?.value || 300),
+        baseH:  parseFloat(document.getElementById('v-found')?.value || 80),
+        floorAreas: [],
+        floorHs: [],
+      };
+  const areaRaw  = collected.area;
+  const floorRaw = collected.floorH;
+  const foundRaw = collected.baseH;
+  const area   = Math.min(140, Math.max(40, areaRaw));
+  const wallH  = Math.min(3.6, Math.max(2.4, floorRaw / 100));
   const foundH = Math.min(1.2, Math.max(0.5, foundRaw / 100));
   const RATIO  = 1.6, wt = 0.2;
   const houseW = Math.sqrt(area / RATIO);
@@ -749,7 +760,13 @@ function buildScene3d() {
         houseGroup,
         _houseCache.desc,
         _houseCache.modules,
-        { area, floorH: floorRaw, baseH: foundRaw },
+        {
+          area,
+          floorH:     floorRaw,
+          baseH:      foundRaw,
+          floorAreas: collected.floorAreas,
+          floorHs:    collected.floorHs,
+        },
         { controls }
       );
     } else {

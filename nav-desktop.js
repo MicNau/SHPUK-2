@@ -51,31 +51,179 @@ function dGoTo(s) {
   document.getElementById('d-step-label').textContent = labels[s] || '';
   document.getElementById('d-btn-summary').style.display = s === 3 ? '' : 'none';
 
-  if (s === 2) _dInitParamsView();
+  if (s === 1) _dInitHouseGrid();
+  else if (s === 2) _dInitParamsView();
   else if (s === 3) _dInitWorkspace();
+}
+
+// Сразу рендерим сетку при загрузке (step 1 активен по умолчанию)
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _dInitHouseGrid);
+  } else {
+    _dInitHouseGrid();
+  }
 }
 
 // ══════════════════════════════════════════════
 // STEP 1 — House selection
 // ══════════════════════════════════════════════
-function dSelHouse(el, name) {
-  document.querySelectorAll('.d-house-card').forEach(c => c.classList.remove('selected'));
-  el.classList.add('selected');
-  S.houseType = name;
-  // Запускаем загрузку дескриптора заранее, чтобы при переходе на шаг 2 сцена была готова.
-  // ensureHouseLoaded определена в viewer3d-core.js. Если houseType не маппится (например,
-  // «Участок без дома»), функция вернёт null без ошибки.
-  if (typeof ensureHouseLoaded === 'function') {
+let _dHousesIndex = null; // кэш списка домов
+
+// Загружает индекс домов и рендерит сетку (5 в ряд, вертикальный скролл).
+async function _dInitHouseGrid() {
+  const grid = document.getElementById('d-house-grid');
+  if (!grid) return;
+  if (grid.dataset.rendered === '1') return; // уже отрисовано
+  try {
+    const idx = await fetch('assets/houses/index.json', { cache: 'no-store' }).then(r => r.json());
+    _dHousesIndex = idx;
+    grid.innerHTML = idx.houses.map(h => `
+      <div class="d-house-card" data-typeid="${h.id}" onclick="dSelectHouseAndGo('${h.id}')">
+        <div class="hcp">
+          <div class="ic" data-placeholder="1">🏠</div>
+        </div>
+        <div class="hcl">${h.name}<br><span style="font-size:11px; opacity:0.75; font-weight:400;">${h.subtitle || ''}</span></div>
+      </div>
+    `).join('');
+    grid.dataset.rendered = '1';
+    // Запускаем фоновый рендер 3D-превью (после небольшой задержки, чтобы UI успел отрисоваться)
+    setTimeout(() => _dRenderHousePreviews().catch(e => console.warn('[house-preview]', e)), 100);
+  } catch (e) {
+    console.error('[house-grid] не удалось загрузить index.json:', e);
+    grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; color:#999;">Ошибка загрузки списка домов</div>';
+  }
+}
+
+// Кэш отрендеренных превью (typeId → dataURL). Между переходами туда-сюда не пересчитываем.
+const _dPreviewCache = {};
+
+// Рендерит 3D-превью для всех домов из индекса. Использует ОДИН shared WebGL-рендерер,
+// чтобы не упираться в лимит контекстов браузера. Снимок → JPEG dataURL → <img>.
+async function _dRenderHousePreviews() {
+  if (!_dHousesIndex || typeof THREE === 'undefined' || typeof HouseBuilder === 'undefined') return;
+  const W = 240, H = 180;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
+  renderer.setSize(W, H);
+  renderer.setPixelRatio(1);
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.shadowMap.enabled = false; // для скорости
+
+  for (const h of _dHousesIndex.houses) {
+    if (_dPreviewCache[h.id]) {
+      _dApplyPreviewToCard(h.id, _dPreviewCache[h.id]);
+      continue;
+    }
+    try {
+      // Загрузка дескриптора + GLB-модулей. HTTP-кэш дедуплицирует общие модули между домами.
+      const { desc, modules } = await HouseBuilder.loadHouseType(h.id);
+
+      // Минимальная сцена для рендера
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xf0f0f0);
+      scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+      const sun = new THREE.DirectionalLight(0xffffff, 0.95);
+      sun.position.set(10, 14, 8);
+      scene.add(sun);
+      // Земля под домом — небольшая плита
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(40, 40),
+        new THREE.MeshStandardMaterial({ color: 0x7fa86b, roughness: 0.9, metalness: 0 })
+      );
+      ground.rotation.x = -Math.PI / 2;
+      scene.add(ground);
+
+      const houseGroup = new THREE.Group();
+      scene.add(houseGroup);
+
+      // Параметры — берём дефолты из дескриптора
+      const firstFloor = desc.floors[0];
+      const areaDef   = firstFloor?.constraints?.area?.default   || 80;
+      const floorHDef = firstFloor?.constraints?.floor_h?.default || 300;
+      const baseHDef  = desc.constraints?.base_h?.default || 80;
+
+      HouseBuilder.buildHouseFromDescriptor(houseGroup, desc, modules,
+        { area: areaDef, floorH: floorHDef, baseH: baseHDef }, {}
+      );
+
+      // Iso-ракурс по bbox дома
+      const bbox = new THREE.Box3().setFromObject(houseGroup);
+      const size = bbox.getSize(new THREE.Vector3());
+      const center = bbox.getCenter(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const cam = new THREE.PerspectiveCamera(32, W / H, 0.1, 200);
+      const dist = maxDim * 1.6;
+      cam.position.set(center.x + dist * 0.75, center.y + dist * 0.55, center.z + dist * 0.85);
+      cam.lookAt(center);
+
+      renderer.render(scene, cam);
+      const dataURL = renderer.domElement.toDataURL('image/jpeg', 0.82);
+      _dPreviewCache[h.id] = dataURL;
+      _dApplyPreviewToCard(h.id, dataURL);
+
+      // Dispose геометрии и материалов сцены, чтобы освободить GPU-память
+      scene.traverse(o => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) {
+          const mats = Array.isArray(o.material) ? o.material : [o.material];
+          mats.forEach(m => m && m.dispose());
+        }
+      });
+
+      // Даём браузеру вдохнуть, чтобы UI не подвисал
+      await new Promise(r => setTimeout(r, 0));
+    } catch (e) {
+      console.warn(`[preview] ${h.id}:`, e);
+    }
+  }
+  renderer.dispose();
+}
+
+function _dApplyPreviewToCard(typeId, dataURL) {
+  const hcp = document.querySelector(`.d-house-card[data-typeid="${typeId}"] .hcp`);
+  if (!hcp) return;
+  hcp.innerHTML = `<img class="preview-img" src="${dataURL}" alt="">`;
+}
+
+// Универсальная функция выбора дома по typeId. Без отдельной кнопки «Дальше» —
+// сразу переходим на step 2.
+function dSelectHouseAndGo(typeId) {
+  document.querySelectorAll('.d-house-card, .d-house-card-empty').forEach(c => c.classList.remove('selected'));
+  const card = document.querySelector(`.d-house-card[data-typeid="${typeId}"]`) ||
+               document.querySelector(`.d-house-card-empty[data-typeid="${typeId}"]`);
+  if (card) card.classList.add('selected');
+
+  // S.houseType хранит typeId напрямую (например, "type_10"). Для "no_house" — special-case.
+  S.houseType = (typeId === 'no_house') ? null : typeId;
+
+  // Async preload дескриптора + GLB модулей
+  if (typeof ensureHouseLoaded === 'function' && S.houseType) {
     ensureHouseLoaded().then(() => {
       if (typeof threeState !== 'undefined' && threeState) buildScene3d();
+      if (dStep === 2) _dRenderFloorParams();
     }).catch(()=>{});
   }
+  dGoTo(2);
+}
+
+// Сохраняем legacy dSelHouse для совместимости (на случай старых вызовов из мобильной/общей логики).
+function dSelHouse(el, name) {
+  // Маппинг старых русских имён на typeId. Можно расширять или удалить когда legacy не нужен.
+  const legacyMap = {
+    'Одноэтажный дом':  'type_01',
+    'Двухэтажный дом':  'type_09',
+    'Дом с мансардой':  'type_10',
+    'Участок без дома': 'no_house',
+  };
+  dSelectHouseAndGo(legacyMap[name] || 'type_01');
 }
 
 // ══════════════════════════════════════════════
 // STEP 2 — Parameters + 3D
 // ══════════════════════════════════════════════
 function _dInitParamsView() {
+  // Перерендерим параметры по дескриптору (если уже загружен) или по дефолтам.
+  _dRenderFloorParams();
   _dSyncRanges();
   setTimeout(() => {
     const slot = document.getElementById('d-slot-params');
@@ -84,16 +232,123 @@ function _dInitParamsView() {
   }, 80);
 }
 
+// Рендерит per-floor контролы (высота этажа + площадь этажа) на основе дескриптора.
+// Глобальный area-слайдер служит для синхронной установки площадей всех этажей.
+function _dRenderFloorParams() {
+  const cont = document.getElementById('d-floors-params');
+  if (!cont) return;
+  cont.innerHTML = '';
+  // Возьмём дескриптор из кэша HouseBuilder (если уже загружен), иначе пропустим.
+  const desc = (typeof _houseCache !== 'undefined' && _houseCache.desc) ? _houseCache.desc : null;
+  if (!desc) {
+    // Дом без дескриптора (или ещё не загружен) — оставляем только глобальный area.
+    return;
+  }
+  // Обновим диапазон глобального area по первому этажу (как опорному)
+  const firstFloor = desc.floors && desc.floors[0];
+  if (firstFloor && firstFloor.constraints && firstFloor.constraints.area) {
+    const a = firstFloor.constraints.area;
+    const aInp = document.getElementById('v-area'), aRng = document.getElementById('r-area');
+    const hint = document.getElementById('d-area-range-hint');
+    if (aInp) { aInp.min = a.min; aInp.max = a.max; aInp.value = a.default; }
+    if (aRng) { aRng.min = a.min; aRng.max = a.max; aRng.step = a.step || 5; aRng.value = a.default; }
+    if (hint) hint.textContent = `${a.min} — ${a.max} кв.м`;
+  }
+  // Per-floor: для каждого этажа — высота этажа + площадь этажа.
+  desc.floors.forEach((floor, fi) => {
+    const label = floor.label || `Этаж ${fi + 1}`;
+    const aConstr = floor.constraints && floor.constraints.area;
+    const hConstr = floor.constraints && floor.constraints.floor_h;
+    // Если у этажа есть area_factor, дефолт площади = глобал × factor; иначе global default
+    const factor = (floor.area_factor !== undefined) ? floor.area_factor : 1.0;
+    const aDefault = aConstr ? aConstr.default : Math.round((firstFloor?.constraints?.area?.default || 80) * factor);
+    const hDefault = hConstr ? hConstr.default : 300;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'd-param-group';
+    wrap.style.borderTop = '1px solid #e0e0e0';
+    wrap.style.paddingTop = '8px';
+    wrap.innerHTML = `
+      <div class="d-param-label" style="font-weight: 600; margin-bottom: 6px;">${label}</div>
+      <div class="d-param-sublabel" style="font-size: 12px; color: #666; margin-bottom: 4px;">Высота этажа (см)</div>
+      <input class="d-param-input" type="number" id="v-floor-${fi}" value="${hDefault}" min="${hConstr?.min ?? 270}" max="${hConstr?.max ?? 360}"
+             oninput="dOnFloorParam(${fi})">
+      <input class="d-param-range" type="range" id="r-floor-${fi}" value="${hDefault}" min="${hConstr?.min ?? 270}" max="${hConstr?.max ?? 360}" step="${hConstr?.step ?? 10}"
+             oninput="document.getElementById('v-floor-${fi}').value=this.value; dOnFloorParam(${fi})">
+      <div class="d-param-sublabel" style="font-size: 12px; color: #666; margin: 8px 0 4px;">Площадь этажа (кв.м)</div>
+      <input class="d-param-input" type="number" id="v-area-${fi}" value="${aDefault}" min="${aConstr?.min ?? 40}" max="${aConstr?.max ?? 140}"
+             oninput="dOnFloorParam(${fi})">
+      <input class="d-param-range" type="range" id="r-area-${fi}" value="${aDefault}" min="${aConstr?.min ?? 40}" max="${aConstr?.max ?? 140}" step="${aConstr?.step ?? 5}"
+             oninput="document.getElementById('v-area-${fi}').value=this.value; dOnFloorParam(${fi})">
+    `;
+    cont.appendChild(wrap);
+  });
+}
+
+// Изменение глобального area: распространяется на все этажи по их area_factor.
+function dOnAreaTotal() {
+  const aEl = document.getElementById('v-area'), rEl = document.getElementById('r-area');
+  if (aEl && rEl) rEl.value = aEl.value;
+  const total = parseFloat(aEl.value);
+  const desc = (typeof _houseCache !== 'undefined' && _houseCache.desc) ? _houseCache.desc : null;
+  if (desc) {
+    desc.floors.forEach((floor, fi) => {
+      const factor = (floor.area_factor !== undefined) ? floor.area_factor : 1.0;
+      const target = Math.round(total * factor);
+      const aInp = document.getElementById(`v-area-${fi}`);
+      const aRng = document.getElementById(`r-area-${fi}`);
+      if (aInp) aInp.value = target;
+      if (aRng) aRng.value = target;
+    });
+  }
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
+// Изменение per-floor параметра. Не синхронизируем «обратно» глобальный area —
+// пользователь сознательно отрегулировал один этаж индивидуально.
+function dOnFloorParam(fi) {
+  ['v-floor', 'v-area'].forEach(prefix => {
+    const inp = document.getElementById(`${prefix}-${fi}`);
+    const rng = document.getElementById(`r${prefix.slice(1)}-${fi}`);
+    if (inp && rng) rng.value = inp.value;
+  });
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
 function dOnParam() {
   _dSyncRanges();
   if (typeof onParamChange === 'function') onParamChange();
 }
 
 function _dSyncRanges() {
-  [['v-area','r-area'],['v-floor','r-floor'],['v-found','r-found']].forEach(([inp,rng]) => {
+  // Глобальные слайдеры
+  [['v-area','r-area'],['v-found','r-found']].forEach(([inp,rng]) => {
     const iEl = document.getElementById(inp), rEl = document.getElementById(rng);
     if (iEl && rEl) rEl.value = iEl.value;
   });
+}
+
+// Собирает все параметры для HouseBuilder (используется из viewer3d-core.js).
+function dCollectParams() {
+  const desc = (typeof _houseCache !== 'undefined' && _houseCache.desc) ? _houseCache.desc : null;
+  const baseH = parseFloat(document.getElementById('v-found')?.value || 80);
+  const areaTotal = parseFloat(document.getElementById('v-area')?.value || 80);
+  const floorAreas = [], floorHs = [];
+  if (desc) {
+    desc.floors.forEach((floor, fi) => {
+      const a = parseFloat(document.getElementById(`v-area-${fi}`)?.value);
+      const h = parseFloat(document.getElementById(`v-floor-${fi}`)?.value);
+      if (!isNaN(a)) floorAreas.push(a); else floorAreas.push(areaTotal * (floor.area_factor || 1.0));
+      if (!isNaN(h)) floorHs.push(h); else floorHs.push(300);
+    });
+  }
+  return {
+    area:    areaTotal,
+    floorH:  floorHs[0] || 300, // для совместимости со старым API
+    baseH:   baseH,
+    floorAreas,
+    floorHs,
+  };
 }
 
 // ══════════════════════════════════════════════
@@ -443,18 +698,29 @@ function dEstimateMat(e, mid, name) {
 // SUMMARY
 // ══════════════════════════════════════════════
 function dShowSummary() {
+  const desc = (typeof _houseCache !== 'undefined' && _houseCache.desc) ? _houseCache.desc : null;
   const rows = [
     ['Тип дома', S.houseType || 'не выбран'],
-    ['Площадь', (document.getElementById('v-area')?.value || '—') + ' кв.м'],
-    ['Высота этажа', (document.getElementById('v-floor')?.value || '—') + ' см'],
+    ['Общая площадь', (document.getElementById('v-area')?.value || '—') + ' кв.м'],
     ['Фундамент', (document.getElementById('v-found')?.value || '—') + ' см'],
+  ];
+  // Per-floor параметры (если есть дескриптор с этажами)
+  if (desc && desc.floors) {
+    desc.floors.forEach((floor, fi) => {
+      const a = document.getElementById(`v-area-${fi}`)?.value;
+      const h = document.getElementById(`v-floor-${fi}`)?.value;
+      const label = floor.label || `Этаж ${fi + 1}`;
+      if (a || h) rows.push([label, `${a || '—'} кв.м, h=${h || '—'} см`]);
+    });
+  }
+  rows.push(
     ['Настроено', dConfigured.size
       ? [...dConfigured].map(s => D_SIDEBAR_ITEMS.find(x => x.id === s)?.lbl || s).join(', ')
       : 'не выбрано'],
     ...Object.entries(S.mats).map(([k, v]) => [
       D_SIDEBAR_ITEMS.find(x => x.id === k)?.lbl || k, v.name
     ]),
-  ];
+  );
   document.getElementById('d-sum-body').innerHTML = rows.map(([k, v]) =>
     `<div class="sum-row"><span class="sum-k">${k}</span><span class="sum-v">${v}</span></div>`
   ).join('');

@@ -491,6 +491,19 @@ CREATE TABLE projects (
 
 ## Recent cleanup (tech debt)
 
+Сделано в итерации v=22 (мансарда + per-floor sliders + карусель домов с 3D-превью):
+
+- **Мансарда (ломаная крыша Мансар)** — `buildBrokenMansardRoof` в `shared/house-builder.js`. Параметры в `desc.mansard`: `lower_angle` (крутой нижний скат, ~70°), `upper_angle` (пологий верхний, ~25°), `lower_height` (высота нижнего ската, м), `knee_height` (опц. вертикальная стенка перед началом ската). Фронтоны — пятиугольники (5 вершин: 2 базы + 2 излома + 1 ridge). Для multi-rect декомпозиции главный rect получает ломаную крышу, остальные — hip с углом нижнего ската. `getSlopeFrame` обрабатывает `roof_type='mansard'` отдельно: frame описывает НИЖНИЙ крутой скат (от eave до kink), что используется для размещения velux/dormer. `roof_type='mansard'` добавлен в `collectModuleIds`.
+- **`buildKneeWall`** — низкая вертикальная стенка по периметру outline, использует те же модули `wall_segment` + `pillar` что и основные стены.
+- **`house_type_10.json` переделан** — раньше был «2-этажный с уменьшенным верхом», теперь настоящая 1.5-этажная мансарда: 1 этаж + `roof_type: "mansard"` с `lower_angle: 70`, `upper_angle: 25`, `lower_height: 2.20`, `knee_height: 0.20`. Угол крыши max до 60°.
+- **Per-floor sliders** в шаге 2 UI: HTML заменён на динамический контейнер `<div id="d-floors-params">`, `nav-desktop.js::_dRenderFloorParams()` создаёт по 2 слайдера (площадь + высота этажа) для каждого этажа дескриптора. Глобальный `v-area` синхронно меняет все этажи через `area_factor` (`dOnAreaTotal()`); per-floor слайдер можно использовать индивидуально (`dOnFloorParam(fi)`). `dCollectParams()` собирает `{floorAreas[], floorHs[]}` массивы.
+- **`HouseBuilder.buildHouseFromDescriptor`** теперь принимает в `params`: `floorAreas[]`, `floorHs[]`. Если не заданы — fallback на старое поведение (`params.area × area_factor`).
+- **Карусель типов домов (шаг 1)** — заменены 4 фиксированные карточки на сетку 5×скролл из всех 10 типов (`assets/houses/index.json`). По клику — немедленный переход на step 2 (без кнопки «Дальше»). Отдельная строка снизу: «Участок без дома» + «Загрузите фото».
+- **3D-превью на карточках** — `_dRenderHousePreviews()` использует один shared `WebGLRenderer` (240×180), для каждого типа дома: load descriptor + GLB, build via `HouseBuilder`, render в iso-ракурсе по bbox, snapshot → JPEG dataURL (qual 0.82) → `<img>` в карточке. Кэш `_dPreviewCache` между переходами. HTTP-кэш GLB дедуплицирует общие модули между домами.
+- **`flatShading: true`** добавлено в материалы крыши (`buildHipRoof`, `buildGableRoof`, `buildFlatRoofPoly`, `buildBrokenMansardRoof` уже было) — рёбра между скатами теперь чёткие, не сглаживаются `computeVertexNormals`.
+- **`HOUSE_TYPE_MAP`** теперь поддерживает прямой typeId (через regex `/^type_\d+$/`). `S.houseType` хранит typeId напрямую (например, `"type_10"`), но legacy русские имена через `legacyMap` в `dSelHouse` всё ещё работают.
+- **Cache-bust**: `shared/house-builder.js?v=22`, `viewer3d-core.js?v=17`, `nav-desktop.js?v=18`.
+
 Сделано в итерациях v=16 (porch + velux/dormer + pad-стыковка):
 
 - **Porch builder** (`buildPorch` в `shared/house-builder.js`) — реализован «с нуля» процедурно, без GLB. Привязка к двери: поиск через `findMainDoorPlacement` по items outline 1-го этажа, приоритет — флаг `"main": true`. Параметризация через `features.porch` в дескрипторе: `width`, `depth`, `offset_along`, `step_rise`, `step_run`, `has_canopy`, `canopy_height`, `canopy_slope`, `has_railing`, `railing_height`. Геометрия: ступени с nosing-плитой (выступ вперёд и по бокам), щёки с лестничным контуром через `ShapeUtils.triangulateShape`, 2 колонны на оси щёк, плоский навес с наклоном к ступеням, перила платформы (поручень + балясины с шагом 26 см), наклонные перила вдоль ступеней (балясины на каждой ступени + newel post). Материалы: `mat_porch_step` (тела ступеней/щёк), `mat_porch_deck` (проступи/плиты), `mat_porch_column`, `mat_porch_canopy`, `mat_porch_railing`.
@@ -533,12 +546,13 @@ CREATE TABLE projects (
 5. **Доработки модульной системы (некритично, инкрементально):**
    - ~~Porch builder~~ ✅ (`buildPorch` в `shared/house-builder.js`, привязка к двери с флагом `"main": true`, процедурно с ступенями/nosing/щёками/колоннами/навесом/перилами).
    - ~~Dormer/velux на скате крыши~~ ✅ (`buildRoofWindows` в `shared/house-builder.js`, velux через GLB в плоскости ската + custom flat glass; dormer процедурный с правосторонним базисом и автоматическим утоплением).
+   - ~~Mansard-крыша~~ ✅ (`buildBrokenMansardRoof` в `shared/house-builder.js` — классическая ломаная крыша Мансар с двумя углами наклона, knee wall опционально).
+   - ~~Карусель типов домов в UI шага 1~~ ✅ (сетка 5 карточек × скролл из всех 10 типов через `assets/houses/index.json`, 3D-превью через shared `WebGLRenderer` + JPEG dataURL, one-click переход на step 2).
+   - ~~Per-floor sliders area/floor_h~~ ✅ (динамический UI step 2 на основе `desc.floors`, глобальный + per-floor контролы, `params.floorAreas[]` / `floorHs[]` в `HouseBuilder.buildHouseFromDescriptor`).
    - `mod_cornice_corner.glb` — GLB-модуль с трапециевидным сечением для закрытия convex-углов карниза.
-   - Mansard-крыша (наклонные стены 2-го этажа).
+   - GLB-модули `mod_porch_column.glb` / `mod_porch_step.glb` — сейчас крыльцо строится процедурно через BoxGeometry, для красивого декора можно подключить GLB.
    - Пересборка GLB дверей: handle как sibling leaf_main (не child), чтобы handle не масштабировался вместе со створкой.
-   - Карусель типов домов в UI шага 1 (вместо 4 карточек — превью всех 10 дескрипторов).
-   - Per-floor sliders area/floor_h (для гибкого тюнинга многоэтажных домов в UI).
-   - CSG-вырез отверстия в скате под velux/dormer (сейчас velux лежит сверху на скате, dormer пересекается со скатом без выреза — визуально работает, но не геометрически чисто).
+   - **Балконы** — пока нет реализации. Кандидаты: на фасаде многоэтажных домов, привязка к окнам или отдельной секции дескриптора.
 6. **Бэкенд** — FastAPI + расчётный модуль + БД (в работе у команды бэкенда).
 
 ---

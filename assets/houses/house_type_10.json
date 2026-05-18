@@ -1,16 +1,23 @@
 {
   "id": "type_10",
   "name": "1.5-этажный (мансарда)",
-  "description": "Первый этаж — большой прямоугольник, второй этаж — меньший, центрированный сверху. На выступающих частях 1-го этажа — плоская терраса/кровля. Hip-крыша на втором этаже.",
+  "description": "Один этаж с мансардой под gable-крышей. Жилое пространство мансарды — под наклонными скатами, низкая вертикальная стенка (knee wall) над верхом основного этажа.",
 
   "constraints": {
     "base_h":         { "min": 50, "max": 120, "step": 10, "default": 80,  "unit": "cm" },
-    "roof_angle":     { "min": 15, "max": 35,  "step": 5,  "default": 25,  "unit": "deg" },
+    "roof_angle":     { "min": 30, "max": 60,  "step": 5,  "default": 45,  "unit": "deg" },
     "wall_thickness": 0.25,
     "pillar_size":    0.25
   },
 
-  "roof_type": "hip",
+  "roof_type": "mansard",
+
+  "mansard": {
+    "knee_height":  0.20,
+    "lower_angle":  70,
+    "upper_angle":  25,
+    "lower_height": 2.20
+  },
 
   "modules": {
     "window_single": {
@@ -38,6 +45,14 @@
       "mechanism": "swing",
       "frame_profile": 0.05,
       "glb": "mod_door_single.glb"
+    },
+    "dormer": {
+      "w":     { "min": 1.00, "max": 2.50, "default": 1.50 },
+      "h":     { "min": 1.00, "max": 2.00, "default": 1.40 },
+      "depth": { "min": 0.60, "max": 1.50, "default": 1.00 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "glb": "mod_dormer.glb"
     }
   },
 
@@ -64,7 +79,7 @@
         { "_comment": "═══ E: короткая (вход) ↓" },
         { "run": "W1", "facade": [
           { "wall": "fill" },
-          { "door": "single" },
+          { "door": "single", "main": true },
           { "wall": "fill" }
         ]},
         { "turn": 90 },
@@ -77,59 +92,12 @@
         { "run": "W1", "facade": "auto_windows", "window_type": "single", "min_margin": 0.8 },
         { "turn": 90 }
       ]
-    },
-    {
-      "id": "floor_2",
-      "label": "Второй этаж (мансарда)",
-      "_comment": "Второй этаж = 50% площади первого, центрирован внутри L1×W1.",
-
-      "constraints": {
-        "floor_h": { "min": 240, "max": 300, "step": 10, "default": 260, "unit": "cm" }
-      },
-
-      "vars": {
-        "_comment": "L1/W1 — размер 1-го этажа (тот же area). L2/W2 — половина по площади. ox/oz — центрирование.",
-        "L1": "sqrt(area * 1.5)",
-        "W1": "sqrt(area / 1.5)",
-        "L2": "sqrt(area * 0.5 * 1.5)",
-        "W2": "sqrt(area * 0.5 / 1.5)",
-        "ox": "(L1 - L2) / 2",
-        "oz": "(W1 - W2) / 2"
-      },
-
-      "start_offset": { "x": "ox", "z": "oz" },
-
-      "perimeter": [
-        { "_comment": "═══ N: верхняя стена 2-го этажа →" },
-        { "run": "L2", "facade": "auto_windows", "window_type": "single", "min_margin": 0.8 },
-        { "turn": 90 },
-
-        { "_comment": "═══ E ↓" },
-        { "run": "W2", "facade": [
-          { "wall": "fill" },
-          { "window": "single" },
-          { "wall": "fill" }
-        ]},
-        { "turn": 90 },
-
-        { "_comment": "═══ S ←" },
-        { "run": "L2", "facade": "auto_windows", "window_type": "single", "min_margin": 0.8 },
-        { "turn": 90 },
-
-        { "_comment": "═══ W ↑" },
-        { "run": "W2", "facade": [
-          { "wall": "fill" },
-          { "window": "single" },
-          { "wall": "fill" }
-        ]},
-        { "turn": 90 }
-      ]
     }
   ],
 
   "features": {
-    "cornice": true,
-    "inter_floor_cornice": true
+    "chimney":  { "position": [0.7, 0.5], "model": "chimney" },
+    "cornice":  true
   },
 
   "materials_map": {
