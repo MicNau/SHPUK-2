@@ -12,7 +12,9 @@
 - ✅ **Velux** (`placeVelux` в `shared/house-builder.js`): GLB-модуль `mod_window_velux.glb` трансформируется параметрически и размещается в плоскости ската (правосторонний базис `axisAlong × axisUp × normal`). Без CSG-выреза — рама поднята на 6 см над плоскостью, поверх — custom `PlaneGeometry` glass на 8.5 см. Используется для hip / gable / gable_cross.
 - ✅ **Dormer** (`placeDormer` в `shared/house-builder.js`): процедурный «дом-образный» через `BoxGeometry` (стены) + `BufferGeometry` (мини-крыша из 2 скатов и 2 фронтонов). Конёк перпендикулярен главному, угол совпадает с углом главной крыши. Утопление в скат: `basePt.y -= (d/2)*slopeTan`. GLB-стекло окна скрыто, вместо него custom flat glass перед стеной. GLB `mod_dormer.glb` пока НЕ используется (всё процедурно).
 - ✅ **Mansard (ломаная крыша Мансар)** — `buildBrokenMansardRoof` в `shared/house-builder.js`. Классическая ломаная крыша с двумя углами наклона (`lower_angle`, `upper_angle`) и `lower_height` высотой нижнего ската. Пятиугольные фронтоны (5 вершин с изломом). Knee wall опционально. Декомпозиция многосоставной формы: главный rect — mansard, остальные — hip с углом нижнего ската.
-- ❌ **Не реализовано** (можно делать инкрементально): угловой элемент карниза `mod_cornice_corner.glb` (требуется GLB с трапециевидным сечением — без него на convex-углах карниза остаётся зазор `cd × cd`); балконы.
+- ✅ **`mod_cornice_corner.glb`** — создан (усечённая пирамида с квадратным сечением: основание 5×5 см, верх 15×15 см, высота 30 см; материал `mat_wood`). Ставится на каждый convex pillar (`turn > 0`), закрывает зазор `cd × cd`.
+- ✅ **Soffit (подшивка свеса)** — `buildRoofSoffit` строит плоскую плиту по `inflateOrthoOutline(outline, eave)` на уровне `wallTopY` (закрывает «дыру» под свесом крыши).
+- ❌ **Не реализовано** (можно делать инкрементально): `mod_cornice_concave_corner.glb` (L-shape для concave-углов; сейчас две cornice'ы overlap'ятся на 15 см в bay-зоне, малозаметно); балконы.
 - **Вырезы в скате под velux/dormer НЕ нужны** — velux лежит выше плоскости ската (стекло на 8.5 см над скатом), dormer естественно входит в скат и заглубляется, внутрь мы не заглядываем.
 - ⚠ **Legacy-расхождение имён**: модули из `Modules.blend` (single/double/wide window) используют `Glass` (с заглавной) и `treshold` (опечатка). Новые модули — строго по спеке (`glass`, `threshold`). В `test-house.js` обработано через alias-таблицу `NAME_ALIASES`.
 - ⚠ **Алгоритм section 5.2 уточнён** при реализации — см. подраздел «5.2.1. Уточнения алгоритма».
@@ -91,7 +93,7 @@
 | `roof_flat_edge` | `mod_roof_flat_edge.glb` | Парапет плоской крыши | X (длина) | — |
 | **Декор** |
 | `cornice_segment` | `mod_cornice.glb` | Карнизный свес (1 п.м.) | X (длина) | — |
-| `cornice_corner` | `mod_cornice_corner.glb` *(планируется)* | Угловой элемент карниза с трапециевидным сечением (повторяет профиль `cornice_segment`), L-образный кусок для закрытия convex-углов | — | — |
+| `cornice_corner` | `mod_cornice_corner.glb` | Угловой элемент карниза, усечённая пирамида с квадратным сечением (низ 5×5, верх 15×15 см, высота 30 см). Ставится на каждый convex pillar (`turn > 0`), закрывает зазор `cd × cd`. | — | — |
 | `chimney` | `mod_chimney.glb` | Дымоход | — | — |
 | `gutter_segment` | `mod_gutter.glb` | Водосток (1 п.м.) | X | — |
 | `downpipe` | `mod_downpipe.glb` | Водосточная труба | Y (высота) | — |

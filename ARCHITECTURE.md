@@ -491,6 +491,16 @@ CREATE TABLE projects (
 
 ## Recent cleanup (tech debt)
 
+Сделано в итерации v=27 (cornice_corner GLB + soffit + cornice во всех домах + bug fix inflate):
+
+- **`mod_cornice_corner.glb`** — создан новый GLB-модуль через Blender MCP. Усечённая пирамида 8 вершин / 6 граней: основание 5×5 см (Z=0), верх 15×15 см (Z=0.30 м). Внутренние две грани вертикальные (к стенам), внешние — наклонные (повторяют профиль cornice). Материал `mat_wood`. Исходник: `3d_sources/decor/mod_cornice_corner.blend`. В `buildDecorFromFeatures` ставится на каждый convex pillar (`turn > 0`) с rotation через `Matrix4.makeBasis(prevExt, yUp, nextExt)` — правосторонний базис, ориентирует local +X вдоль prev exterior, local +Z — вдоль next exterior. Закрывает 15×15 см зазор между соседними cornice'ами.
+- **`buildRoofSoffit`** — горизонтальная подшивка свеса крыши. Thin sheet (5 см над wallTopY, нормаль вниз) по периметру `inflateOrthoOutline(outline, eave)`. Закрывает «дыру» снизу свеса. Вызывается для hip / gable / gable_cross / mansard (для flat не нужен — сам slab служит подшивкой). Материал `mat_soffit`, светлый бежевый. Для мансарды wallTopY = `roofBaseY` (= `yOffset + knee_height`).
+- **Bug fix: `inflateOrthoOutline`** — раньше для concave pillar использовался `sign = +1`, что сдвигало inflated pillar в interior **тела дома** (баг). Должно сдвигать в anti-interior направлении: convex — наружу от дома, concave — в bay-зону. Исправлено на `sign = -1` всегда. Это влияет на `buildRoofSoffit` и `buildInterFloorSlab` для не-прямоугольных форм (Г, +, T, П, S, O).
+- **Cornice на правильной высоте у мансарды** — `buildDecorFromFeatures` теперь получает `roofBaseY` (= `yOffset + knee_height`), а не `yOffset`. Карниз стоит над knee wall, прямо под началом ската, а не под коленной стенкой.
+- **Cornice добавлен во все 10 домов** — типы 02, 04, 05, 06, 07, 08 раньше не имели `features` блока. Скрипт добавил `features.cornice: true` + `mat_cornice` в `materials_map`.
+- **Cornice на concave-углах** — full length на обеих стенах. На concave-углах две cornice'ы сходятся с overlap 15×15 см в bay-зоне (внутри концавного угла, малозаметно). TODO: отдельный `mod_cornice_concave_corner.glb` (L-shape) для идеального стыка.
+- Cache-bust: `shared/house-builder.js?v=27`.
+
 Сделано в итерации v=22 (мансарда + per-floor sliders + карусель домов с 3D-превью):
 
 - **Мансарда (ломаная крыша Мансар)** — `buildBrokenMansardRoof` в `shared/house-builder.js`. Параметры в `desc.mansard`: `lower_angle` (крутой нижний скат, ~70°), `upper_angle` (пологий верхний, ~25°), `lower_height` (высота нижнего ската, м), `knee_height` (опц. вертикальная стенка перед началом ската). Фронтоны — пятиугольники (5 вершин: 2 базы + 2 излома + 1 ridge). Для multi-rect декомпозиции главный rect получает ломаную крышу, остальные — hip с углом нижнего ската. `getSlopeFrame` обрабатывает `roof_type='mansard'` отдельно: frame описывает НИЖНИЙ крутой скат (от eave до kink), что используется для размещения velux/dormer. `roof_type='mansard'` добавлен в `collectModuleIds`.
@@ -549,7 +559,9 @@ CREATE TABLE projects (
    - ~~Mansard-крыша~~ ✅ (`buildBrokenMansardRoof` в `shared/house-builder.js` — классическая ломаная крыша Мансар с двумя углами наклона, knee wall опционально).
    - ~~Карусель типов домов в UI шага 1~~ ✅ (сетка 5 карточек × скролл из всех 10 типов через `assets/houses/index.json`, 3D-превью через shared `WebGLRenderer` + JPEG dataURL, one-click переход на step 2).
    - ~~Per-floor sliders area/floor_h~~ ✅ (динамический UI step 2 на основе `desc.floors`, глобальный + per-floor контролы, `params.floorAreas[]` / `floorHs[]` в `HouseBuilder.buildHouseFromDescriptor`).
-   - `mod_cornice_corner.glb` — GLB-модуль с трапециевидным сечением для закрытия convex-углов карниза.
+   - ~~`mod_cornice_corner.glb`~~ ✅ (создан через Blender MCP, усечённая пирамида с трапециевидным сечением; ставится на convex-pillars).
+   - ~~Soffit (подшивка свеса)~~ ✅ (`buildRoofSoffit` — плоская плита по `inflateOrthoOutline(outline, eave)` под скатами).
+   - `mod_cornice_concave_corner.glb` — L-shape filling bay-corner для идеального стыка cornice'ов на concave-углах (сейчас они просто overlap'ятся на 15 см, что незаметно).
    - GLB-модули `mod_porch_column.glb` / `mod_porch_step.glb` — сейчас крыльцо строится процедурно через BoxGeometry, для красивого декора можно подключить GLB.
    - Пересборка GLB дверей: handle как sibling leaf_main (не child), чтобы handle не масштабировался вместе со створкой.
    - **Балконы** — пока нет реализации. Кандидаты: на фасаде многоэтажных домов, привязка к окнам или отдельной секции дескриптора.

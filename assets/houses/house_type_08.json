@@ -2,220 +2,497 @@
   "id": "type_08",
   "name": "О-образный с двором (атриум)",
   "description": "Дом-кольцо вокруг внутреннего дворика. На южной стене — узкий слит-проход шириной 1 м, через который контур заходит во двор и выходит обратно (приём 'slit', чтобы один периметр обошёл и наружную, и внутреннюю границу). 4 reflex-угла в углах двора.",
-
   "constraints": {
-    "base_h":         { "min": 50, "max": 120, "step": 10, "default": 70,  "unit": "cm" },
-    "roof_angle":     { "min": 15, "max": 35,  "step": 5,  "default": 22,  "unit": "deg" },
+    "base_h": {
+      "min": 50,
+      "max": 120,
+      "step": 10,
+      "default": 70,
+      "unit": "cm"
+    },
+    "roof_angle": {
+      "min": 15,
+      "max": 35,
+      "step": 5,
+      "default": 22,
+      "unit": "deg"
+    },
     "wall_thickness": 0.25,
-    "pillar_size":    0.25
+    "pillar_size": 0.25
   },
-
   "roof_type": "hip",
-
   "modules": {
     "_comment": "Все 8 параметрических типов проёмов",
-
     "window_single": {
-      "w": { "min": 0.60, "max": 1.40, "default": 0.90 },
-      "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
-      "y": { "min": 0.30, "max": 1.50, "default": 0.90 },
+      "w": {
+        "min": 0.6,
+        "max": 1.4,
+        "default": 0.9
+      },
+      "h": {
+        "min": 0.6,
+        "max": 1.8,
+        "default": 1.2
+      },
+      "y": {
+        "min": 0.3,
+        "max": 1.5,
+        "default": 0.9
+      },
       "frame_profile": 0.05,
       "sill_overhang": 0.03,
       "glb": "mod_window_single.glb"
     },
     "window_double": {
-      "w": { "min": 1.00, "max": 2.00, "default": 1.40 },
-      "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
-      "y": { "min": 0.30, "max": 1.50, "default": 0.90 },
+      "w": {
+        "min": 1.0,
+        "max": 2.0,
+        "default": 1.4
+      },
+      "h": {
+        "min": 0.6,
+        "max": 1.8,
+        "default": 1.2
+      },
+      "y": {
+        "min": 0.3,
+        "max": 1.5,
+        "default": 0.9
+      },
       "frame_profile": 0.05,
       "sill_overhang": 0.03,
-      "mullions": ["v"],
+      "mullions": [
+        "v"
+      ],
       "glb": "mod_window_double.glb"
     },
     "window_wide": {
-      "w": { "min": 1.80, "max": 3.00, "default": 2.40 },
-      "h": { "min": 0.80, "max": 2.00, "default": 1.50 },
-      "y": { "min": 0.20, "max": 1.20, "default": 0.60 },
+      "w": {
+        "min": 1.8,
+        "max": 3.0,
+        "default": 2.4
+      },
+      "h": {
+        "min": 0.8,
+        "max": 2.0,
+        "default": 1.5
+      },
+      "y": {
+        "min": 0.2,
+        "max": 1.2,
+        "default": 0.6
+      },
       "frame_profile": 0.05,
       "sill_overhang": 0.03,
-      "mullions": ["v", "h"],
+      "mullions": [
+        "v",
+        "h"
+      ],
       "glb": "mod_window_wide.glb"
     },
-
     "door_single": {
-      "w": { "min": 0.80, "max": 1.00, "default": 0.90 },
-      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
-      "y": 0.00,
+      "w": {
+        "min": 0.8,
+        "max": 1.0,
+        "default": 0.9
+      },
+      "h": {
+        "min": 2.0,
+        "max": 2.4,
+        "default": 2.1
+      },
+      "y": 0.0,
       "leaves": 1,
       "mechanism": "swing",
       "frame_profile": 0.05,
       "glb": "mod_door_single.glb"
     },
     "door_onehalf": {
-      "w": { "min": 1.10, "max": 1.40, "default": 1.20 },
-      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
-      "y": 0.00,
+      "w": {
+        "min": 1.1,
+        "max": 1.4,
+        "default": 1.2
+      },
+      "h": {
+        "min": 2.0,
+        "max": 2.4,
+        "default": 2.1
+      },
+      "y": 0.0,
       "leaves": 1.5,
       "mechanism": "swing",
       "frame_profile": 0.05,
       "glb": "mod_door_onehalf.glb"
     },
     "door_double": {
-      "w": { "min": 1.20, "max": 1.80, "default": 1.40 },
-      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
-      "y": 0.00,
+      "w": {
+        "min": 1.2,
+        "max": 1.8,
+        "default": 1.4
+      },
+      "h": {
+        "min": 2.0,
+        "max": 2.4,
+        "default": 2.1
+      },
+      "y": 0.0,
       "leaves": 2,
       "mechanism": "swing",
       "frame_profile": 0.05,
       "glb": "mod_door_double.glb"
     },
     "door_slide_single": {
-      "w": { "min": 0.80, "max": 1.20, "default": 1.00 },
-      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
-      "y": 0.00,
+      "w": {
+        "min": 0.8,
+        "max": 1.2,
+        "default": 1.0
+      },
+      "h": {
+        "min": 2.0,
+        "max": 2.4,
+        "default": 2.1
+      },
+      "y": 0.0,
       "leaves": 1,
       "mechanism": "slide",
       "frame_profile": 0.05,
       "glb": "mod_door_slide_single.glb"
     },
     "door_slide_double": {
-      "w": { "min": 1.40, "max": 3.00, "default": 2.00 },
-      "h": { "min": 2.00, "max": 2.40, "default": 2.30 },
-      "y": 0.00,
+      "w": {
+        "min": 1.4,
+        "max": 3.0,
+        "default": 2.0
+      },
+      "h": {
+        "min": 2.0,
+        "max": 2.4,
+        "default": 2.3
+      },
+      "y": 0.0,
       "leaves": 2,
       "mechanism": "slide",
       "frame_profile": 0.05,
       "glb": "mod_door_slide_double.glb"
     }
   },
-
   "floors": [
     {
       "id": "floor_1",
       "label": "Первый этаж",
-
       "constraints": {
         "_comment": "min=60: дальше двор становится слишком мал для slide_double на внутренней стене",
-        "area":    { "min": 60, "max": 140, "step": 5,  "default": 95,  "unit": "m2" },
-        "floor_h": { "min": 270, "max": 330, "step": 10, "default": 300, "unit": "cm" }
+        "area": {
+          "min": 60,
+          "max": 140,
+          "step": 5,
+          "default": 95,
+          "unit": "m2"
+        },
+        "floor_h": {
+          "min": 270,
+          "max": 330,
+          "step": 10,
+          "default": 300,
+          "unit": "cm"
+        }
       },
-
       "vars": {
         "_comment": "L,W — bbox; ringW — толщина стены-кольца вокруг двора; slit — ширина прохода во двор на южной стене",
-        "L":     "sqrt(area * 1.4)",
-        "W":     "sqrt(area / 1.4)",
+        "L": "sqrt(area * 1.4)",
+        "W": "sqrt(area / 1.4)",
         "ringW": "sqrt(area) * 0.20",
-        "slit":  "1.0"
+        "slit": "1.0"
       },
-
       "perimeter": [
-        { "_comment": "═══ N: внешняя северная стена (вся длина L) → ═══" },
-        { "run": "L", "facade": "auto_windows", "window_type": "wide", "min_margin": 1.0 },
-        { "turn": 90 },
-
-        { "_comment": "═══ E: внешняя восточная стена (вся высота W) ↓ ═══" },
-        { "run": "W", "facade": [
-          { "wall": "fill" },
-          { "window": "single" },
-          { "wall": 0.5 },
-          { "door": "onehalf" },
-          { "wall": 0.5 },
-          { "window": "single" },
-          { "wall": "fill" }
-        ]},
-        { "turn": 90 },
-
-        { "_comment": "═══ S правая часть: между outer SE и входом в слит ← ═══" },
-        { "run": "L/2 - slit/2", "facade": [
-          { "wall": "fill" },
-          { "window": "double" },
-          { "wall": "fill" }
-        ]},
-        { "turn": 90 },
-
-        { "_comment": "═══ Слит, правая стенка прохода (внутрь, к двору) ↑ ═══" },
-        { "run": "ringW", "facade": [
-          { "wall": "fill" }
-        ]},
-        { "turn": 90 },
-
-        { "_comment": "═══ Двор, S-стена правая часть (от слита до inner SE) → ═══" },
-        { "run": "L/2 - slit/2 - ringW", "facade": [
-          { "wall": "fill" },
-          { "window": "single" },
-          { "wall": "fill" }
-        ]},
-        { "turn": -90, "_comment": "REFLEX: inner SE — внутренний угол двора (1/4)" },
-
-        { "_comment": "═══ Двор, E-стена (раздвижная одностворчатая во двор) ↑ ═══" },
-        { "run": "W - 2*ringW", "facade": [
-          { "wall": "fill" },
-          { "door": "slide_single" },
-          { "wall": "fill" }
-        ]},
-        { "turn": -90, "_comment": "REFLEX: inner NE (2/4)" },
-
-        { "_comment": "═══ Двор, N-стена (две панорамы во двор) ← ═══" },
-        { "run": "L - 2*ringW", "facade": [
-          { "wall": "fill" },
-          { "window": "wide" },
-          { "wall": 0.5 },
-          { "window": "wide" },
-          { "wall": "fill" }
-        ]},
-        { "turn": -90, "_comment": "REFLEX: inner NW (3/4)" },
-
-        { "_comment": "═══ Двор, W-стена (раздвижная двойная во двор) ↓ ═══" },
-        { "run": "W - 2*ringW", "facade": [
-          { "wall": "fill" },
-          { "door": "slide_double" },
-          { "wall": "fill" }
-        ]},
-        { "turn": -90, "_comment": "REFLEX: inner SW (4/4)" },
-
-        { "_comment": "═══ Двор, S-стена левая часть (от inner SW до слита) → ═══" },
-        { "run": "L/2 - slit/2 - ringW", "facade": [
-          { "wall": "fill" },
-          { "window": "single" },
-          { "wall": "fill" }
-        ]},
-        { "turn": 90 },
-
-        { "_comment": "═══ Слит, левая стенка прохода (наружу из двора) ↓ ═══" },
-        { "run": "ringW", "facade": [
-          { "wall": "fill" }
-        ]},
-        { "turn": 90 },
-
-        { "_comment": "═══ S левая часть: от выхода из слита до outer SW ← ═══" },
-        { "run": "L/2 - slit/2", "facade": [
-          { "wall": "fill" },
-          { "door": "single" },
-          { "wall": "fill" }
-        ]},
-        { "turn": 90 },
-
-        { "_comment": "═══ W: внешняя западная стена ↑ ═══" },
-        { "run": "W", "facade": [
-          { "wall": "fill" },
-          { "window": "double" },
-          { "wall": 0.5 },
-          { "door": "double" },
-          { "wall": 0.5 },
-          { "window": "double" },
-          { "wall": "fill" }
-        ]},
-        { "turn": 90 }
+        {
+          "_comment": "═══ N: внешняя северная стена (вся длина L) → ═══"
+        },
+        {
+          "run": "L",
+          "facade": "auto_windows",
+          "window_type": "wide",
+          "min_margin": 1.0
+        },
+        {
+          "turn": 90
+        },
+        {
+          "_comment": "═══ E: внешняя восточная стена (вся высота W) ↓ ═══"
+        },
+        {
+          "run": "W",
+          "facade": [
+            {
+              "wall": "fill"
+            },
+            {
+              "window": "single"
+            },
+            {
+              "wall": 0.5
+            },
+            {
+              "door": "onehalf"
+            },
+            {
+              "wall": 0.5
+            },
+            {
+              "window": "single"
+            },
+            {
+              "wall": "fill"
+            }
+          ]
+        },
+        {
+          "turn": 90
+        },
+        {
+          "_comment": "═══ S правая часть: между outer SE и входом в слит ← ═══"
+        },
+        {
+          "run": "L/2 - slit/2",
+          "facade": [
+            {
+              "wall": "fill"
+            },
+            {
+              "window": "double"
+            },
+            {
+              "wall": "fill"
+            }
+          ]
+        },
+        {
+          "turn": 90
+        },
+        {
+          "_comment": "═══ Слит, правая стенка прохода (внутрь, к двору) ↑ ═══"
+        },
+        {
+          "run": "ringW",
+          "facade": [
+            {
+              "wall": "fill"
+            }
+          ]
+        },
+        {
+          "turn": 90
+        },
+        {
+          "_comment": "═══ Двор, S-стена правая часть (от слита до inner SE) → ═══"
+        },
+        {
+          "run": "L/2 - slit/2 - ringW",
+          "facade": [
+            {
+              "wall": "fill"
+            },
+            {
+              "window": "single"
+            },
+            {
+              "wall": "fill"
+            }
+          ]
+        },
+        {
+          "turn": -90,
+          "_comment": "REFLEX: inner SE — внутренний угол двора (1/4)"
+        },
+        {
+          "_comment": "═══ Двор, E-стена (раздвижная одностворчатая во двор) ↑ ═══"
+        },
+        {
+          "run": "W - 2*ringW",
+          "facade": [
+            {
+              "wall": "fill"
+            },
+            {
+              "door": "slide_single"
+            },
+            {
+              "wall": "fill"
+            }
+          ]
+        },
+        {
+          "turn": -90,
+          "_comment": "REFLEX: inner NE (2/4)"
+        },
+        {
+          "_comment": "═══ Двор, N-стена (две панорамы во двор) ← ═══"
+        },
+        {
+          "run": "L - 2*ringW",
+          "facade": [
+            {
+              "wall": "fill"
+            },
+            {
+              "window": "wide"
+            },
+            {
+              "wall": 0.5
+            },
+            {
+              "window": "wide"
+            },
+            {
+              "wall": "fill"
+            }
+          ]
+        },
+        {
+          "turn": -90,
+          "_comment": "REFLEX: inner NW (3/4)"
+        },
+        {
+          "_comment": "═══ Двор, W-стена (раздвижная двойная во двор) ↓ ═══"
+        },
+        {
+          "run": "W - 2*ringW",
+          "facade": [
+            {
+              "wall": "fill"
+            },
+            {
+              "door": "slide_double"
+            },
+            {
+              "wall": "fill"
+            }
+          ]
+        },
+        {
+          "turn": -90,
+          "_comment": "REFLEX: inner SW (4/4)"
+        },
+        {
+          "_comment": "═══ Двор, S-стена левая часть (от inner SW до слита) → ═══"
+        },
+        {
+          "run": "L/2 - slit/2 - ringW",
+          "facade": [
+            {
+              "wall": "fill"
+            },
+            {
+              "window": "single"
+            },
+            {
+              "wall": "fill"
+            }
+          ]
+        },
+        {
+          "turn": 90
+        },
+        {
+          "_comment": "═══ Слит, левая стенка прохода (наружу из двора) ↓ ═══"
+        },
+        {
+          "run": "ringW",
+          "facade": [
+            {
+              "wall": "fill"
+            }
+          ]
+        },
+        {
+          "turn": 90
+        },
+        {
+          "_comment": "═══ S левая часть: от выхода из слита до outer SW ← ═══"
+        },
+        {
+          "run": "L/2 - slit/2",
+          "facade": [
+            {
+              "wall": "fill"
+            },
+            {
+              "door": "single"
+            },
+            {
+              "wall": "fill"
+            }
+          ]
+        },
+        {
+          "turn": 90
+        },
+        {
+          "_comment": "═══ W: внешняя западная стена ↑ ═══"
+        },
+        {
+          "run": "W",
+          "facade": [
+            {
+              "wall": "fill"
+            },
+            {
+              "window": "double"
+            },
+            {
+              "wall": 0.5
+            },
+            {
+              "door": "double"
+            },
+            {
+              "wall": 0.5
+            },
+            {
+              "window": "double"
+            },
+            {
+              "wall": "fill"
+            }
+          ]
+        },
+        {
+          "turn": 90
+        }
       ]
     }
   ],
-
   "materials_map": {
-    "mat_wall":  { "label": "Стены (штукатурка)", "swappable": true  },
-    "mat_base":  { "label": "Цоколь",             "swappable": true  },
-    "mat_roof":  { "label": "Крыша (парапет)",    "swappable": true  },
-    "mat_frame": { "label": "Рамы окон",          "swappable": true  },
-    "mat_glass": { "label": "Стекло",             "swappable": false },
-    "mat_door":  { "label": "Двери",              "swappable": true  }
+    "mat_wall": {
+      "label": "Стены (штукатурка)",
+      "swappable": true
+    },
+    "mat_base": {
+      "label": "Цоколь",
+      "swappable": true
+    },
+    "mat_roof": {
+      "label": "Крыша (парапет)",
+      "swappable": true
+    },
+    "mat_frame": {
+      "label": "Рамы окон",
+      "swappable": true
+    },
+    "mat_glass": {
+      "label": "Стекло",
+      "swappable": false
+    },
+    "mat_door": {
+      "label": "Двери",
+      "swappable": true
+    },
+    "mat_cornice": {
+      "label": "Карнизы",
+      "swappable": true
+    }
+  },
+  "features": {
+    "cornice": true
   }
 }

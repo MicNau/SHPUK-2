@@ -62,7 +62,7 @@ function collectModuleIds(desc) {
   if (desc.features) {
     if (desc.features.chimney)  ids.add('chimney');
     if (desc.features.gutters)  ids.add('gutter');
-    if (desc.features.cornice)  ids.add('cornice');
+    if (desc.features.cornice)  { ids.add('cornice'); ids.add('cornice_corner'); }
     if (desc.features.downpipe) ids.add('downpipe');
     if (desc.features.porch)    { ids.add('porch_column'); ids.add('porch_step'); }
   }
@@ -1100,9 +1100,13 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
   }
 
   if (desc.features.cornice) {
+    // Cornice строится на ПОЛНУЮ длину wall (без trim). На concave-углах две cornice'ы
+    // от соседних стен пересекаются в bay-зоне (overlap volume 0.15×0.15×0.30 см) — это
+    // менее заметно, чем gap, и пересечение скрыто внутри bay-corner. Идеальное решение —
+    // отдельный mod_cornice_concave_corner.glb (TODO).
     for (const item of outline.items) {
       if (item.type !== 'wall') continue;
-      if (item.runLength < 0.5) continue;
+      if (item.runLength < 0.3) continue;
       const c = cloneModule(modules, 'cornice');
       if (!c) break;
       const bb = detectNativeBbox(c);
@@ -1122,7 +1126,36 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
       parent.add(c);
       counts.cornice++;
     }
-    // TODO: convex-углы cornice — нужен mod_cornice_corner.glb с трапециевидным сечением.
+    // Угловые элементы карниза (mod_cornice_corner.glb) на convex-pillars: turn > 0 на CW-обходе.
+    // Закрывают зазор cd×cd между двумя cornice'ами, встречающимися в углу.
+    counts.cornice_corner = 0;
+    for (let i = 0; i < outline.items.length; i++) {
+      const item = outline.items[i];
+      if (item.type !== 'pillar' || !(item.turn > 0)) continue;
+      const prev = outline.items[(i - 1 + outline.items.length) % outline.items.length];
+      const next = outline.items[(i + 1) % outline.items.length];
+      if (!prev || !next || prev.type !== 'wall' || next.type !== 'wall') continue;
+      const cc = cloneModule(modules, 'cornice_corner');
+      if (!cc) break;
+      const bbcc = detectNativeBbox(cc);
+      dumpDecorBbox('cornice_corner', bbcc);
+      cc.scale.z = -1;
+      // basis: xAxis = prev exterior, yUp, zAxis = next exterior (right-handed для convex CW-углов).
+      const prevExt = new THREE.Vector3(prev.dz, 0, -prev.dx);
+      const nextExt = new THREE.Vector3(next.dz, 0, -next.dx);
+      const yUp = new THREE.Vector3(0, 1, 0);
+      const basis = new THREE.Matrix4().makeBasis(prevExt, yUp, nextExt);
+      cc.quaternion.setFromRotationMatrix(basis);
+      cc.position.set(item.x, wallTopY - bbcc.maxY, item.z);
+      if (sharedCorniceMat) {
+        cc.traverse(child => { if (child.isMesh) child.material = sharedCorniceMat; });
+      } else {
+        cc.traverse(child => { if (child.isMesh && child.material) child.material.name = 'mat_cornice'; });
+      }
+      setupShadows(cc);
+      parent.add(cc);
+      counts.cornice_corner++;
+    }
   }
 
   if (desc.features.downpipe) {
@@ -1169,7 +1202,7 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
     }
   }
 
-  log(`[decor] gutter=${counts.gutter}, cornice=${counts.cornice}, downpipe=${counts.downpipe}, chimney=${counts.chimney}`, 'dim');
+  log(`[decor] gutter=${counts.gutter}, cornice=${counts.cornice} (corners=${counts.cornice_corner || 0}), downpipe=${counts.downpipe}, chimney=${counts.chimney}`, 'dim');
 }
 
 // ══════════════════════════════════════════════
@@ -1260,8 +1293,11 @@ function inflateOrthoOutline(outline, eave) {
     const nextW = items[(i + 1) % items.length];
     const bx = -prevW.dz + -nextW.dz;
     const bz = prevW.dx + nextW.dx;
-    const sign = item.turn < 0 ? +1 : -1;
-    newPillarPos[i] = { x: item.x + sign * bx * eave, z: item.z + sign * bz * eave };
+    // ВСЕГДА anti-interior (наружу от тела дома):
+    //   convex pillar — наружу от здания;
+    //   concave pillar — в bay-зону (= тоже anti-interior относительно тела дома).
+    // Раньше для concave использовался sign=+1 — это сдвигало внутрь тела (баг).
+    newPillarPos[i] = { x: item.x - bx * eave, z: item.z - bz * eave };
   }
   const newItems = [];
   let bbMinX = Infinity, bbMaxX = -Infinity, bbMinZ = Infinity, bbMaxZ = -Infinity;
@@ -1594,6 +1630,37 @@ function buildKneeWall(parent, modules, outline, baseY, kneeHeight, wt, ps) {
   log(`[roof] knee wall: h=${kneeHeight.toFixed(2)}m`, 'dim');
 }
 
+// Soffit — горизонтальная подшивка свеса крыши (= потолок снаружи дома, видимый снизу свеса).
+// Строится по периметру outline, расширенному на eave. Тонкий sheet чуть выше wallTopY,
+// чтобы не пересекаться со cornice (top of cornice = wallTopY).
+function buildRoofSoffit(parent, outline, wallTopY, eave) {
+  if (eave <= 0.001) return;
+  const expanded = inflateOrthoOutline(outline, eave);
+  const corners = expanded.items.filter(i => i.type === 'pillar');
+  if (corners.length < 3) return;
+  const points2D = corners.map(c => new THREE.Vector2(c.x, c.z));
+  const triangles = THREE.ShapeUtils.triangulateShape(points2D, []);
+  if (!triangles.length) return;
+  // Sheet на уровне wallTopY + 1 мм. Только нижняя грань видна снизу свеса.
+  // Используем обратное winding (вершины наоборот) — normal вниз.
+  const yPlane = wallTopY + 0.001;
+  const positions = [], indices = [];
+  for (const p of points2D) positions.push(p.x, yPlane, p.y);
+  for (const t of triangles) indices.push(t[0], t[2], t[1]);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xf0e8d8, roughness: 0.9, metalness: 0, side: THREE.DoubleSide, flatShading: true,
+  });
+  mat.name = 'mat_soffit';
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  log(`[roof] soffit: ${corners.length} corners, eave=${eave}m`, 'dim');
+}
+
 function buildRoof(parent, baseY, bbox, outline, roofType, angleDeg, eave, options) {
   options = options || {};
   if (roofType === 'flat')  return buildFlatRoofPoly(parent, baseY, outline, eave);
@@ -1602,7 +1669,9 @@ function buildRoof(parent, baseY, bbox, outline, roofType, angleDeg, eave, optio
     const rects = decomposeOrthoPolygonIntoRectangles(outline);
     if (rects.length === 0) {
       log('[roof] decomposition failed, fallback на bbox-hip', 'warn');
-      return buildHipRoof(parent, baseY, bbox, angleDeg, eave);
+      buildHipRoof(parent, baseY, bbox, angleDeg, eave);
+      buildRoofSoffit(parent, outline, baseY, eave);
+      return;
     }
     log(`[roof] hip: декомпозиция на ${rects.length} прямоугольник(ов)`, 'dim');
     rects.sort((a, b) => ((b.maxX - b.minX) * (b.maxZ - b.minZ)) - ((a.maxX - a.minX) * (a.maxZ - a.minZ)));
@@ -1611,6 +1680,7 @@ function buildRoof(parent, baseY, bbox, outline, roofType, angleDeg, eave, optio
       const rectBbox = { minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ };
       buildHipRoof(parent, baseY + i * 0.001, rectBbox, angleDeg, eave);
     }
+    buildRoofSoffit(parent, outline, baseY, eave);
     return;
   }
   if (roofType === 'mansard') {
@@ -1637,6 +1707,7 @@ function buildRoof(parent, baseY, bbox, outline, roofType, angleDeg, eave, optio
     const main = rects[0];
     const mainBbox = { minX: main.minX, maxX: main.maxX, minZ: main.minZ, maxZ: main.maxZ };
     buildBrokenMansardRoof(parent, roofBaseY + (rects.length - 1) * 0.001, mainBbox, eave, mansardSpec);
+    buildRoofSoffit(parent, outline, roofBaseY, eave);
     return;
   }
   if (roofType === 'gable' || roofType === 'gable_cross') {
@@ -1665,9 +1736,11 @@ function buildRoof(parent, baseY, bbox, outline, roofType, angleDeg, eave, optio
       const mainBbox = { minX: main.minX, maxX: main.maxX, minZ: main.minZ, maxZ: main.maxZ };
       buildGableRoof(parent, baseY + (rects.length - 1) * 0.001, mainBbox, angleDeg, eave);
     }
+    buildRoofSoffit(parent, outline, baseY, eave);
     return;
   }
-  return buildHipRoof(parent, baseY, bbox, angleDeg, eave);
+  buildHipRoof(parent, baseY, bbox, angleDeg, eave);
+  buildRoofSoffit(parent, outline, baseY, eave);
 }
 
 // ══════════════════════════════════════════════
@@ -2177,8 +2250,9 @@ function buildHouseFromDescriptor(houseGroup, desc, modules, params, options = {
     buildRoof(houseGroup, yOffset, lastOutline.bbox, lastOutline, roofType, angleDeg, ROOF_EAVE, {
       mansardSpec: desc.mansard, modules, wt, ps,
     });
-    // Декор (cornice) идёт по верху основных стен — на yOffset (не сдвигается)
-    buildDecorFromFeatures(houseGroup, modules, desc, lastOutline, baseH, yOffset, angleDeg, ROOF_EAVE, sharedCorniceMat);
+    // Декор (cornice) идёт по верху стен НЕПОСРЕДСТВЕННО под крышей. Для мансарды это
+    // верх knee wall (= roofBaseY), для остальных roof_type — yOffset.
+    buildDecorFromFeatures(houseGroup, modules, desc, lastOutline, baseH, roofBaseY, angleDeg, ROOF_EAVE, sharedCorniceMat);
     // Мансардные / слуховые окна на скатах — используют roofBaseY (с учётом knee)
     buildRoofWindows(houseGroup, modules, desc, lastOutline, roofBaseY, angleDeg, ROOF_EAVE);
   }
