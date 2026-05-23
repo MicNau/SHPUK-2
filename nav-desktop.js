@@ -76,7 +76,9 @@ async function _dInitHouseGrid() {
   if (!grid) return;
   if (grid.dataset.rendered === '1') return; // уже отрисовано
   try {
-    const idx = await fetch('assets/houses/index.json', { cache: 'no-store' }).then(r => r.json());
+    // ?ts=Date.now() — жёсткий cache-bust против застрявшего в кэше старого index.json
+    // (некоторые preview-режимы / file:// игнорируют cache:'no-store').
+    const idx = await fetch('assets/houses/index.json?ts=' + Date.now(), { cache: 'no-store' }).then(r => r.json());
     _dHousesIndex = idx;
     grid.innerHTML = idx.houses.map(h => `
       <div class="d-house-card" data-typeid="${h.id}" onclick="dSelectHouseAndGo('${h.id}')">

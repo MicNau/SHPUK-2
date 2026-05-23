@@ -38,6 +38,15 @@
       "mechanism": "swing",
       "frame_profile": 0.05,
       "glb": "mod_door_single.glb"
+    },
+    "door_slide_double": {
+      "w": { "min": 1.40, "max": 2.40, "default": 1.80 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
+      "y": 0.00,
+      "leaves": 2,
+      "mechanism": "slide",
+      "frame_profile": 0.05,
+      "glb": "mod_door_slide_double.glb"
     }
   },
 
@@ -61,10 +70,14 @@
         { "run": "L", "facade": "auto_windows", "window_type": "double", "min_margin": 1.0 },
         { "turn": 90 },
 
-        { "_comment": "═══ E: короткая стена с входом ↓" },
+        { "_comment": "═══ E: короткая стена с входом (окна по бокам от двери) ↓" },
         { "run": "W", "facade": [
           { "wall": "fill" },
-          { "door": "single" },
+          { "window": "single" },
+          { "wall": 0.7 },
+          { "door": "single", "main": true },
+          { "wall": 0.7 },
+          { "window": "single" },
           { "wall": "fill" }
         ]},
         { "turn": 90 },
@@ -105,8 +118,16 @@
         ]},
         { "turn": 90 },
 
-        { "_comment": "═══ S второго этажа ←" },
-        { "run": "L", "facade": "auto_windows", "window_type": "double", "min_margin": 1.2 },
+        { "_comment": "═══ S второго этажа: балконная дверь по центру ←" },
+        { "run": "L", "facade": [
+          { "wall": "fill" },
+          { "window": "double" },
+          { "wall": 1.0 },
+          { "door": "slide_double", "balcony": true },
+          { "wall": 1.0 },
+          { "window": "double" },
+          { "wall": "fill" }
+        ]},
         { "turn": 90 },
 
         { "_comment": "═══ W второго этажа ↑" },
@@ -117,18 +138,55 @@
   ],
 
   "features": {
-    "chimney": { "position": [0.4, 0.3], "model": "chimney" },
-    "cornice": true,
-    "inter_floor_cornice": true
+    "chimney":  { "position": [0.4, 0.3], "model": "chimney" },
+    "cornice":  true,
+    "inter_floor_cornice": true,
+    "gutters":  true,
+    "downpipe": true,
+    "porch": {
+      "width": 1.8,
+      "depth": 1.4,
+      "has_canopy": true,
+      "canopy_height": 2.30,
+      "canopy_slope": 0.10,
+      "has_railing": true,
+      "railing_height": 0.95
+    },
+    "gable_windows": [
+      { "side": "east", "type": "single", "w": 0.90, "h": 0.80, "y_offset": 0.60 },
+      { "side": "west", "type": "single", "w": 0.90, "h": 0.80, "y_offset": 0.60 }
+    ],
+    "_comment_balconies": "Балкон над дверью с balcony:true на южной стене 2-го этажа (авто-привязка).",
+    "balconies": [
+      {
+        "floor": 1,
+        "side": "south",
+        "align_to_door": true,
+        "width": 2.6,
+        "depth": 1.4,
+        "thickness": 0.18,
+        "has_railing": true,
+        "railing_height": 1.05
+      }
+    ]
   },
 
   "materials_map": {
-    "mat_wall":    { "label": "Стены (штукатурка)", "swappable": true  },
-    "mat_base":    { "label": "Цоколь",             "swappable": true  },
-    "mat_roof":    { "label": "Крыша",              "swappable": true  },
-    "mat_cornice": { "label": "Карнизы",            "swappable": true  },
-    "mat_frame":   { "label": "Рамы окон",          "swappable": true  },
-    "mat_glass":   { "label": "Стекло",             "swappable": false },
-    "mat_door":    { "label": "Дверь",              "swappable": true  }
+    "mat_wall":            { "label": "Стены (штукатурка)", "swappable": true  },
+    "mat_base":            { "label": "Цоколь",             "swappable": true  },
+    "mat_roof":            { "label": "Крыша",              "swappable": true  },
+    "mat_soffit":          { "label": "Подшивка свеса",     "swappable": true  },
+    "mat_cornice":         { "label": "Карнизы",            "swappable": true  },
+    "mat_frame":           { "label": "Рамы окон",          "swappable": true  },
+    "mat_glass":           { "label": "Стекло",             "swappable": false },
+    "mat_door":            { "label": "Дверь",              "swappable": true  },
+    "mat_metal":           { "label": "Водосток",           "swappable": true  },
+    "mat_balcony_slab":    { "label": "Плита балкона",      "swappable": true  },
+    "mat_balcony_railing": { "label": "Перила балкона",     "swappable": true  },
+    "mat_porch_step":      { "label": "Ступени крыльца",    "swappable": true  },
+    "mat_porch_deck":      { "label": "Проступи крыльца",   "swappable": true  },
+    "mat_porch_column":    { "label": "Колонны крыльца",    "swappable": true  },
+    "mat_porch_canopy":    { "label": "Навес крыльца",      "swappable": true  },
+    "mat_porch_railing":   { "label": "Перила крыльца",     "swappable": true  }
   }
 }

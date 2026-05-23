@@ -16,7 +16,7 @@
     "knee_height":  0.20,
     "lower_angle":  70,
     "upper_angle":  25,
-    "lower_height": 2.20
+    "lower_height": 2.60
   },
 
   "modules": {
@@ -76,10 +76,14 @@
         { "run": "L1", "facade": "auto_windows", "window_type": "double", "min_margin": 1.0 },
         { "turn": 90 },
 
-        { "_comment": "═══ E: короткая (вход) ↓" },
+        { "_comment": "═══ E: короткая (вход с окнами по бокам) ↓" },
         { "run": "W1", "facade": [
           { "wall": "fill" },
+          { "window": "single" },
+          { "wall": 0.7 },
           { "door": "single", "main": true },
+          { "wall": 0.7 },
+          { "window": "single" },
           { "wall": "fill" }
         ]},
         { "turn": 90 },
@@ -97,16 +101,48 @@
 
   "features": {
     "chimney":  { "position": [0.7, 0.5], "model": "chimney" },
-    "cornice":  true
+    "cornice":  true,
+    "gutters":  true,
+    "downpipe": true,
+    "no_rake_overhang": true,
+    "porch": {
+      "width": 1.8,
+      "depth": 1.4,
+      "has_canopy": true,
+      "canopy_height": 2.30,
+      "canopy_slope": 0.10,
+      "has_railing": true,
+      "railing_height": 0.95
+    },
+    "gable_windows": [
+      { "side": "east", "type": "single", "w": 1.00, "h": 1.20, "y_offset": 0.40 },
+      { "side": "west", "type": "single", "w": 1.00, "h": 1.20, "y_offset": 0.40 }
+    ]
   },
 
+  "roof_windows": [
+    { "module": "dormer", "slope": "south", "position_along": 0.35, "position_up": 0.88,
+      "w": 1.20, "h": 0.95, "depth": 1.30, "roof_angle": 30,
+      "window": { "type": "single", "w": 0.85, "h": 0.70 } },
+    { "module": "dormer", "slope": "south", "position_along": 0.65, "position_up": 0.88,
+      "w": 1.20, "h": 0.95, "depth": 1.30, "roof_angle": 30,
+      "window": { "type": "single", "w": 0.85, "h": 0.70 } }
+  ],
+
   "materials_map": {
-    "mat_wall":    { "label": "Стены (штукатурка)", "swappable": true  },
-    "mat_base":    { "label": "Цоколь",             "swappable": true  },
-    "mat_roof":    { "label": "Крыша",              "swappable": true  },
-    "mat_cornice": { "label": "Карнизы",            "swappable": true  },
-    "mat_frame":   { "label": "Рамы окон",          "swappable": true  },
-    "mat_glass":   { "label": "Стекло",             "swappable": false },
-    "mat_door":    { "label": "Дверь",              "swappable": true  }
+    "mat_wall":           { "label": "Стены (штукатурка)", "swappable": true  },
+    "mat_base":           { "label": "Цоколь",             "swappable": true  },
+    "mat_roof":           { "label": "Крыша",              "swappable": true  },
+    "mat_soffit":         { "label": "Подшивка свеса",     "swappable": true  },
+    "mat_cornice":        { "label": "Карнизы",            "swappable": true  },
+    "mat_frame":          { "label": "Рамы окон",          "swappable": true  },
+    "mat_glass":          { "label": "Стекло",             "swappable": false },
+    "mat_door":           { "label": "Дверь",              "swappable": true  },
+    "mat_metal":          { "label": "Водосток",           "swappable": true  },
+    "mat_porch_step":     { "label": "Ступени крыльца",    "swappable": true  },
+    "mat_porch_deck":     { "label": "Проступи крыльца",   "swappable": true  },
+    "mat_porch_column":   { "label": "Колонны крыльца",    "swappable": true  },
+    "mat_porch_canopy":   { "label": "Навес крыльца",      "swappable": true  },
+    "mat_porch_railing":  { "label": "Перила крыльца",     "swappable": true  }
   }
 }

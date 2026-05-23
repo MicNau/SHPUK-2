@@ -479,17 +479,186 @@ CREATE TABLE projects (
 | Подключение в основной фронтенд (`viewer3d-core.js` + `nav-desktop.js`) | ✅ `HOUSE_TYPE_MAP` + `ensureHouseLoaded` + `dSelHouse` запускает preload; в `buildScene3d()` вызывается `HouseBuilder.buildHouseFromDescriptor` |
 
 **Открытые TODO (некритично, инкрементально):**
-- Cornice на convex-углах: нужен GLB `mod_cornice_corner.glb` с трапециевидным сечением (повторяет профиль `mod_cornice.glb`), чтобы закрыть зазор `cd × cd` на каждом convex-углу.
-- Mansard-крыша: наклонные стены 2-го этажа вместо вертикальных.
-- Handle двери: сейчас обрезается при `scale.x` leaf'а (handle — child of leaf в GLB). Нужна пересборка GLB с handle как sibling.
-- Per-floor UI sliders (для разной высоты/площади этажей в test-house).
-- Карусель типов домов в UI шага 1 (вместо 4 карточек — превью всех 10 дескрипторов).
+- ~~Cornice на convex-углах~~ ✅ сделано в v=27 (`mod_cornice_corner.glb`).
+- ~~Mansard-крыша~~ ✅ сделано в v=22 (`buildBrokenMansardRoof`). Mansard с **наклонными** стенами (вместо вертикальных knee wall) — отдельная фича, не реализовано.
+- ~~Балконы~~ ✅ сделано в v=28 (`features.balconies[]`, `buildBalconies`).
+- ~~Правильный карниз/rake для gable~~ ✅ сделано в v=28 (фронтон на линии стены + rake soffit).
+- ~~GLB porch column/step~~ ✅ сделано в v=28 (`placeScaledGlb` с fallback на BoxGeometry).
+- ~~Per-floor UI sliders~~ ✅ сделано в v=22.
+- ~~Карусель типов домов~~ ✅ сделано в v=22.
+- Handle двери: обрезается при `scale.x` leaf'а (handle — child of leaf в GLB). Нужна пересборка GLB с handle как sibling.
+- `mod_cornice_concave_corner.glb` — L-shape для concave-углов; сейчас две cornice'ы overlap'ятся на 15 см в bay-зоне (малозаметно).
+- Eave для polygon-flat-roof: слаб ровно по outline без свеса; нужен Minkowski offset для произвольного полигона.
 
 **Известное расхождение имён в legacy-GLB.** Существующие модули из `Modules.blend` (single/double/wide окна) используют `Glass` (с заглавной) и `treshold` (опечатка) вместо требуемых спекой `glass` и `threshold`. **Новые** модули, собранные после согласования v2, идут строго по спеке. При написании `transformParametricModule()` нужно либо пересобрать legacy-GLB с правильными именами, либо сделать парсер case-insensitive с alias-таблицей `{Glass:'glass', treshold:'threshold'}` — выбор за реализатором.
 
 ---
 
 ## Recent cleanup (tech debt)
+
+Сделано в итерациях v=41–v=55 (трубы, мансарда, фронтонные окна, fixes):
+
+- **Downpipe v3 — 3-частный GLB с клонированием center'а.** Пользователь пересобрал `mod_downpipe.glb`: 3 объекта (`downpipe_top` — раструб, `downpipe_center` — цилиндр, `downpipe_bottom` — колено-выпуск). Код больше НЕ масштабирует (scale через Vector3 bracket access не применялся в этой связке Three.js+GLTFLoader). Вместо этого `partCenter` клонируется N раз стопкой: `bot → center₁ → center₂ → … → centerN → top`. `N = floor((fullH − topH − botH) / centerSize)` (floor — труба гарантированно не выше карниза, чтобы не врезаться в скат крутой мансарды). Auto-detect upAxis по самой длинной размерности `partCenter`. Если ось ≠ Y — `d.rotation.x/z = +π/2`.
+- **Позиционирование трубы на углу.** `exterior_unit` нормализуется (для прямого угла — диагональ `(±1,±1)/√2`). `d.rotation.y = atan2(−exUnitX, −exUnitZ)` поворачивает native -Z (направление колена и раструба, длинная ось в плане) в exterior — труба смотрит наружу под 45°. `d.position` рассчитан так, чтобы centroid раструба попал на точку `corner + pipeAttachOffset · exterior_unit` (раструб под стыком gutter'ов). Подъём всей трубы: `pipeYLift = 0.20 м` от земли. `pipeAttachOffset = ROOF_EAVE − 0.15 = 0.15 м` — труба прижата к углу.
+- **`_buildThickSlope` без yShift.** Раньше брус сдвигался вверх на `cos(α)·thickness`, чтобы низ ската совпадал со стеной. На мансарде это давало РАЗНЫЕ yShift для нижнего (5 см) и верхнего (14 см) скатов — на kink-линии образовывалась видимая ступенька 5–9 см. Теперь yShift=0: верхние плоскости обоих скатов на kink точно совпадают (= `kinkY`), кровля непрерывна. Нижняя грань бруса свешивается ниже плоскости ската на `cos(α)·thickness` — это нормальный «толщина свеса» (карниз).
+- **Капельник на kink (отменён).** v=51 добавлял декоративную металлическую полосу на изломе мансарды для маскировки шва. После убирания yShift шов исчез естественно, капельник больше не нужен — удалён.
+- **Dormer с собственным углом крыши (`roof_angle`).** Раньше угол мини-крыши dormer'а наследовал угол главной крыши. На крутой мансарде (70°) это давало `dormerRoofRise = 0.6·tan(70°) = 1.65 м` — нелепо высокий фронтон. Теперь `dormerSpec.roof_angle` (опция) задаёт свой пологий угол. Тип 10: `roof_angle: 30°`. Тип 11: `roof_angle: 25°`.
+- **Dormer.depth ограничен на крутой мансарде.** На скате с углом α `placeDormer` опускает `basePt.y` на `(depth/2)·tan(α)` чтобы переднюю кромку «посадить» на скат. При `depth=2.20` и `α=70°` опускание = 3.03 м — больше высоты ската! Dormer проваливался. Для type_10 поставлено `depth: 1.30, position_up: 0.88`.
+- **Окна в мансардном фронтоне (`features.gable_windows` поддерживает mansard).** `getGableTriangle` теперь возвращает `points2D` массив: треугольник из 3 точек для gable, **пятиугольник из 5 точек** для mansard (`LL → LR → kinkR → top → kinkL`). `buildOneGable` проверяет помещение окна по форме контура (для мансарды — окно должно быть НИЖЕ kink-линии и не вылезать за наклонные стороны трапеции). `buildBrokenMansardRoof` принимает `skipGableSides` (Set) — пятиугольник для нужной стороны пропускается, его строит `buildGableWindows` с дыркой + window GLB. Тип 10 получил `gable_windows` на east+west.
+- **Mansard фронтон — на стене (без расширения на eave).** Pentagon строится строго на `wx0/wx1` и `wz0/wz1` (без расширения по eave). Расширение давало «уши» за стеной, под которыми у крутого ската видна была пустота. В `getGableTriangle` для мансарды pentagon-точки `kinkL/kinkR` теперь на `u = horizontalLower − ROOF_EAVE` (с учётом того что фронтон на стене, а horizontalLower считается от eave-кромки).
+- **`no_rake_overhang: true` для типа 10.** Свес скатов мансарды по продольной оси отключён — скаты ровно над фронтонной стеной без выступа за неё. Карнизный свес по длинной (eave) стороне сохранён.
+- **Cache-bust для JSON-дескрипторов.** `?ts=Date.now()` в `loadHouseType` — гарантия что новый JSON подхватывается даже когда preview-режимы / file:// игнорируют `cache: 'no-store'`.
+- **`mod_porch_column.glb`, `mod_porch_step.glb`, `mod_downpipe.glb`** перемоделированы в Blender — все в Z-up конвенции с export_yup=True (вертикаль = Y в glTF).
+- **Реалистичность дескрипторов:** добавлены `features.balconies[]` (тип 09), `features.gable_windows[]` (типы 02, 09, 10, 11), `features.no_rake_overhang` (тип 10), `features.porch.*` во многих типах. Удалены типы 06, 07, 08 из карусели (JSON-файлы оставлены в архиве). Добавлены типы 11 (полутораэтажный с gable+dormer) и 12 (стеклянный, плоская крыша). Расширены фасады во всех типах: окна вокруг дверей, разнообразие window_single/double/wide, `main: true` флаг для главной двери, `balcony: true` флаг для балконной.
+- Cache-bust финальный: `shared/house-builder.js?v=55`, `nav-desktop.js?v=19`, `GLB_CACHE_VERSION=33`.
+
+Сделано в итерации v=40 (downpipe через Box3.setFromObject):
+
+- **Downpipe — переход на Box3.setFromObject.** Раньше я использовал `mesh.geometry.boundingBox` для локального bbox каждой части, но если в GLB `downpipe_top/center/bottom` — это `Object3D` (Group) с детьми-мешами, такой подход не учитывает иерархию и position children'ов, и трубы выглядели «горизонтально лежащими».
+  - Новый helper `_bboxOfObject(obj)` использует `new THREE.Box3().setFromObject(obj)` — обходит всю иерархию объекта и возвращает мировой bbox (с учётом всех вложенных transforms).
+  - Алгоритм размещения переписан чище:
+    1. `scale.set(1,1,1)` для всех 3 частей + `updateMatrixWorld()`.
+    2. Снимаем native bbox.
+    3. Auto-detect `upAxis` по самой длинной размерности `partCenter`.
+    4. `partCenter.scale[upAxis] = sFactor`, повторно снимаем bbox после scale.
+    5. Сдвигаем каждую часть: `position[upAxis] += target_min - current_min`.
+    6. Если upAxis ≠ y — поворот группы `rotation.x/-z = -π/2`.
+- Cache-bust: `shared/house-builder.js?v=40`.
+
+Сделано в итерации v=39 (auto-detect оси downpipe):
+
+- **Downpipe auto-axis detection.** GLB пользователя имеет 3 части (`downpipe_top/center/bottom`), но ось «вверх» части center может быть не Y (зависит от Blender-конвенции при экспорте). Теперь код определяет ось автоматически по самой длинной размерности `center`-меша: `upAxis = (sizeY ≥ sizeX ∧ sizeY ≥ sizeZ) ? 'y' : (sizeZ ≥ sizeX ? 'z' : 'x')`. По этой оси:
+  - `partBottom.position[upAxis] = -bbBot.min[upAxis]` (нижний край на 0)
+  - `partCenter.scale[upAxis] = centerH / centerSize` (растягивается)
+  - `partTop.position[upAxis] = botH + centerH - bbTop.min[upAxis]`
+  - Если upAxis = z или x — добавляется `rotation.x = -π/2` или `rotation.z = -π/2` к группе, чтобы upAxis смотрел в world +Y.
+- **`_bboxOfMesh` расширен** — возвращает теперь `min/max` объекты, `sizeX/Y/Z` + legacy `minY/maxY/sizeY` для обратной совместимости.
+- **Известная проблема**: на мансарде остаётся ступенчатый шов на kink-линии (между нижним и верхним скатом, ~9–14 см вертикально). Связано с разными `yShift = cosA·thickness` для скатов разных углов наклона. Архитектурно эту ступеньку обычно закрывает «капельник» (kink fascia) — отдельный декоративный элемент, который добавим в следующих итерациях.
+- Cache-bust: `shared/house-builder.js?v=39`.
+
+Сделано в итерации v=38 (фронтон шире eave, трёхчастный downpipe, мансарда):
+
+- **Фронтон РАСШИРЕН на eave по карнизной оси.** В `buildGableRoof` и `buildBrokenMansardRoof` фронтонные точки теперь идут не от `wz0/wz1` (стена), а от `z0/z1 = wz0-eave / wz1+eave` (с eave). Фронтонная стена ВЫХОДИТ за стену дома по карнизу — закрывает eave-overhang с торца, и щель «крыша не прилегает к стене» исчезает. Аналогично для longAxisZ: фронтон расширен по X.
+- **`_buildThickSlope` сдвигает брус вверх на cosA·thickness** — чтобы нижняя грань бруса (mat_soffit) совпадала с плоскостью ската (заданной topCorners). Это устраняет вертикальный зазор `cosA·thickness ≈ 5 см` между верхом стены и нижней гранью свеса.
+- **`no_rake_overhang` убран из type_10/11** — флаг был лишний после расширения фронтона. Rake overhang вернулся, фронтон закрывает eave.
+- **Трёхчастный downpipe (`top/center/bottom`).** GLB теперь содержит 3 объекта; `top` и `bottom` сохраняют native размеры, `center` масштабируется по Y. В коде:
+  - `_bboxOfMesh(mesh)` — локальный bbox одного меша через `geometry.boundingBox`.
+  - В блоке `desc.features.downpipe`: traverse GLB ищет 3 части по имени (`downpipe_top/center/bottom`). Если найдены — bottom на Y=0, center сразу над bottom со scale.y = centerH/native_centerH, top на boтH+centerH. Если структура старая (один меш) — fallback на старое поведение (scale.y по всему).
+- **Тип 10 (мансарда)**: `mansard.lower_height: 2.20 → 2.60` (больше места для dormer'ов). Dormer'ы: `position_up: 0.55, h: 0.85, depth: 1.80` (помещаются в нижнем скате без пробивания kink).
+- **Тип 12 (стеклянный)**: на N и S добавлен `{ "wall": "fill" }` в обоих концах — раньше сумма фиксированных размеров не покрывала длину стены, образовывались видимые «дыры» в стене.
+- Cache-bust: `shared/house-builder.js?v=38`, `GLB_CACHE_VERSION=33` (новый трёхчастный downpipe).
+
+Сделано в итерации v=37 (флаг no_rake_overhang + cornice skip для mansard + чистка type_12):
+
+- **`features.no_rake_overhang: true`** — новый флаг в дескрипторе. Когда установлен, для `gable`/`gable_cross`/`mansard` СКАТЫ НЕ выступают за фронтонную стену по rake-направлению (т.е. вдоль конька). Eave-overhang по карнизной стороне сохраняется. Реализация в `buildGableRoof` и `buildBrokenMansardRoof`: `eaveAlong = noRakeOverhang ? 0 : eave`, для longAxisX rake идёт по X, для longAxisZ — по Z. Передаётся через `buildRoof` options.
+- **Cornice skip на фронтонах для mansard.** В `buildDecorFromFeatures` `isFrontalRoof` теперь включает `'mansard'` (раньше только gable/gable_cross). Карниз больше не рисуется на фронтонной стене мансардных домов.
+- **Тип 10** (мансарда): `no_rake_overhang: true` + dormer `position_up: 0.70, depth: 2.00` (длиннее по нормали, садятся на скат до конца).
+- **Тип 11** (полутораэтажный): `no_rake_overhang: true` + dormer `position_up: 0.55, depth: 2.00`.
+- **Тип 12** (стеклянный): убрана раздвижная дверь с южного фасада (заменена на window_double). Высота `door_slide_double` снижена до 2.30 (от native ~2.10, scale близок к 1.0). `window_double.h` снижен до 2.20 (тоже близко к native 1.20, scale ~1.83 — лучше отрисовка).
+- Cache-bust: `shared/house-builder.js?v=37`.
+
+Сделано в итерации v=36 (мансарда с толщиной + реалистичная труба + окна-в-пол для type_12):
+
+- **`_buildThickSlope(parent, topCorners, normal, thickness)`** — вынесен в верхний уровень helper для построения объёмного бруса ската (8 вершин, mat_roof сверху + mat_soffit снизу/боковые). Использован в `buildBrokenMansardRoof`.
+- **Мансардная крыша с толщиной 15 см.** Каждый из 4 скатов (lower/upper × N/S) теперь — наклонный параллелепипед. Видимая толщина по карнизу + барджборд на rake. Нижняя грань бруса работает как soffit — общий `buildRoofSoffit` для mansard больше НЕ вызывается. Пристройки-hip получают свой `buildBboxSoffit`. Фронтонные пятиугольники остаются плоскими (на bbox, без eave) и используют общий `sharedWallMat`.
+- **`mod_downpipe.glb` перемоделирован** через Blender MCP: 168 вершин, 135 граней. Цилиндр D=10 см с 12 гранями, конический раструб сверху (10→14 см), 2 хомута-кольца (D 13 см), колено-выпуск в +Y направлении. Material `mat_metal` — оцинкованный металл (color (0.72,0.74,0.76), roughness 0.35, metallic 0.55). `GLB_CACHE_VERSION = 32`.
+- **Тип 12 переделан**: `window_double` (только вертикальный импост, без сетки) вместо `window_wide` (со сеткой 2×2). Параметры окна `y=0.20, h=2.40` — низ окна 20 см от пола, верх 80 см от потолка (при floor_h=280). Теперь окна реально «в пол». Также добавлена раздвижная стеклянная дверь по центру южного фасада (как дополнительный выход в сад).
+- **Тип 4**: дверь `door_double` помечена `main: true` (исправление пропущенного флага).
+- Cache-bust: `shared/house-builder.js?v=36`, `GLB_CACHE_VERSION=32`.
+
+Сделано в итерации v=35 (фикс меню, gutter в углах, downpipe offset, mansard dormer):
+
+- **`index.json` cache-bust** в `_dInitHouseGrid()` через `?ts=Date.now()` — теперь типы 11, 12 точно подхватываются (некоторые preview-режимы / file:// игнорируют `cache: 'no-store'`).
+- **Gutter удлинён на `pillar_size`** в обе стороны: gutter тянется от `item.x - ps/2` до `endX + ps/2`. Соседние gutter-ы перекрываются в углах (раньше была щель ровно в pillar-зоне).
+- **Downpipe offset переписан**: не нормализованный (sign), 4 угла дают `(±1, ±1)` диагональ. Смещение по каждой оси = `ps/2 + pipe_half + 0.04`. Для `ps=0.25` и `pipe ≈ 0.10` это ~0.22 м — труба полностью снаружи pillar и стены.
+- **Тип 10 dormer'ы подняты**: `position_up: 0.20 → 0.55`, размеры скорректированы (`w: 1.20, h: 0.95, depth: 1.20`). Окна больше не залезают на стену под скатом.
+- **Mansard толщина крыши и фронтон-зашивка** — TODO (большая работа, аналогично buildGableRoof v=29 с параллелепипедами). В этой итерации не сделано.
+- **Downpipe GLB перемоделирование** — отложено (Blender MCP временно недоступен). Когда Blender будет запущен, сделаю реалистичную трубу: 12-граний цилиндр D=10 см, конический раструб сверху, 2 хомута, колено-выпуск снизу.
+- Cache-bust: `shared/house-builder.js?v=35`, `nav-desktop.js?v=19`.
+
+Сделано в итерации v=34 (водостоки наружу, mansard-фронтон на стене, чистка типов 4/5, удалены 6/7/8, добавлены 11/12):
+
+- **Водостоки**: трубу теперь сдвигаем на `0.13 + bbox/2 + 0.03 ≈ 0.20 м` наружу по диагонали — труба стоит рядом с углом, не утопает в pillar.
+- **Mansard фронтон на стене (без eave)** — `buildBrokenMansardRoof` теперь имеет 10 дополнительных вершин (10-19) на bbox (без eave) для пятиугольных фронтонных треугольников. Скаты с eave overhang остаются (вершины 0-9 с x0/x1).
+- **Тип 3 переделан**: новая планировка — основной прямоугольник + выступ на север (по центру), вход с окнами на южном (длинном) фасаде. Главный вход теперь на широкой стене, не на узком торце выступа.
+- **Тип 4 переделан**: рук стало шире (`aw = sqrt(area)*0.50`), короче (`ext_x/z = (L-aw)/2`). Из 5 дверей остались 2: `door_double` (main на верхней руке) + `door_single` (служебный на нижней). Окна по бокам от обеих дверей. Modules: убраны `door_onehalf`, `door_slide_*`. Окна добавлены на всех 12 стенах.
+- **Тип 5 переделан**: было 5 дверей, осталось одна — `door_double main` на W. Остальные двери заменены окнами (`window_single` или `window_wide` под перекладиной). Modules: убраны `door_onehalf`, `door_slide_*`. Расширены окна на всех стенах + панорама на N.
+- **Удалены типы 6, 7, 8 из карусели** (`index.json`) как слишком экзотичные. JSON-файлы остаются в `assets/houses/` как архив.
+- **Тип 11 — новый «полутораэтажный с мансардой»**: gable крыша 45°, 2 dormer'а на южном скате (1.20×1.10×1.20), gable_windows на east+west в треугольной части фронтонов. Прямоугольный план, вход на восточной (короткой) стене с окнами по бокам.
+- **Тип 12 — новый «стеклянный»**: плоская крыша, окна в пол (`window_wide` 2.10м высотой, `y=0.30`), главный вход — стеклянная раздвижная `door_slide_double` 2.30м высотой. Простой прямоугольник.
+- **`index.json`** теперь содержит 9 типов: 01, 02, 03, 04, 05, 09, 10, 11, 12. Subtitle обновлён (тип 03/04/05 — вальмовая, тип 09 — двускатная, type_10 — мансардная, type_11 — двускатная+dormer, type_12 — плоская).
+- **Уменьшено porch.width до 1.8** в типах 1, 2, 3, 7, 9, 10 (перила не лезут в окна вокруг двери).
+- Cache-bust JS: `shared/house-builder.js?v=34`.
+
+Сделано в итерации v=33 (водостоки/трубы + gable_window + насыщенные фасады во всех 10 типах):
+
+- **Водостоки/трубы — фикс кода.**
+  - `gutters` теперь рендерятся одновременно с `cornice` (раньше взаимоисключали). Для gable пропускаются фронтонные стены (`skipGableEnds` + `isGableEndWall`). Gutter сдвинут наружу на `eave * 0.9` от стены, чтобы висеть на кромке кровли (не прижиматься к cornice).
+  - `downpipe` теперь идёт от земли (`Y=0`) до верха стен (`wallTopY`), а не от верха цоколя. Сдвинут наружу на 6 см по диагонали внешнего угла (среднее exterior-нормалей двух прилегающих стен).
+- **`features.gable_windows[]` — окна в треугольной части фронтона.** Новая фича. Дескриптор задаёт массив окон по сторонам (`east`/`west` для longAxisX; `north`/`south` для longAxisZ). В коде:
+  - `buildGableRoof` принимает `skipGableSides` (Set строк) и не строит треугольник фронтона для этих сторон.
+  - Новая функция `buildGableWindows`:
+    - `getGableTriangle(bbox, longAxisX, ridgeY, baseY, side)` возвращает 3 угла треугольника + локальный u-axis и exterior normal.
+    - `buildOneGable` триангулирует полигон с дыркой через `THREE.ShapeUtils.triangulateShape(points2D, [hole])`, строит mesh с `sharedWallMat`, поверх ставит window GLB с правильной rotation (`ry = atan2(exterior.x, exterior.z)`).
+    - Graceful fallback: если окно вылезает за треугольник — warn + плоский фронтон без выреза.
+- **Насыщенные фасады во всех 10 типах.**
+  - Тип 01: окно слева + дверь main + окно справа на восточном входе.
+  - Тип 02: переработан целиком. N: 2 double + 1 wide; S: 3 double (спальни); E: окна по бокам от двери; W: 2 single. Добавлены окна в фронтоне (east + west, 0.9×0.8).
+  - Тип 03: переработан. N с панорамным окном, окна вокруг двери на E-выступе.
+  - Тип 04 (showcase крест): дверь верхней руки помечена `main: true` + добавлено porch.
+  - Тип 05: дверь W помечена `main`, окна по бокам, добавлено porch.
+  - Тип 06: дверь S `main`, добавлено porch.
+  - Тип 07: дверь E `main` с окнами по бокам, добавлено porch.
+  - Тип 08: дверь W `main`, добавлено porch.
+  - Тип 09: окна вокруг двери E, добавлены gable_windows на east+west, добавлено porch.
+  - Тип 10: окна вокруг двери E, 2 dormer'а на южном скате, добавлено porch.
+- **`gutters: true` + `downpipe: true`** во всех 10 дескрипторах.
+- **Расширены `materials_map`** во всех типах: `mat_soffit`, `mat_metal` (водосток), `mat_porch_*`.
+- Документация: `HOUSE_DESCRIPTOR_FORMAT.md` дополнен таблицей полей `features.gable_windows[]`.
+- Cache-bust JS: `shared/house-builder.js?v=33`.
+
+Сделано в итерации v=32 (исправлена ось GLB-моделей крыльца):
+
+- **Bug fix: GLB крыльца моделировались с осью Y вверх.** Blender использует **Z-up**, а я в скрипте создавал вершины как если бы Y был вертикалью. После `export_yup=True` Blender свапает Z→Y и Y→-Z, и моя «вертикальная» колонна высотой 1 unit становилась горизонтально лежащим брусом длиной 1 unit по glTF -Z. В коде `placeScaledGlb` масштабировал её по `target=(0.18, 2.4, 0.18)`, что давало плоскую «доску» 0.18 м толщиной растянутую горизонтально — это и видел пользователь как «колонны повёрнуты на 90°».
+- **`mod_porch_column.glb` v3** перегенерирован в правильной Z-up конвенции (Blender bbox X[-0.5..0.5] Y[-0.5..0.5] Z[0..1]). После export Y→вертикаль в glTF.
+- **`mod_porch_step.glb` v2** — простой куб с правильной осью, фаска убрана (сверху всё равно проступь-слаб).
+- `GLB_CACHE_VERSION = 31` (был 30).
+- Cache-bust JS: `shared/house-builder.js?v=32`.
+
+Сделано в итерации v=31 (cache-busting для GLB-моделей):
+
+- **GLB cache-busting.** Раньше при обновлении `.glb` через Blender браузер отдавал старую версию из кэша (запрос без query-string кэшируется FileLoader по URL). Введена константа `GLB_CACHE_VERSION = 30` в `shared/house-builder.js`; путь к GLB теперь `assets/houses/modules/<cat>/mod_<id>.glb?v=${GLB_CACHE_VERSION}`. При обновлении любого GLB в `assets/houses/modules/` нужно поднимать эту константу.
+- Cache-bust JS: `shared/house-builder.js?v=31` (т.к. логика loader'а изменена).
+
+Сделано в итерации v=30 (полировка двускатной + выразительная колонна крыльца):
+
+- **Толщина gable снижена до 15 см.** `GABLE_SLOPE_THICKNESS = 0.15` (было 0.20). Брус скатов стал визуально тоньше.
+- **Фронтон использует общий wall material.** Раньше в `buildGableRoof` создавался свой `MeshStandardMaterial` с `name='mat_wall'`, и без активного `applyMaterialOverride('mat_wall', color)` цвет фронтона отличался от стен (native GLB цвет ≠ кремовый 0xf5e6c8). Теперь в `buildHouseFromDescriptor` pre-clone'им `wall_segment` GLB, извлекаем его материал в `sharedWallMat`, пробрасываем через `buildRoof` options в `buildGableRoof`. Фронтон рендерится тем же материалом, что и стены — цвета синхронны.
+- **`mod_porch_column.glb` v2 — выразительный профиль.** Перегенерирован через Blender MCP. 6-уровневая структура (вместо 3): база (полный размер 1×0.07×1) + переход база→ствол (наклон 0.03) + ствол (0.55×0.80×0.55, фаски 27% от размера = очень выраженные) + переход ствол→капитель + капитель (1×0.07×1). 48 вершин, 42 граней. Native bbox 1×1×1. После масштаба в коде до 0.18×2.4×0.18: база/капитель 18×17×18 см, ствол ~10×192×10 см, фаски ~2.4 см — теперь чётко видны.
+- Cache-bust: `shared/house-builder.js?v=30` (в `index-desktop.html` и `test-house.html`).
+
+Сделано в итерации v=29 (объёмная двускатная крыша + GLB декор крыльца + балкон над балконной дверью):
+
+- **Двускатная крыша с толщиной 20 см.** В `buildGableRoof` каждый скат теперь — наклонный параллелепипед (8 вершин), а не плоский треугольник. Верхняя грань = плоскость кровли (`mat_roof`, красный), нижняя грань + 4 торца = `mat_soffit` (бежевый — выполняет роль barge fascia на rake и подшивки на eave). Толщина задана константой `GABLE_SLOPE_THICKNESS = 0.20`. Удалены отдельные функции `buildGableRakeSoffit` / `buildGableEaveSoffit` — их роль теперь играет нижняя грань самого бруса.
+- **Cornice скипается на фронтонной стороне.** В `buildDecorFromFeatures` добавлен `isGableEndWall(item, longAxisX)` и флаг `skipGableEnds` (включается, когда `roof_type ∈ {gable, gable_cross}` и outline = 1 rectangle). Cornice на фронтонных стенах не строится; corner cornice на углу, прилегающем хотя бы к одной фронтонной стене, тоже скипается. Для прямоугольного gable получается классический вид: cornice только по карнизным сторонам.
+- **Балкон над балконной дверью.** В `makeDoorFill` добавлен флаг `balcony: true` (override.balcony), помечающий балконную дверь в фасаде. В `buildBalcony` появилась поддержка `cfg.align_to_door: true` — балкон ищет дверь на привязанной стене и центрируется над ней (через новую функцию `findBalconyDoorOnWall`, которая использует `resolveFills`). Авто-привязка к двери с `balcony:true` происходит даже без явного `align_to_door`. Если двери нет — балкон по середине стены + `offset_along`. В `house_type_09.json`: на южной стене 2-го этажа auto_windows заменены на явный фасад с `door_slide_double + balcony:true`, добавлено определение `door_slide_double` в `modules`. Балкон размер 2.6×1.4 м.
+- **Новые GLB крыльца (через Blender MCP).**
+  - **`mod_porch_column.glb`** — деревянный брус с фаской. База (куб 1.0×0.04×1.0) + 8-угольный профиль ствола 0.7×0.7 с фасками 0.10 (высота 0.92) + капитель (1.0×0.04×1.0). Material `mat_porch_column` (тёплое дерево, color (0.78, 0.66, 0.48)). 32 вершины, 22 граней. Native bbox 1×1×1 — масштабируется через `placeScaledGlb`.
+  - **`mod_porch_step.glb`** — тело ступени с фаской по передней верхней кромке. 10 вершин, 7 граней (куб + 1 chamfer face 10% от высоты/глубины). Material `mat_porch_step` (серо-бежевый, color (0.74, 0.71, 0.66)).
+  - Источники: `3d_sources/decor/mod_porch_column.blend` и `mod_porch_step.blend`.
+- Cache-bust: `shared/house-builder.js?v=29` (в `index-desktop.html` и `test-house.html`).
+
+Сделано в итерации v=28 (правильный карниз/rake для gable + GLB porch column/step + балконы):
+
+- **Правильный gable-карниз.** В `buildGableRoof` фронтонная стена теперь строится строго **на линии стены дома** (на `bbox.minX..bbox.maxX` без eave), а скаты по-прежнему выступают за фронтон на `ROOF_EAVE` (rake overhang). Раньше фронтон шёл `x0..x1` (с eave) — выступал за стену с обеих сторон, что архитектурно неверно. Теперь:
+  - Slope-mesh: 4 нижних угла с eave + 2 точки ridge на концах ската (с rake overhang).
+  - Gable-mesh: 4 угла на bbox (без eave) + 2 точки ridge на линии фронтонной стены.
+- **Rake soffit.** Под выступающей частью ската со стороны фронтона строится наклонная плита параллельная скату (`buildGableRakeSoffit`): два «крыла» от карнизной линии до конька, по обе стороны фронтонной стены.
+- **Eave soffit.** Карнизные стороны двускатной крыши получают отдельную горизонтальную подшивку (`buildGableEaveSoffit`), не покрывающую rake-зону (иначе пересекалась бы с rake soffit). Для пути `gable` с пристройками-hip пристройки получают отдельный `buildBboxSoffit` (горизонтальная плита по своему bbox). Общий `buildRoofSoffit` для gable/gable_cross больше не вызывается.
+- **GLB porch column/step.** Добавлен helper `placeScaledGlb(parent, glbModules, modId, sizeX, sizeY, sizeZ, cx, cyCenter, cz, ry, matName, fallbackColor)`: клонирует GLB, измеряет native bbox через `detectNativeBbox`, масштабирует по 3 осям до целевых размеров и размещает с rotation вокруг Y. Если модуль не загружен или bbox невалидный — fallback на `addBoxAt` (BoxGeometry). В `buildPorch` применён к колоннам (`porch_column`) и к телам ступеней / тела платформы (`porch_step`). Проступи (deck slabs) и навес остаются процедурными — это простые плиты, их GLB не имеет смысла. Сигнатура `buildPorch` расширена параметром `glbModules` (передаётся `modules` из `buildHouseFromDescriptor`).
+- **Балконы (`features.balconies`).** Новая фича: массив балконов в дескрипторе. Каждый балкон — `{ floor, side|wall_index, offset_along, width, depth, thickness, has_railing, railing_height, has_supports }`. Привязка к фасаду этажа: `pickBalconyWall(outline, side, wall_index)` выбирает самую длинную стену с подходящей exterior normal (`side="south"` → `exZ > 0.5`, и т.д.). Геометрия: плита (`addBoxAt`) + перила с трёх сторон (front + 2 sides, задняя сторона прижата к стене) — handrail + балясины с шагом 13 см через `buildBalconyRailing`. Опционально консольные опоры от земли до плиты (`has_supports: true`). В `buildHouseFromDescriptor` теперь ведётся массив `floorOutlines[]` / `floorYFloors[]` (нужен для привязки к этажам >= 1). Добавлено в `house_type_09.json` (двухэтажный) — демо-балкон на южном фасаде второго этажа, ширина 2.8 м, глубина 1.2 м.
+- **Спека.** `HOUSE_DESCRIPTOR_FORMAT.md` обновлён: добавлена таблица полей `features.balconies[]`, упомянуто использование GLB `porch_column` / `porch_step` с fallback.
+- Cache-bust: `shared/house-builder.js?v=28` (в `index-desktop.html` и `test-house.html`).
 
 Сделано в итерации v=27 (cornice_corner GLB + soffit + cornice во всех домах + bug fix inflate):
 
@@ -561,10 +730,11 @@ CREATE TABLE projects (
    - ~~Per-floor sliders area/floor_h~~ ✅ (динамический UI step 2 на основе `desc.floors`, глобальный + per-floor контролы, `params.floorAreas[]` / `floorHs[]` в `HouseBuilder.buildHouseFromDescriptor`).
    - ~~`mod_cornice_corner.glb`~~ ✅ (создан через Blender MCP, усечённая пирамида с трапециевидным сечением; ставится на convex-pillars).
    - ~~Soffit (подшивка свеса)~~ ✅ (`buildRoofSoffit` — плоская плита по `inflateOrthoOutline(outline, eave)` под скатами).
+   - ~~GLB-модули `mod_porch_column.glb` / `mod_porch_step.glb`~~ ✅ (подключены в v=28 через `placeScaledGlb` с автомасштабированием по детектированному bbox + fallback на BoxGeometry).
+   - ~~Балконы~~ ✅ (v=28 — `features.balconies[]`: плита + перила с трёх сторон, опциональные опоры, привязка к фасадам этажей >= 1 через `side` или `wall_index`; демо в `house_type_09.json`).
+   - ~~Правильный карниз/rake для двускатной крыши~~ ✅ (v=28 — фронтон на линии стены, скат с rake overhang, наклонный rake soffit + горизонтальный eave soffit).
    - `mod_cornice_concave_corner.glb` — L-shape filling bay-corner для идеального стыка cornice'ов на concave-углах (сейчас они просто overlap'ятся на 15 см, что незаметно).
-   - GLB-модули `mod_porch_column.glb` / `mod_porch_step.glb` — сейчас крыльцо строится процедурно через BoxGeometry, для красивого декора можно подключить GLB.
    - Пересборка GLB дверей: handle как sibling leaf_main (не child), чтобы handle не масштабировался вместе со створкой.
-   - **Балконы** — пока нет реализации. Кандидаты: на фасаде многоэтажных домов, привязка к окнам или отдельной секции дескриптора.
 6. **Бэкенд** — FastAPI + расчётный модуль + БД (в работе у команды бэкенда).
 
 ---

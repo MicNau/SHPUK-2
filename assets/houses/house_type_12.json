@@ -1,0 +1,111 @@
+{
+  "id": "type_12",
+  "name": "Стеклянный дом",
+  "description": "Современный одноэтажный дом, плоская крыша. Окна в пол (почти от пола до потолка), стеклянные раздвижные двери. Стиль хай-тек / минимализм.",
+
+  "constraints": {
+    "base_h":         { "min": 20, "max": 50,  "step": 10, "default": 30,  "unit": "cm" },
+    "roof_angle":     { "min": 5,  "max": 10,  "step": 5,  "default": 5,   "unit": "deg" },
+    "wall_thickness": 0.20,
+    "pillar_size":    0.20
+  },
+
+  "roof_type": "flat",
+
+  "modules": {
+    "_comment": "Окна в пол: h=2.40, низ от пола 20 см → лента над окном 20 см. window_double (только v-mullion, без сетки).",
+    "window_double": {
+      "w": { "min": 1.20, "max": 2.40, "default": 1.80 },
+      "h": { "min": 1.80, "max": 2.30, "default": 2.20 },
+      "y": { "min": 0.15, "max": 0.30, "default": 0.25 },
+      "frame_profile": 0.04,
+      "sill_overhang": 0.02,
+      "mullions": ["v"],
+      "glb": "mod_window_double.glb"
+    },
+    "door_slide_double": {
+      "_comment": "Стеклянная раздвижная дверь — основной вход, высокая",
+      "w": { "min": 1.80, "max": 3.00, "default": 2.20 },
+      "h": { "min": 2.10, "max": 2.40, "default": 2.30 },
+      "y": 0.00,
+      "leaves": 2,
+      "mechanism": "slide",
+      "frame_profile": 0.04,
+      "glb": "mod_door_slide_double.glb"
+    }
+  },
+
+  "floors": [
+    {
+      "id": "floor_1",
+      "label": "Первый этаж",
+
+      "constraints": {
+        "area":    { "min": 70, "max": 150, "step": 5,  "default": 100, "unit": "m2" },
+        "floor_h": { "min": 260, "max": 290, "step": 10, "default": 280, "unit": "cm" }
+      },
+
+      "vars": {
+        "L": "sqrt(area * 1.8)",
+        "W": "sqrt(area / 1.8)"
+      },
+
+      "perimeter": [
+        { "_comment": "═══ N: длинная стена — 3 окна в пол →" },
+        { "run": "L", "facade": [
+          { "wall": "fill" },
+          { "window": "double" },
+          { "wall": 0.4 },
+          { "window": "double" },
+          { "wall": 0.4 },
+          { "window": "double" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ E: короткая (главный стеклянный вход) ↓" },
+        { "run": "W", "facade": [
+          { "wall": "fill" },
+          { "door": "slide_double", "main": true },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ S: длинная стена — панорамные окна в сад ←" },
+        { "run": "L", "facade": [
+          { "wall": "fill" },
+          { "window": "double" },
+          { "wall": 0.4 },
+          { "window": "double" },
+          { "wall": 0.4 },
+          { "window": "double" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ W: короткая ↑" },
+        { "run": "W", "facade": [
+          { "wall": "fill" },
+          { "window": "double" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 }
+      ]
+    }
+  ],
+
+  "features": {
+    "gutters":  true,
+    "downpipe": true
+  },
+
+  "materials_map": {
+    "mat_wall":           { "label": "Стены (бетон/дерево)", "swappable": true  },
+    "mat_base":           { "label": "Цоколь",               "swappable": true  },
+    "mat_roof":           { "label": "Крыша",                "swappable": true  },
+    "mat_frame":          { "label": "Рамы (тёмный металл)", "swappable": true  },
+    "mat_glass":          { "label": "Стекло",               "swappable": false },
+    "mat_door":           { "label": "Дверь",                "swappable": true  },
+    "mat_metal":          { "label": "Водосток",             "swappable": true  }
+  }
+}

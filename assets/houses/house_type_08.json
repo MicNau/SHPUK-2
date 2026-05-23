@@ -428,7 +428,7 @@
           "turn": 90
         },
         {
-          "_comment": "═══ W: внешняя западная стена ↑ ═══"
+          "_comment": "═══ W: внешняя западная стена (главный вход) ↑ ═══"
         },
         {
           "run": "W",
@@ -443,7 +443,8 @@
               "wall": 0.5
             },
             {
-              "door": "double"
+              "door": "double",
+              "main": true
             },
             {
               "wall": 0.5
@@ -463,36 +464,33 @@
     }
   ],
   "materials_map": {
-    "mat_wall": {
-      "label": "Стены (штукатурка)",
-      "swappable": true
-    },
-    "mat_base": {
-      "label": "Цоколь",
-      "swappable": true
-    },
-    "mat_roof": {
-      "label": "Крыша (парапет)",
-      "swappable": true
-    },
-    "mat_frame": {
-      "label": "Рамы окон",
-      "swappable": true
-    },
-    "mat_glass": {
-      "label": "Стекло",
-      "swappable": false
-    },
-    "mat_door": {
-      "label": "Двери",
-      "swappable": true
-    },
-    "mat_cornice": {
-      "label": "Карнизы",
-      "swappable": true
-    }
+    "mat_wall":           { "label": "Стены (штукатурка)", "swappable": true  },
+    "mat_base":           { "label": "Цоколь",             "swappable": true  },
+    "mat_roof":           { "label": "Крыша (парапет)",    "swappable": true  },
+    "mat_soffit":         { "label": "Подшивка свеса",     "swappable": true  },
+    "mat_frame":          { "label": "Рамы окон",          "swappable": true  },
+    "mat_glass":          { "label": "Стекло",             "swappable": false },
+    "mat_door":           { "label": "Двери",              "swappable": true  },
+    "mat_cornice":        { "label": "Карнизы",            "swappable": true  },
+    "mat_metal":          { "label": "Водосток",           "swappable": true  },
+    "mat_porch_step":     { "label": "Ступени крыльца",    "swappable": true  },
+    "mat_porch_deck":     { "label": "Проступи крыльца",   "swappable": true  },
+    "mat_porch_column":   { "label": "Колонны крыльца",    "swappable": true  },
+    "mat_porch_canopy":   { "label": "Навес крыльца",      "swappable": true  },
+    "mat_porch_railing":  { "label": "Перила крыльца",     "swappable": true  }
   },
   "features": {
-    "cornice": true
+    "cornice":  true,
+    "gutters":  true,
+    "downpipe": true,
+    "porch": {
+      "width": 2.6,
+      "depth": 1.4,
+      "has_canopy": true,
+      "canopy_height": 2.30,
+      "canopy_slope": 0.10,
+      "has_railing": true,
+      "railing_height": 0.95
+    }
   }
 }

@@ -1,7 +1,7 @@
 {
   "id": "type_03",
   "name": "Г-образный одноэтажный",
-  "description": "Г-образный план: основной прямоугольник + восточный выступ. Плоская крыша.",
+  "description": "Основной прямоугольник + северный выступ по центру. Вальмовая крыша. Главный вход на южном фасаде.",
 
   "constraints": {
     "base_h":         { "min": 50, "max": 120, "step": 10, "default": 70,  "unit": "cm" },
@@ -13,8 +13,6 @@
   "roof_type": "hip",
 
   "modules": {
-    "_comment": "Spec v2: range-объекты {min, max, default} в метрах",
-
     "window_single": {
       "w": { "min": 0.60, "max": 1.40, "default": 0.90 },
       "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
@@ -22,6 +20,24 @@
       "frame_profile": 0.05,
       "sill_overhang": 0.03,
       "glb": "mod_window_single.glb"
+    },
+    "window_double": {
+      "w": { "min": 1.00, "max": 2.00, "default": 1.40 },
+      "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
+      "y": { "min": 0.30, "max": 1.50, "default": 0.90 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "mullions": ["v"],
+      "glb": "mod_window_double.glb"
+    },
+    "window_wide": {
+      "w": { "min": 1.80, "max": 3.00, "default": 2.40 },
+      "h": { "min": 0.80, "max": 2.00, "default": 1.50 },
+      "y": { "min": 0.20, "max": 1.20, "default": 0.70 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "mullions": ["v", "h"],
+      "glb": "mod_window_wide.glb"
     },
     "door_single": {
       "w": { "min": 0.80, "max": 1.00, "default": 0.90 },
@@ -40,71 +56,129 @@
       "label": "Первый этаж",
 
       "constraints": {
-        "area":    { "min": 60, "max": 140, "step": 5,  "default": 100, "unit": "m2" },
+        "area":    { "min": 70, "max": 160, "step": 5,  "default": 110, "unit": "m2" },
         "floor_h": { "min": 270, "max": 330, "step": 10, "default": 300, "unit": "cm" }
       },
 
       "vars": {
-        "_comment": "L, W — основной прямоугольник; ext — глубина выступа (восточная пристройка); ew — её ширина по Z",
-        "L":   "sqrt(area * 1.4)",
-        "W":   "sqrt(area / 1.4)",
-        "ext": "L * 0.35",
-        "ew":  "W * 0.45"
+        "_comment": "L,W — основной прямоугольник; ext — ширина выступа (по X); eh — его глубина на север (по Z); L_left/right — стенки основы по бокам от выступа",
+        "L":      "sqrt(area * 1.5)",
+        "W":      "sqrt(area / 1.5)",
+        "ext":    "L * 0.32",
+        "eh":     "W * 0.40",
+        "L_side": "(L - ext) / 2"
       },
 
       "perimeter": [
-        { "_comment": "═══ N: северная стена основного прямоугольника →" },
-        { "run": "L", "facade": "auto_windows", "window_type": "single", "min_margin": 1.0 },
-        { "turn": 90 },
-
-        { "_comment": "═══ E1: восток основного прямоугольника, верхняя часть до выступа ↓" },
-        { "run": "W - ew", "facade": [
+        { "_comment": "═══ N слева до выступа (по X) →" },
+        { "run": "L_side", "facade": [
           { "wall": "fill" },
           { "window": "single" },
           { "wall": "fill" }
         ]},
-        { "_comment": "ВНЕШНИЙ угол — выступ начинается" },
+        { "_comment": "REFLEX: вход в выступ" },
         { "turn": -90 },
 
-        { "_comment": "═══ N выступа →" },
-        { "run": "ext", "facade": [
+        { "_comment": "═══ Запад выступа (по Z, на север) ↑" },
+        { "run": "eh", "facade": [
           { "wall": "fill" },
           { "window": "single" },
           { "wall": "fill" }
         ]},
         { "turn": 90 },
 
-        { "_comment": "═══ E выступа ↓" },
-        { "run": "ew", "facade": [
+        { "_comment": "═══ Север выступа (узкая стена) →" },
+        { "run": "ext", "facade": [
           { "wall": "fill" },
-          { "door": "single" },
+          { "window": "double" },
           { "wall": "fill" }
         ]},
         { "turn": 90 },
 
-        { "_comment": "═══ S: южная стена (полная длина L+ext) ←" },
-        { "run": "L + ext", "facade": "auto_windows", "window_type": "single", "min_margin": 1.0 },
+        { "_comment": "═══ Восток выступа (по Z, на юг) ↓" },
+        { "run": "eh", "facade": [
+          { "wall": "fill" },
+          { "window": "single" },
+          { "wall": "fill" }
+        ]},
+        { "_comment": "REFLEX: возвращаемся к основе" },
+        { "turn": -90 },
+
+        { "_comment": "═══ N справа от выступа →" },
+        { "run": "L_side", "facade": [
+          { "wall": "fill" },
+          { "window": "single" },
+          { "wall": "fill" }
+        ]},
         { "turn": 90 },
 
-        { "_comment": "═══ W: западная стена ↑" },
-        { "run": "W", "facade": "auto_windows", "window_type": "single", "min_margin": 0.8 },
+        { "_comment": "═══ E основы ↓" },
+        { "run": "W", "facade": [
+          { "wall": "fill" },
+          { "window": "double" },
+          { "wall": "fill" },
+          { "window": "double" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ S основы — главный вход с окнами по бокам ←" },
+        { "run": "L", "facade": [
+          { "wall": "fill" },
+          { "window": "double" },
+          { "wall": "fill" },
+          { "window": "wide" },
+          { "wall": 0.8 },
+          { "door": "single", "main": true },
+          { "wall": 0.8 },
+          { "window": "double" },
+          { "wall": "fill" }
+        ]},
+        { "turn": 90 },
+
+        { "_comment": "═══ W основы ↑" },
+        { "run": "W", "facade": [
+          { "wall": "fill" },
+          { "window": "double" },
+          { "wall": "fill" },
+          { "window": "double" },
+          { "wall": "fill" }
+        ]},
         { "turn": 90 }
       ]
     }
   ],
 
   "features": {
-    "chimney": { "position": [0.4, 0.3], "model": "chimney" },
-    "gutters": true,
-    "cornice": true
+    "chimney":  { "position": [0.5, 0.5], "model": "chimney" },
+    "gutters":  true,
+    "downpipe": true,
+    "cornice":  true,
+    "porch": {
+      "width": 1.8,
+      "depth": 1.4,
+      "has_canopy": true,
+      "canopy_height": 2.30,
+      "canopy_slope": 0.10,
+      "has_railing": true,
+      "railing_height": 0.95
+    }
   },
 
   "materials_map": {
-    "mat_wall":  { "label": "Стены (штукатурка)", "swappable": true  },
-    "mat_base":  { "label": "Цоколь",             "swappable": true  },
-    "mat_roof":  { "label": "Крыша",              "swappable": true  },
-    "mat_frame": { "label": "Рамы окон",          "swappable": true  },
-    "mat_glass": { "label": "Стекло",             "swappable": false },
-    "mat_door":  { "label": "Дверь",              "swappable": true  }
+    "mat_wall":           { "label": "Стены (штукатурка)", "swappable": true  },
+    "mat_base":           { "label": "Цоколь",             "swappable": true  },
+    "mat_roof":           { "label": "Крыша",              "swappable": true  },
+    "mat_soffit":         { "label": "Подшивка свеса",     "swappable": true  },
+    "mat_frame":          { "label": "Рамы окон",          "swappable": true  },
+    "mat_glass":          { "label": "Стекло",             "swappable": false },
+    "mat_door":           { "label": "Дверь",              "swappable": true  },
+    "mat_cornice":        { "label": "Карнизы",            "swappable": true  },
+    "mat_metal":          { "label": "Водосток",           "swappable": true  },
+    "mat_porch_step":     { "label": "Ступени крыльца",    "swappable": true  },
+    "mat_porch_deck":     { "label": "Проступи крыльца",   "swappable": true  },
+    "mat_porch_column":   { "label": "Колонны крыльца",    "swappable": true  },
+    "mat_porch_canopy":   { "label": "Навес крыльца",      "swappable": true  },
+    "mat_porch_railing":  { "label": "Перила крыльца",     "swappable": true  }
   }
 }

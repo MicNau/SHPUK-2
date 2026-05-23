@@ -108,15 +108,17 @@
         },
         { "turn": 90 },
 
-        { "_comment": "═══ Восточная стена (короткая, вход) ↓ ═══" },
+        { "_comment": "═══ Восточная стена (короткая, вход с окнами по бокам) ↓ ═══" },
         {
           "run": "W",
           "facade": [
             { "wall": "fill" },
             { "window": "single" },
-            { "wall": "fill" },
+            { "wall": 0.8 },
             { "door": "single", "main": true },
-            { "wall": 0.6 }
+            { "wall": 0.8 },
+            { "window": "single" },
+            { "wall": "fill" }
           ]
         },
         { "turn": 90 },
@@ -168,14 +170,14 @@
   "features": {
     "chimney":  { "position": [0.65, 0.45], "model": "chimney" },
     "gutters":  true,
+    "downpipe": true,
     "cornice":  true,
     "porch": {
-      "width": 2.4,
-      "depth": 1.5,
-      "offset_along": -0.20,
+      "width": 1.8,
+      "depth": 1.4,
       "has_canopy": true,
-      "canopy_height": 2.40,
-      "canopy_slope": 0.12,
+      "canopy_height": 2.30,
+      "canopy_slope": 0.10,
       "has_railing": true,
       "railing_height": 0.95
     }

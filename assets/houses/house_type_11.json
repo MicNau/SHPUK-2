@@ -1,11 +1,11 @@
 {
-  "id": "type_02",
-  "name": "Одноэтажный с двускатной крышей",
-  "description": "Прямоугольный одноэтажный дом, двускатная крыша, конёк по длинной оси. Окно в фронтоне над входом.",
+  "id": "type_11",
+  "name": "Полутораэтажный с мансардой",
+  "description": "Один этаж + жилой чердак под крутой двускатной крышей. На южном скате — 2 dormer-окна; на фронтоне — окно в треугольнике.",
 
   "constraints": {
     "base_h":         { "min": 50, "max": 120, "step": 10, "default": 80,  "unit": "cm" },
-    "roof_angle":     { "min": 20, "max": 40,  "step": 5,  "default": 30,  "unit": "deg" },
+    "roof_angle":     { "min": 35, "max": 55,  "step": 5,  "default": 45,  "unit": "deg" },
     "wall_thickness": 0.25,
     "pillar_size":    0.25
   },
@@ -30,15 +30,6 @@
       "mullions": ["v"],
       "glb": "mod_window_double.glb"
     },
-    "window_wide": {
-      "w": { "min": 1.80, "max": 3.00, "default": 2.40 },
-      "h": { "min": 0.80, "max": 2.00, "default": 1.50 },
-      "y": { "min": 0.20, "max": 1.20, "default": 0.70 },
-      "frame_profile": 0.05,
-      "sill_overhang": 0.03,
-      "mullions": ["v", "h"],
-      "glb": "mod_window_wide.glb"
-    },
     "door_single": {
       "w": { "min": 0.80, "max": 1.00, "default": 0.90 },
       "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
@@ -47,6 +38,14 @@
       "mechanism": "swing",
       "frame_profile": 0.05,
       "glb": "mod_door_single.glb"
+    },
+    "dormer": {
+      "w":     { "min": 1.00, "max": 2.50, "default": 1.50 },
+      "h":     { "min": 1.00, "max": 2.00, "default": 1.40 },
+      "depth": { "min": 0.60, "max": 1.50, "default": 1.00 },
+      "frame_profile": 0.05,
+      "sill_overhang": 0.03,
+      "glb": "mod_dormer.glb"
     }
   },
 
@@ -56,8 +55,8 @@
       "label": "Первый этаж",
 
       "constraints": {
-        "area":    { "min": 50, "max": 120, "step": 5,  "default": 90,  "unit": "m2" },
-        "floor_h": { "min": 270, "max": 330, "step": 10, "default": 300, "unit": "cm" }
+        "area":    { "min": 60, "max": 140, "step": 5,  "default": 100, "unit": "m2" },
+        "floor_h": { "min": 270, "max": 330, "step": 10, "default": 290, "unit": "cm" }
       },
 
       "vars": {
@@ -66,19 +65,19 @@
       },
 
       "perimeter": [
-        { "_comment": "═══ Северная стена (длинная, гостиная/кухня — панорамное окно + два двойных) →" },
+        { "_comment": "═══ N: длинная стена (двойные окна гостиной) →" },
         { "run": "L", "facade": [
           { "wall": 0.8 },
           { "window": "double" },
           { "wall": "fill" },
-          { "window": "wide" },
+          { "window": "double" },
           { "wall": "fill" },
           { "window": "double" },
           { "wall": 0.8 }
         ]},
         { "turn": 90 },
 
-        { "_comment": "═══ Восточная стена (короткая, вход + окна по бокам) ↓" },
+        { "_comment": "═══ E: короткая стена с входом (фронтон над ней) ↓" },
         { "run": "W", "facade": [
           { "wall": "fill" },
           { "window": "single" },
@@ -90,19 +89,21 @@
         ]},
         { "turn": 90 },
 
-        { "_comment": "═══ Южная стена (длинная, спальни — 3 double) ←" },
+        { "_comment": "═══ S: длинная стена (спальни — single окна) ←" },
         { "run": "L", "facade": [
           { "wall": 0.8 },
-          { "window": "double" },
+          { "window": "single" },
           { "wall": "fill" },
-          { "window": "double" },
+          { "window": "single" },
           { "wall": "fill" },
-          { "window": "double" },
+          { "window": "single" },
+          { "wall": "fill" },
+          { "window": "single" },
           { "wall": 0.8 }
         ]},
         { "turn": 90 },
 
-        { "_comment": "═══ Западная стена (короткая, окна санузла/прачечной) ↑" },
+        { "_comment": "═══ W: короткая фронтонная стена ↑" },
         { "run": "W", "facade": [
           { "wall": "fill" },
           { "window": "single" },
@@ -115,11 +116,20 @@
     }
   ],
 
+  "roof_windows": [
+    { "module": "dormer", "slope": "south", "position_along": 0.30, "position_up": 0.65,
+      "w": 1.20, "h": 1.10, "depth": 2.00, "roof_angle": 25,
+      "window": { "type": "single", "w": 0.85, "h": 0.80 } },
+    { "module": "dormer", "slope": "south", "position_along": 0.70, "position_up": 0.65,
+      "w": 1.20, "h": 1.10, "depth": 2.00, "roof_angle": 25,
+      "window": { "type": "single", "w": 0.85, "h": 0.80 } }
+  ],
+
   "features": {
-    "chimney":  { "position": [0.30, 0.5], "model": "chimney" },
+    "chimney":  { "position": [0.55, 0.5], "model": "chimney" },
+    "cornice":  true,
     "gutters":  true,
     "downpipe": true,
-    "cornice":  true,
     "porch": {
       "width": 1.8,
       "depth": 1.4,
@@ -130,20 +140,8 @@
       "railing_height": 0.95
     },
     "gable_windows": [
-      {
-        "side": "east",
-        "type": "single",
-        "w": 0.90,
-        "h": 0.80,
-        "y_offset": 0.50
-      },
-      {
-        "side": "west",
-        "type": "single",
-        "w": 0.90,
-        "h": 0.80,
-        "y_offset": 0.50
-      }
+      { "side": "east", "type": "single", "w": 0.90, "h": 0.90, "y_offset": 0.80 },
+      { "side": "west", "type": "single", "w": 0.90, "h": 0.90, "y_offset": 0.80 }
     ]
   },
 
