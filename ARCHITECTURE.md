@@ -11,19 +11,18 @@
 ## Структура файлов (текущая)
 
 ```
-/frontend — мобильная версия (wizard)
-  index.html              # разметка + script-теги (детектор платформы перенесён в viewer3d-entourage.js)
-  styles.css              # все стили (мобильный wizard, max-width 480px)
-  nav.js                  # goTo, updProg, getStepOrder и навигационные хелперы
-  ui.js                   # шаг 10: секции, образцы, примерка
-  catalog.js              # каталог, фильтры, результаты, selMat
-
 /frontend — десктопная версия (3-column workspace)
-  index-desktop.html      # 3 экрана: выбор дома → параметры+3D → workspace
-  styles-desktop.css      # все стили (3-column layout, topbar, sidebar, panel)
-  nav-desktop.js          # dGoTo, sidebar, canvas editors, right panel, catalog
+  index.html              # 3 экрана: выбор дома → параметры+3D → workspace
+                          # Initial loading state в d-house-grid — виден до выполнения JS.
+  styles-desktop.css      # все стили (3-column layout, topbar, sidebar, panel,
+                          # loading-индикаторы карточек)
+  nav-desktop.js          # dGoTo, sidebar, canvas editors, right panel, catalog,
+                          # карусель домов + прогресс-каунтер генерации превью
 
-/frontend — общие файлы (используются обеими версиями)
+/frontend — legacy мобильные файлы (мобильный wizard удалён, файлы оставлены)
+  styles.css, nav.js, ui.js, catalog.js  # не подключены ни одним HTML
+
+/frontend — общие файлы
   state.js                # S, SECS, SEC_SCREEN, CATALOG_COLORS, PRICE_TIERS, STUB_RESULTS
   canvas.js               # pan/zoom движок, snap-canvas, крыльцо (drag+resize)
   viewer3d-core.js        # сцена, HDRI, PBR-материалы, buildScene3d.
@@ -95,15 +94,7 @@ README.md
 
 ### Порядок подключения скриптов
 
-**Мобильная (index.html):**
-```
-Three.js r128 → OrbitControls → RGBELoader → EXRLoader → GLTFLoader
-state.js → nav.js → canvas.js
-→ viewer3d-core.js → viewer3d-entourage.js
-ui.js → catalog.js
-```
-
-**Десктопная (index-desktop.html):**
+**Основной фронт (index.html):**
 ```
 Three.js r128 → OrbitControls → RGBELoader → EXRLoader → GLTFLoader
 state.js → canvas.js
@@ -117,17 +108,14 @@ Three.js r128 → OrbitControls → GLTFLoader
 → shared/house-builder.js → test-house.js
 ```
 
-В обоих случаях `shared/house-builder.js` подключается **до** кода, который его использует.
+`shared/house-builder.js` подключается **до** кода, который его использует.
 Test-house инжектит свой panel-логгер через `HouseBuilder.setLogger(log)`.
 
-Все скрипты подключаются с query-string `?v=N` для сброса кэша браузера (текущая: v=14).
+Все скрипты подключаются с query-string `?v=N` для сброса кэша браузера. Текущие версии
+указаны ниже в разделе «Recent cleanup».
 
-Детектор платформы в `index.html` (клиентский):
-```javascript
-const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-              || window.innerWidth < 768;
-```
-При появлении бэкенда: заменить на серверный выбор через шаблон FastAPI (Jinja2).
+`viewer3d-entourage.js` автоматически детектит `IS_MOBILE` (UA + `innerWidth<768`)
+для подбора параметров растительности.
 
 ---
 
@@ -404,7 +392,7 @@ CREATE TABLE projects (
 
 ---
 
-## Десктопный UI (index-desktop.html)
+## Десктопный UI (index.html)
 
 ### 3 экрана:
 
@@ -495,6 +483,15 @@ CREATE TABLE projects (
 ---
 
 ## Recent cleanup (tech debt)
+
+Сделано в итерациях v=56–v=57 (фронтоны без щелей, индикатор загрузки, переименование index):
+
+- **Фронтон мансарды (`buildBrokenMansardRoof`) — основание расширено до slope-footprint.** Раньше пятиугольник фронтона строился строго на стене (`wz0/wz1`), а скаты выходили на `eave` (z0/z1). Угол NW/SW рёбер пятиугольника получался ~76° против 70° у ската — между ними была видимая треугольная дыра. Теперь основание пентагона = `z0/z1` (для longAxisX) или `x0/x1` (для longAxisZ); рёбра пентагона лежат точно в плоскости скатов. «Уши» пентагона (за пределами стены) скрыты внутри объёма ската-бруса.
+- **`getGableTriangle` — единое расширение основания для всех «фронтонных» крыш.** Раньше расширение `ll/lr` по carniz-оси на `ROOF_EAVE` делалось только для `roof_type === 'mansard'`. Это давало рассинхрон с `buildGableRoof` (gable / gable_cross), где основание уже было на `z0/z1` — для сторон со `gable_windows` (где фронтон строит `buildGableWindows`, а не `buildGableRoof`) появлялась та же треугольная дыра, что и на мансарде. Теперь `expandU = ROOF_EAVE` для `mansard | gable | gable_cross`. Тип 11 (полутораэтажный с `gable_windows` на east/west) фиксится этим изменением.
+- **`type_10`: убран `no_rake_overhang: true`, карниз возвращён.** После того как фронтон стал прилегать к скатам, флаг `no_rake_overhang` (отключение rake-выноса) больше не нужен — rake-вынос вернулся стандартный (`ROOF_EAVE = 0.30 м`). `features.cornice: true` тоже вернули.
+- **Loading-индикатор для карусели домов.** Раньше после загрузки страницы пользователь видел пустую область сетки ~5 сек, пока скрипты с CDN не дозагрузятся и `_dInitHouseGrid` не отрисует карточки. Теперь в `index.html` внутрь `<div id="d-house-grid">` положен **initial loading state** (`.d-grid-initial-loading` + крутящийся круг + «Загружаем дома…») — браузер рисует его сразу при парсинге HTML, до выполнения JS. После того как `_dInitHouseGrid` подставляет карточки, плейсхолдер исчезает; на месте превью — серые блоки, которые быстро заполняются JPEG-миниатюрами. Над сеткой — глобальный прогресс-каунтер `.d-house-progress` («Готовим превью домов (X / 10)…»), который плавно fade-out по завершении. Per-card спиннеры удалены (фаза генерации превью проходит быстро, отдельные индикаторы избыточны).
+- **Переименование `index-desktop.html` → `index.html`.** Старый мобильный `index.html` (wizard, max-width 480px) удалён. Legacy-файлы мобильного UI (`styles.css`, `nav.js`, `ui.js`, `catalog.js`) оставлены в корне, но ни одним HTML не подключаются.
+- Cache-bust: `shared/house-builder.js?v=57`, `nav-desktop.js?v=21`.
 
 Сделано в итерациях v=41–v=55 (трубы, мансарда, фронтонные окна, fixes):
 

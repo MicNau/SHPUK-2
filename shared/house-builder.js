@@ -1338,28 +1338,33 @@ function getGableTriangle(bbox, longAxisX, ridgeY, baseY, side, roofType, mansar
   const minX = bbox.minX, maxX = bbox.maxX, minZ = bbox.minZ, maxZ = bbox.maxZ;
   const ridgeX = (minX + maxX) / 2;
   const ridgeZ = (minZ + maxZ) / 2;
+  // Основание фронтонного полигона расширяем до slope-footprint
+  // (bbox ± ROOF_EAVE по carniz-оси), чтобы рёбра легли точно на скаты.
+  // Это согласует buildGableWindows с buildGableRoof (gable) и buildBrokenMansardRoof
+  // (mansard) — там основание уже расширено до z0/z1 (или x0/x1).
+  const expandU = (roofType === 'mansard' || roofType === 'gable' || roofType === 'gable_cross') ? ROOF_EAVE : 0;
   let ll, lr, top, uAxis, exterior;
   if (longAxisX && side === 'west') {
-    ll       = new THREE.Vector3(minX, baseY,  minZ);
-    lr       = new THREE.Vector3(minX, baseY,  maxZ);
+    ll       = new THREE.Vector3(minX, baseY,  minZ - expandU);
+    lr       = new THREE.Vector3(minX, baseY,  maxZ + expandU);
     top      = new THREE.Vector3(minX, ridgeY, ridgeZ);
     uAxis    = new THREE.Vector3(0, 0, 1);
     exterior = new THREE.Vector3(-1, 0, 0);
   } else if (longAxisX && side === 'east') {
-    ll       = new THREE.Vector3(maxX, baseY,  maxZ);
-    lr       = new THREE.Vector3(maxX, baseY,  minZ);
+    ll       = new THREE.Vector3(maxX, baseY,  maxZ + expandU);
+    lr       = new THREE.Vector3(maxX, baseY,  minZ - expandU);
     top      = new THREE.Vector3(maxX, ridgeY, ridgeZ);
     uAxis    = new THREE.Vector3(0, 0, -1);
     exterior = new THREE.Vector3(1, 0, 0);
   } else if (!longAxisX && side === 'north') {
-    ll       = new THREE.Vector3(maxX, baseY,  minZ);
-    lr       = new THREE.Vector3(minX, baseY,  minZ);
+    ll       = new THREE.Vector3(maxX + expandU, baseY,  minZ);
+    lr       = new THREE.Vector3(minX - expandU, baseY,  minZ);
     top      = new THREE.Vector3(ridgeX, ridgeY, minZ);
     uAxis    = new THREE.Vector3(-1, 0, 0);
     exterior = new THREE.Vector3(0, 0, -1);
   } else if (!longAxisX && side === 'south') {
-    ll       = new THREE.Vector3(minX, baseY,  maxZ);
-    lr       = new THREE.Vector3(maxX, baseY,  maxZ);
+    ll       = new THREE.Vector3(minX - expandU, baseY,  maxZ);
+    lr       = new THREE.Vector3(maxX + expandU, baseY,  maxZ);
     top      = new THREE.Vector3(ridgeX, ridgeY, maxZ);
     uAxis    = new THREE.Vector3(1, 0, 0);
     exterior = new THREE.Vector3(0, 0, 1);
@@ -1375,11 +1380,11 @@ function getGableTriangle(bbox, longAxisX, ridgeY, baseY, side, roofType, mansar
     const lowerHeight = (mansardSpec.lower_height !== undefined) ? mansardSpec.lower_height : 2.0;
     const lowerAngle  = (mansardSpec.lower_angle  !== undefined) ? mansardSpec.lower_angle  : 70;
     const tanLower = Math.tan(lowerAngle * Math.PI / 180);
-    // horizontalLower — горизонтальный отступ kink от eave-кромки ската (с учётом eave).
-    // Фронтон теперь СТРОГО на стене (без расширения по eave), поэтому в плоскости фронтона
-    // kink отстоит от стены на (horizontalLower - ROOF_EAVE).
+    // Основание пятиугольника = slope-footprint (расширено на eave с обеих сторон).
+    // kinkInsetU — горизонтальный отступ kink от расширенного основания = horizontalLower
+    // (без вычитания ROOF_EAVE, т.к. ll уже сдвинут на -eave).
     const horizontalLower = lowerHeight / tanLower;
-    const kinkInsetU = Math.max(0.01, horizontalLower - ROOF_EAVE);
+    const kinkInsetU = horizontalLower;
     frame.points2D = [
       new THREE.Vector2(0, 0),
       new THREE.Vector2(wallW, 0),
@@ -2480,19 +2485,18 @@ function buildBrokenMansardRoof(parent, baseY, bbox, eave, mansardSpec, sharedWa
       [[x1, kinkY, kinkZSouth], [x0, kinkY, kinkZSouth], [x0, ridgeY, ridgeZ], [x1, ridgeY, ridgeZ]],
       { x: 0, y: cosUpper, z: +sinUpper }, thickness);  // S upper
 
-    // Фронтонные пятиугольники мансарды: СТРОГО НА СТЕНЕ (без расширения на eave).
-    // Раньше я расширял по Z eave чтобы покрыть eave-overhang, но на крутом нижнем
-    // скате (70°) «уши» пятиугольника висели за пределами стены — между ними и кровлей
-    // была видимая пустота. Возвращаем фронтон на стену; eave-overhang виден сбоку
-    // как карниз ската.
+    // Фронтонные пятиугольники мансарды: основание РАСШИРЕНО до slope-footprint
+    // (z0..z1, с учётом carniz-eave). Это даёт прилегание NW/SW рёбер пятиугольника
+    // точно к скатам (угол ребра = lower_angle), без треугольного зазора.
+    // «Уши» пятиугольника (z<wz0 и z>wz1) скрыты внутри объёма ската-бруса.
     gableVerts = [
-      [wx0, baseY, wz0],        // 0: NW gable base
-      [wx0, baseY, wz1],        // 1: SW gable base
+      [wx0, baseY, z0],         // 0: NW gable base (extended to slope eave)
+      [wx0, baseY, z1],         // 1: SW gable base (extended)
       [wx0, kinkY, kinkZNorth], // 2: NW gable kink
       [wx0, kinkY, kinkZSouth], // 3: SW gable kink
       [wx0, ridgeY, ridgeZ],    // 4: W gable ridge
-      [wx1, baseY, wz0],        // 5: NE gable base
-      [wx1, baseY, wz1],        // 6: SE gable base
+      [wx1, baseY, z0],         // 5: NE gable base (extended)
+      [wx1, baseY, z1],         // 6: SE gable base (extended)
       [wx1, kinkY, kinkZNorth], // 7: NE gable kink
       [wx1, kinkY, kinkZSouth], // 8: SE gable kink
       [wx1, ridgeY, ridgeZ],    // 9: E gable ridge
@@ -2518,15 +2522,15 @@ function buildBrokenMansardRoof(parent, baseY, bbox, eave, mansardSpec, sharedWa
       [[kinkXEast, kinkY, z0], [kinkXEast, kinkY, z1], [ridgeX, ridgeY, z1], [ridgeX, ridgeY, z0]],
       { x: +sinUpper, y: cosUpper, z: 0 }, thickness);  // E upper
 
-    // longAxisZ: фронтоны на стене (без расширения по X eave).
+    // longAxisZ: основание пятиугольника РАСШИРЕНО до slope-footprint по X (x0..x1).
     gableVerts = [
-      [wx0, baseY, wz0],        // 0: NW gable base
-      [wx1, baseY, wz0],        // 1: NE gable base
+      [x0, baseY, wz0],         // 0: NW gable base (extended)
+      [x1, baseY, wz0],         // 1: NE gable base (extended)
       [kinkXWest, kinkY, wz0],  // 2: NW gable kink
       [kinkXEast, kinkY, wz0],  // 3: NE gable kink
       [ridgeX, ridgeY, wz0],    // 4: N gable ridge
-      [wx0, baseY, wz1],        // 5: SW gable base
-      [wx1, baseY, wz1],        // 6: SE gable base
+      [x0, baseY, wz1],         // 5: SW gable base (extended)
+      [x1, baseY, wz1],         // 6: SE gable base (extended)
       [kinkXWest, kinkY, wz1],  // 7: SW gable kink
       [kinkXEast, kinkY, wz1],  // 8: SE gable kink
       [ridgeX, ridgeY, wz1],    // 9: S gable ridge

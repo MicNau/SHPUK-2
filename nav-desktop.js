@@ -83,12 +83,18 @@ async function _dInitHouseGrid() {
     grid.innerHTML = idx.houses.map(h => `
       <div class="d-house-card" data-typeid="${h.id}" onclick="dSelectHouseAndGo('${h.id}')">
         <div class="hcp">
-          <div class="ic" data-placeholder="1">🏠</div>
+          <div class="ic" data-placeholder="1"></div>
         </div>
         <div class="hcl">${h.name}<br><span style="font-size:11px; opacity:0.75; font-weight:400;">${h.subtitle || ''}</span></div>
       </div>
     `).join('');
     grid.dataset.rendered = '1';
+    // Стартовое сообщение прогресс-каунтера
+    const prog = document.getElementById('d-house-progress');
+    if (prog) {
+      prog.classList.remove('done');
+      prog.textContent = `Готовим превью домов (0 / ${idx.houses.length})…`;
+    }
     // Запускаем фоновый рендер 3D-превью (после небольшой задержки, чтобы UI успел отрисоваться)
     setTimeout(() => _dRenderHousePreviews().catch(e => console.warn('[house-preview]', e)), 100);
   } catch (e) {
@@ -111,9 +117,23 @@ async function _dRenderHousePreviews() {
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.shadowMap.enabled = false; // для скорости
 
+  const prog = document.getElementById('d-house-progress');
+  const total = _dHousesIndex.houses.length;
+  let done = 0;
+  const updateProg = () => {
+    if (!prog) return;
+    if (done >= total) {
+      prog.textContent = '';
+      prog.classList.add('done');
+    } else {
+      prog.textContent = `Готовим превью домов (${done} / ${total})…`;
+    }
+  };
+
   for (const h of _dHousesIndex.houses) {
     if (_dPreviewCache[h.id]) {
       _dApplyPreviewToCard(h.id, _dPreviewCache[h.id]);
+      done++; updateProg();
       continue;
     }
     try {
@@ -172,13 +192,17 @@ async function _dRenderHousePreviews() {
         }
       });
 
+      done++; updateProg();
+
       // Даём браузеру вдохнуть, чтобы UI не подвисал
       await new Promise(r => setTimeout(r, 0));
     } catch (e) {
       console.warn(`[preview] ${h.id}:`, e);
+      done++; updateProg();
     }
   }
   renderer.dispose();
+  done = total; updateProg();
 }
 
 function _dApplyPreviewToCard(typeId, dataURL) {

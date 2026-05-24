@@ -104,7 +104,6 @@
     "cornice":  true,
     "gutters":  true,
     "downpipe": true,
-    "no_rake_overhang": true,
     "porch": {
       "width": 1.8,
       "depth": 1.4,
