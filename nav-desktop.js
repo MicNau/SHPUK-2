@@ -213,6 +213,22 @@ function _dApplyPreviewToCard(typeId, dataURL) {
 
 // Универсальная функция выбора дома по typeId. Без отдельной кнопки «Дальше» —
 // сразу переходим на step 2.
+// Сброс всех настроек конструкций (террасы, крыльца, дорожек и т.д.) и
+// материалов — при смене типа дома. Сохраняет накопленные образцы (S.samples)
+// и каталожные фильтры, т.к. они не привязаны к конкретному дому.
+function _dResetAllConfigurations() {
+  S.sections = [];
+  S.pts = { terrace: [], pool_terrace: [], paths: [], pier: [], fence: [] };
+  S.porch = { x: 0.3125, y: 0.3125, w: 0.203125, h: 0.125 };
+  S.mats = {};
+  S.activeSample = null;
+  S.matSubMode = null;
+  S.curSec = 0;
+  dConfigured.clear();
+  dActiveItem = null;
+  dEditorOpen = false;
+}
+
 function dSelectHouseAndGo(typeId) {
   document.querySelectorAll('.d-house-card, .d-house-card-empty').forEach(c => c.classList.remove('selected'));
   const card = document.querySelector(`.d-house-card[data-typeid="${typeId}"]`) ||
@@ -220,7 +236,15 @@ function dSelectHouseAndGo(typeId) {
   if (card) card.classList.add('selected');
 
   // S.houseType хранит typeId напрямую (например, "type_10"). Для "no_house" — special-case.
-  S.houseType = (typeId === 'no_house') ? null : typeId;
+  const newType = (typeId === 'no_house') ? null : typeId;
+
+  // Если тип дома МЕНЯЕТСЯ — сбрасываем все настройки конструкций (терраса/крыльцо/…),
+  // потому что они привязаны к геометрии конкретного дома. При повторном выборе того же
+  // типа — настройки сохраняются.
+  if (S.houseType !== newType) {
+    _dResetAllConfigurations();
+  }
+  S.houseType = newType;
 
   // Async preload дескриптора + GLB модулей
   if (typeof ensureHouseLoaded === 'function' && S.houseType) {
@@ -411,8 +435,40 @@ function _dRenderSidebar() {
         </button>
         ${isCfg && item.hasEditor ? `<button class="d-sb-edit ${isLocked ? 'locked' : ''}" title="Редактировать"
             onclick="dEditItem('${item.id}')" ${isLocked ? 'disabled' : ''}>✏</button>` : ''}
+        ${isCfg ? `<button class="d-sb-delete ${isLocked ? 'locked' : ''}" title="Удалить настройки"
+            onclick="dDeleteItem('${item.id}')" ${isLocked ? 'disabled' : ''}>×</button>` : ''}
       </div>`;
   }).join('');
+}
+
+// ── Delete (×) button — сбросить настройки конкретной позиции ──
+function dDeleteItem(secId) {
+  if (dEditorOpen) return;
+  const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
+  const label = item ? item.lbl : secId;
+  if (!window.confirm(`Удалить настройки «${label}»?`)) return;
+
+  // Чистим данные позиции
+  if (S.pts && S.pts[secId]) S.pts[secId] = [];
+  if (secId === 'porch') S.porch = { x: 0.3125, y: 0.3125, w: 0.203125, h: 0.125 };
+  S.sections = S.sections.filter(s => s !== secId);
+  if (S.mats && S.mats[secId]) delete S.mats[secId];
+  dConfigured.delete(secId);
+
+  // Если удаляемая позиция активна — сбрасываем активность
+  if (dActiveItem === secId) {
+    dActiveItem = null;
+    S.matSubMode = null;
+  }
+
+  _dRenderSidebar();
+  _dSetPanelLocked(false);
+  _dRenderPanelContent();
+
+  // Перестроить 3D
+  if (typeof buildScene3d === 'function') {
+    setTimeout(() => init3dCanvas('d-slot-workspace'), 50);
+  }
 }
 
 // ── Click on sidebar button ──

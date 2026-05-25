@@ -3398,6 +3398,29 @@ function applyMaterialOverride(parent, slot, color) {
 // ══════════════════════════════════════════════
 // PUBLIC API
 // ══════════════════════════════════════════════
+// Возвращает полигон периметра первого этажа дома в реальных метрах.
+// Используется canvas-редактором для отрисовки реального контура (вместо bbox-прямоугольника).
+// {corners: [{x, z}, ...] в CW-обходе, bbox: {minX, maxX, minZ, maxZ}}.
+function getHouseFloorPolygon(desc, params) {
+  if (!desc || !desc.floors || !desc.floors[0]) return null;
+  const floor = desc.floors[0];
+  const areaDef = (floor.constraints && floor.constraints.area && floor.constraints.area.default) || 80;
+  const area = (params && typeof params.area === 'number') ? params.area : areaDef;
+  const areaFactor = (floor.area_factor !== undefined) ? floor.area_factor : 1.0;
+  const vars = evalVars(floor.vars, { area: area * areaFactor });
+  const ps = (desc.constraints && desc.constraints.pillar_size) || 0.25;
+  const offsetSpec = floor.start_offset || { x: 0, z: 0 };
+  const startX = evalExpr(offsetSpec.x !== undefined ? offsetSpec.x : 0, vars);
+  const startZ = evalExpr(offsetSpec.z !== undefined ? offsetSpec.z : 0, vars);
+  const outline = computeOutline(floor.perimeter, vars, ps, startX, startZ);
+  // Углы полигона = старты стен в порядке обхода (для замкнутого контура — то же, что pillar-позиции).
+  const corners = [];
+  for (const item of outline.items) {
+    if (item.type === 'wall') corners.push({ x: item.x, z: item.z });
+  }
+  return { corners, bbox: outline.bbox };
+}
+
 global.HouseBuilder = {
   setLogger,
   loadHouseType,
@@ -3405,6 +3428,7 @@ global.HouseBuilder = {
   applyMaterialOverride,
   drawOutlineOverlay,
   decomposeOrthoPolygonIntoRectangles,
+  getHouseFloorPolygon,
   // Constants (можно использовать снаружи)
   FOUNDATION_OVERHANG,
   ROOF_EAVE,

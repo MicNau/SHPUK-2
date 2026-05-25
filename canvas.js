@@ -98,16 +98,30 @@ function initSnapCanvas(name) {
     const W=cvEl.width, snapStep=W/CELLS;
     let snX=Math.round(wx/snapStep)*snapStep/W, snY=Math.round(wy/snapStep)*snapStep/W;
 
-    // Прилипание к стенам дома для террас (порог 0.75 м)
+    // Прилипание к стенам дома для террас (порог 1 м).
+    // Работает по ВСЕМ ortho-рёбрам полигона дома (не только bbox), чтобы
+    // L/T/+/П-формы тоже снапались к своим внутренним углам.
     if (['terrace','pool_terrace','pier'].includes(name) && S.houseType !== 'Участок без дома') {
-      const hr = getHouseRectNorm();
+      const hp = getHousePolygonNorm();
       const thr = 1.0 / GRID; // 1m порог в нормализованных координатах
-      // Прилипание по X к левой/правой стене
-      if (Math.abs(snX - hr.nx) < thr)              snX = hr.nx;
-      else if (Math.abs(snX - (hr.nx+hr.nw)) < thr) snX = hr.nx + hr.nw;
-      // Прилипание по Y к верхней/нижней стене
-      if (Math.abs(snY - hr.ny) < thr)              snY = hr.ny;
-      else if (Math.abs(snY - (hr.ny+hr.nh)) < thr) snY = hr.ny + hr.nh;
+      // Собираем уникальные snap-координаты (X для вертикальных рёбер, Y для горизонтальных)
+      const xCoords = new Set(), yCoords = new Set();
+      for (const e of hp.edges) {
+        if (e.axis === 'v') xCoords.add(e.coord);
+        else if (e.axis === 'h') yCoords.add(e.coord);
+      }
+      let bestX = null, bestXD = thr;
+      for (const xc of xCoords) {
+        const d = Math.abs(snX - xc);
+        if (d < bestXD) { bestX = xc; bestXD = d; }
+      }
+      if (bestX !== null) snX = bestX;
+      let bestY = null, bestYD = thr;
+      for (const yc of yCoords) {
+        const d = Math.abs(snY - yc);
+        if (d < bestYD) { bestY = yc; bestYD = d; }
+      }
+      if (bestY !== null) snY = bestY;
     }
 
     S.pts[name].push({ x:snX, y:snY });
@@ -117,6 +131,7 @@ function initSnapCanvas(name) {
 
 // Вычислить прямоугольник дома на canvas в нормализованных координатах 0..1
 // На основе реальных параметров площади. Canvas = GRID×GRID м сетка.
+// Fallback (если дескриптор ещё не загружен или HouseBuilder недоступен).
 function getHouseRectNorm() {
   const area = parseFloat(document.getElementById('v-area')?.value || 120);
   const RATIO = 1.6;
@@ -131,33 +146,117 @@ function getHouseRectNorm() {
   return { nx, ny, nw, nh, houseL, houseW };
 }
 
+// Вычислить полигон дома в нормализованных координатах canvas 0..1.
+// Если дескриптор загружен (через ensureHouseLoaded в viewer3d-core.js),
+// возвращает реальный outline (для крестообразных, T-образных, L-образных и пр. форм).
+// Иначе fallback — прямоугольник по площади.
+// Возвращает: { corners: [{x, y}], bboxNorm: {nx, ny, nw, nh}, lenL, lenW, edges: [{x1,y1,x2,y2,axis,coord}] }
+//   axis: 'h' (горизонтальное ребро, snap по Y) или 'v' (вертикальное, snap по X)
+//   coord: координата ребра по неподвижной оси (нормализованная)
+function getHousePolygonNorm() {
+  const desc = (typeof _houseCache !== 'undefined' && _houseCache.desc) ? _houseCache.desc : null;
+  const haveBuilder = (typeof HouseBuilder !== 'undefined' && typeof HouseBuilder.getHouseFloorPolygon === 'function');
+
+  if (desc && haveBuilder) {
+    const area = parseFloat(document.getElementById('v-area')?.value || 120);
+    const poly = HouseBuilder.getHouseFloorPolygon(desc, { area });
+    if (poly && poly.corners && poly.corners.length >= 3) {
+      const b = poly.bbox;
+      const lenL = b.maxX - b.minX;
+      const lenW = b.maxZ - b.minZ;
+      // Центрируем по bbox в canvas-сетке
+      const cx = (GRID - lenL) / 2;
+      const cy = (GRID - lenW) / 2;
+      const corners = poly.corners.map(c => ({
+        x: (cx + (c.x - b.minX)) / GRID,
+        y: (cy + (c.z - b.minZ)) / GRID,
+      }));
+      const bboxNorm = { nx: cx / GRID, ny: cy / GRID, nw: lenL / GRID, nh: lenW / GRID };
+      // Рёбра для прилипания (только ortho — все рёбра либо горизонтальные, либо вертикальные)
+      const edges = [];
+      for (let i = 0; i < corners.length; i++) {
+        const p1 = corners[i], p2 = corners[(i + 1) % corners.length];
+        const dx = p2.x - p1.x, dy = p2.y - p1.y;
+        if (Math.abs(dy) < 1e-6) {
+          // горизонтальное ребро (constant y)
+          edges.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, axis: 'h', coord: p1.y });
+        } else if (Math.abs(dx) < 1e-6) {
+          edges.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, axis: 'v', coord: p1.x });
+        }
+      }
+      return { corners, bboxNorm, lenL, lenW, edges, isPolygon: true };
+    }
+  }
+  // Fallback — прямоугольник
+  const r = getHouseRectNorm();
+  const corners = [
+    { x: r.nx,         y: r.ny         },
+    { x: r.nx + r.nw,  y: r.ny         },
+    { x: r.nx + r.nw,  y: r.ny + r.nh  },
+    { x: r.nx,         y: r.ny + r.nh  },
+  ];
+  const edges = [
+    { x1: r.nx, y1: r.ny, x2: r.nx+r.nw, y2: r.ny,       axis: 'h', coord: r.ny       },
+    { x1: r.nx+r.nw, y1: r.ny, x2: r.nx+r.nw, y2: r.ny+r.nh, axis: 'v', coord: r.nx+r.nw },
+    { x1: r.nx+r.nw, y1: r.ny+r.nh, x2: r.nx, y2: r.ny+r.nh, axis: 'h', coord: r.ny+r.nh },
+    { x1: r.nx, y1: r.ny+r.nh, x2: r.nx, y2: r.ny,       axis: 'v', coord: r.nx       },
+  ];
+  return {
+    corners,
+    bboxNorm: { nx: r.nx, ny: r.ny, nw: r.nw, nh: r.nh },
+    lenL: r.houseL, lenW: r.houseW, edges, isPolygon: false,
+  };
+}
+
 // Рисование ранее заданных объектов как фон на canvas-шагах
 // excludeName — текущая секция (не рисуем её повторно, она рисуется как основной слой)
 function drawPreviousLayers(ctx, W, H, cx, excludeName) {
   const sc = cx.scale || 1;
 
-  // 1. Дом
+  // 1. Дом — полигон по реальному outline дескриптора (или fallback-прямоугольник)
   if (S.houseType !== 'Участок без дома') {
-    const hr = getHouseRectNorm();
-    const hx=hr.nx*W, hy=hr.ny*H, hw=hr.nw*W, hh=hr.nh*H;
-    ctx.strokeStyle='#555'; ctx.lineWidth=2.5/sc; ctx.setLineDash([]);
-    ctx.strokeRect(hx,hy,hw,hh);
-    ctx.fillStyle='rgba(0,0,0,.06)'; ctx.fillRect(hx,hy,hw,hh);
-    // Штриховка
+    const hp = getHousePolygonNorm();
+    const bx = hp.bboxNorm.nx * W;
+    const by = hp.bboxNorm.ny * H;
+    const bw = hp.bboxNorm.nw * W;
+    const bh = hp.bboxNorm.nh * H;
+    // Путь по углам полигона
+    ctx.beginPath();
+    for (let i = 0; i < hp.corners.length; i++) {
+      const c = hp.corners[i];
+      const px = c.x * W, py = c.y * H;
+      if (i === 0) ctx.moveTo(px, py);
+      else         ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    // Заливка
+    ctx.fillStyle='rgba(0,0,0,.06)'; ctx.fill();
+    // Контур
+    ctx.strokeStyle='#555'; ctx.lineWidth=2.5/sc; ctx.setLineDash([]); ctx.stroke();
+    // Штриховка (клипом по тому же пути)
     ctx.save();
-    ctx.beginPath(); ctx.rect(hx,hy,hw,hh); ctx.clip();
+    ctx.beginPath();
+    for (let i = 0; i < hp.corners.length; i++) {
+      const c = hp.corners[i];
+      const px = c.x * W, py = c.y * H;
+      if (i === 0) ctx.moveTo(px, py);
+      else         ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.clip();
     ctx.strokeStyle='rgba(0,0,0,.08)'; ctx.lineWidth=1/sc;
-    for (let d = -Math.max(hw,hh); d < Math.max(hw,hh)*2; d += 8/sc) {
-      ctx.beginPath(); ctx.moveTo(hx+d, hy); ctx.lineTo(hx+d-hh, hy+hh); ctx.stroke();
+    for (let d = -Math.max(bw,bh); d < Math.max(bw,bh)*2; d += 8/sc) {
+      ctx.beginPath(); ctx.moveTo(bx+d, by); ctx.lineTo(bx+d-bh, by+bh); ctx.stroke();
     }
     ctx.restore();
+    // Подпись и габариты по bbox
     ctx.fillStyle='#666'; ctx.font=`bold ${13/sc}px Roboto`; ctx.textAlign='center';
-    ctx.fillText('ДОМ', hx+hw/2, hy+hh/2+5/sc);
+    ctx.fillText('ДОМ', bx+bw/2, by+bh/2+5/sc);
     ctx.fillStyle='#888'; ctx.font=`${10/sc}px Roboto`;
-    ctx.fillText(hr.houseL.toFixed(1)+'м', hx+hw/2, hy-6/sc);
-    ctx.save(); ctx.translate(hx-6/sc, hy+hh/2);
+    ctx.fillText(hp.lenL.toFixed(1)+'м', bx+bw/2, by-6/sc);
+    ctx.save(); ctx.translate(bx-6/sc, by+bh/2);
     ctx.rotate(-Math.PI/2); ctx.textAlign='center';
-    ctx.fillText(hr.houseW.toFixed(1)+'м', 0, 0); ctx.restore();
+    ctx.fillText(hp.lenW.toFixed(1)+'м', 0, 0); ctx.restore();
   }
 
   // Цвета для фоновых слоёв

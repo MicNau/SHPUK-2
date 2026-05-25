@@ -745,10 +745,27 @@ function buildScene3d() {
   const wallH  = Math.min(3.6, Math.max(2.4, floorRaw / 100));
   const foundH = Math.min(1.2, Math.max(0.5, foundRaw / 100));
   const RATIO  = 1.6, wt = 0.2;
-  const houseW = Math.sqrt(area / RATIO);
-  const houseL = houseW * RATIO;
+  let houseW = Math.sqrt(area / RATIO);
+  let houseL = houseW * RATIO;
   const wh     = wallH;
   const bh     = foundH;
+
+  // Если дескриптор уже загружен — переопределяем houseL/houseW реальными
+  // размерами bbox полигона (для крестообразных, T-, L-, П-форм). Также
+  // сохраняем bbox.minX/minZ для корректного маппинга канвас→мир.
+  _houseBboxMinX = 0;
+  _houseBboxMinZ = 0;
+  if (!isNoHouse && typeof HouseBuilder !== 'undefined'
+      && typeof HouseBuilder.getHouseFloorPolygon === 'function'
+      && _houseCache.desc) {
+    const poly = HouseBuilder.getHouseFloorPolygon(_houseCache.desc, { area });
+    if (poly && poly.bbox) {
+      houseL = poly.bbox.maxX - poly.bbox.minX;
+      houseW = poly.bbox.maxZ - poly.bbox.minZ;
+      _houseBboxMinX = poly.bbox.minX;
+      _houseBboxMinZ = poly.bbox.minZ;
+    }
+  }
 
   if (!isNoHouse) {
     // Используем модульную сборку по дескриптору, если он загружен (см. ensureHouseLoaded).
@@ -1030,9 +1047,16 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
 // ══════════════════════════════════════════════
 // TERRACE / PIER / POOL BUILDER
 // ══════════════════════════════════════════════
+// Смещение bbox реального полигона дома в мире (для крестообразных, T-образных
+// и пр. — у них bbox.minX/minZ != 0). Устанавливается в buildScene3d на основе
+// дескриптора. Используется в canvasToWorld и buildPorch3d, чтобы канвас-точки
+// (центрированные по bbox в сетке GRID×GRID) корректно ложились на дом в 3D-мире.
+let _houseBboxMinX = 0;
+let _houseBboxMinZ = 0;
+
 function canvasToWorld(pts, houseL, houseW) {
   const gridSize=GRID, offsetX=(gridSize-houseL)/2, offsetZ=(gridSize-houseW)/2;
-  return pts.map(p=>({ x:p.x*gridSize-offsetX, z:p.y*gridSize-offsetZ }));
+  return pts.map(p=>({ x:p.x*gridSize-offsetX+_houseBboxMinX, z:p.y*gridSize-offsetZ+_houseBboxMinZ }));
 }
 
 function buildTerrace3d(parent, M, pts, deckHeight, houseL, houseW, meshArrayName) {
@@ -1121,12 +1145,16 @@ function buildTerrace3d(parent, M, pts, deckHeight, houseL, houseW, meshArrayNam
 function buildPorch3d(parent,M,porch,houseL,houseW,bh){
   const box=(sx,sy,sz)=>new THREE.BoxGeometry(sx,sy,sz);
   const mesh=(geo,mat)=>{const m=new THREE.Mesh(geo,mat);m.castShadow=m.receiveShadow=true;return m;};
+  // Учитываем bbox.minX/minZ полигона (для крест/T/L-форм) — те же сдвиги, что и в canvasToWorld.
   const gridSize=GRID,offsetX=(gridSize-houseL)/2,offsetZ=(gridSize-houseW)/2;
-  const px=porch.x*gridSize-offsetX,pz=porch.y*gridSize-offsetZ,pw=porch.w*gridSize,pd=porch.h*gridSize;
+  const px=porch.x*gridSize-offsetX+_houseBboxMinX,pz=porch.y*gridSize-offsetZ+_houseBboxMinZ,pw=porch.w*gridSize,pd=porch.h*gridSize;
   if(pw<.2||pd<.2)return;
   const porchGroup=new THREE.Group();
   const cx=px+pw/2,cz=pz+pd/2;
-  const dF=Math.abs(cz-houseW),dB=Math.abs(cz),dR=Math.abs(cx-houseL),dL=Math.abs(cx);
+  // Расстояние до краёв bbox дома (в мире: minX..minX+houseL по X, minZ..minZ+houseW по Z).
+  const houseMinX=_houseBboxMinX, houseMaxX=_houseBboxMinX+houseL;
+  const houseMinZ=_houseBboxMinZ, houseMaxZ=_houseBboxMinZ+houseW;
+  const dF=Math.abs(cz-houseMaxZ),dB=Math.abs(cz-houseMinZ),dR=Math.abs(cx-houseMaxX),dL=Math.abs(cx-houseMinX);
   const minD=Math.min(dF,dB,dR,dL);
   let sDX=0,sDZ=0;
   if(minD===dF)sDZ=1;else if(minD===dB)sDZ=-1;else if(minD===dR)sDX=1;else sDX=-1;
