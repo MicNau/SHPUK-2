@@ -750,8 +750,10 @@ function placeScaledGlb(parent, glbModules, modId, sizeX, sizeY, sizeZ, cx, cyCe
   return true;
 }
 
-function buildPorch(parent, desc, outlineFloor0, modulesDef, materialsMap, baseH, glbModules) {
-  const cfg = desc.features && desc.features.porch;
+function buildPorch(parent, desc, outlineFloor0, modulesDef, materialsMap, baseH, glbModules, cfgOverride) {
+  // cfgOverride: если задан — используется вместо desc.features.porch (применяется
+  // для рантайм-оверрайдов has_canopy/has_railing из UI toggle'ов).
+  const cfg = cfgOverride || (desc.features && desc.features.porch);
   if (!cfg) return;
 
   const door = findMainDoorPlacement(outlineFloor0, modulesDef);
@@ -3319,8 +3321,17 @@ function buildHouseFromDescriptor(houseGroup, desc, modules, params, options = {
   // Крыльцо привязывается к двери 1-го этажа.
   // Передаём modules (загруженные GLB) — buildPorch использует porch_column / porch_step GLB,
   // с fallback на BoxGeometry если модули не загрузились.
-  if (firstOutline && desc.features && desc.features.porch) {
-    buildPorch(houseGroup, desc, firstOutline, desc.modules, desc.materials_map, baseH, modules);
+  // Строим ТОЛЬКО если options.porchEnabled === true (пользователь явно настроил крыльцо
+  // в UI). По умолчанию крыльца нет, даже если features.porch присутствует в дескрипторе.
+  // options.porchCanopy / options.porchRailing — рантайм-оверрайды has_canopy / has_railing.
+  // Крыльцо HouseBuilder (привязано к двери) — больше НЕ строится отсюда.
+  // Свободное размещение по drawn-rect делает процедурный buildPorch3d в viewer3d-core.
+  // Здесь оставлен на случай тестовой песочницы (test-house.js передаёт porchEnabled).
+  if (firstOutline && desc.features && desc.features.porch && options.porchEnabled) {
+    const porchCfg = Object.assign({}, desc.features.porch);
+    if (options.porchCanopy  !== undefined) porchCfg.has_canopy  = !!options.porchCanopy;
+    if (options.porchRailing !== undefined) porchCfg.has_railing = !!options.porchRailing;
+    buildPorch(houseGroup, desc, firstOutline, desc.modules, desc.materials_map, baseH, modules, porchCfg);
   }
 
   // Балконы (features.balconies) — привязываются к фасадам этажей >= 1.
@@ -3429,6 +3440,9 @@ global.HouseBuilder = {
   drawOutlineOverlay,
   decomposeOrthoPolygonIntoRectangles,
   getHouseFloorPolygon,
+  // Хелперы для размещения GLB-модулей (используются процедурным крыльцом)
+  placeScaledGlb,
+  detectNativeBbox,
   // Constants (можно использовать снаружи)
   FOUNDATION_OVERHANG,
   ROOF_EAVE,

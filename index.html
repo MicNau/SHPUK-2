@@ -124,8 +124,8 @@
           </div>
           <div class="d-canvas-area" id="cw-terrace"><canvas id="cv-terrace"></canvas></div>
           <div class="d-canvas-footer">
-            <div class="tg" onclick="ttg(this)" data-id="terrace-railing"><span class="tg-txt">Ограждение</span><div class="tg-ind"></div></div>
-            <div class="tg" onclick="ttg(this)" data-id="terrace-roof"><span class="tg-txt">Навес</span><div class="tg-ind"></div></div>
+            <div class="tg on" onclick="ttg(this)" data-id="terrace-railing"><span class="tg-txt">Ограждение</span><div class="tg-ind"></div></div>
+            <div class="tg on" onclick="ttg(this)" data-id="terrace-roof"><span class="tg-txt">Навес</span><div class="tg-ind"></div></div>
           </div>
         </div>
 
@@ -200,7 +200,8 @@
           </div>
           <div class="d-canvas-area" id="cw-porch" style="cursor:default;"><canvas id="cv-porch"></canvas></div>
           <div class="d-canvas-footer">
-            <div class="tg" onclick="ttg(this)"><span class="tg-txt">Нужны перила</span><div class="tg-ind"></div></div>
+            <div class="tg on" onclick="ttg(this)" data-id="porch-canopy"><span class="tg-txt">Навес</span><div class="tg-ind"></div></div>
+            <div class="tg on" onclick="ttg(this)" data-id="porch-railing"><span class="tg-txt">Перила</span><div class="tg-ind"></div></div>
           </div>
         </div>
 
@@ -285,11 +286,11 @@
 <script src="state.js?v=14"></script>
 <script src="canvas.js?v=15"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
-<script src="shared/house-builder.js?v=58"></script>
+<script src="shared/house-builder.js?v=62"></script>
 <!-- 3D viewer -->
-<script src="viewer3d-core.js?v=18"></script>
+<script src="viewer3d-core.js?v=39"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=22"></script>
+<script src="nav-desktop.js?v=25"></script>
 </body>
 </html>

@@ -58,10 +58,11 @@ function dGoTo(s) {
 
 // Сразу рендерим сетку при загрузке (step 1 активен по умолчанию)
 if (typeof document !== 'undefined') {
+  const _initOnReady = () => { _dCacheToggleDefaults(); _dInitHouseGrid(); };
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', _dInitHouseGrid);
+    document.addEventListener('DOMContentLoaded', _initOnReady);
   } else {
-    _dInitHouseGrid();
+    _initOnReady();
   }
 }
 
@@ -227,6 +228,22 @@ function _dResetAllConfigurations() {
   dConfigured.clear();
   dActiveItem = null;
   dEditorOpen = false;
+  // Возвращаем toggle'ы (террасы / крыльца) к дефолтным значениям из HTML
+  // (initial-class "on" → ON). Сбрасываем все .tg в их HTML-дефолт.
+  document.querySelectorAll('.d-center-canvas .tg').forEach(tg => {
+    const isInitiallyOn = tg.dataset.initialOn === '1';
+    tg.classList.toggle('on', isInitiallyOn);
+  });
+}
+
+// Запоминаем стартовое состояние toggle'ов один раз при инициализации UI
+// (чтобы _dResetAllConfigurations мог их вернуть к этим значениям).
+function _dCacheToggleDefaults() {
+  document.querySelectorAll('.d-center-canvas .tg').forEach(tg => {
+    if (tg.dataset.initialOn === undefined) {
+      tg.dataset.initialOn = tg.classList.contains('on') ? '1' : '0';
+    }
+  });
 }
 
 function dSelectHouseAndGo(typeId) {
@@ -544,13 +561,97 @@ function _dOpenEditor(secId) {
 }
 
 // ── Confirm editor (Готово) ──
+// ── Геометрия: проверка пересечения прямоугольника крыльца с полигоном ──
+// Все координаты — канвас-нормированные 0..1 (как в S.porch и S.pts[secId]).
+function _pointInPolygon(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    const intersect = ((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi + 1e-12) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+function _segmentsIntersect(a, b, c, d) {
+  const ccw = (p, q, r) => (r.y - p.y) * (q.x - p.x) > (q.y - p.y) * (r.x - p.x);
+  return ccw(a, c, d) !== ccw(b, c, d) && ccw(a, b, c) !== ccw(a, b, d);
+}
+function _rectPolygonOverlap(rect, poly) {
+  if (!rect || !poly || poly.length < 3) return false;
+  const corners = [
+    { x: rect.x,          y: rect.y },
+    { x: rect.x + rect.w, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y + rect.h },
+    { x: rect.x,          y: rect.y + rect.h },
+  ];
+  for (const c of corners) if (_pointInPolygon(c.x, c.y, poly)) return true;
+  for (const p of poly) {
+    if (p.x >= rect.x && p.x <= rect.x + rect.w && p.y >= rect.y && p.y <= rect.y + rect.h) return true;
+  }
+  const rectEdges = [[corners[0], corners[1]], [corners[1], corners[2]], [corners[2], corners[3]], [corners[3], corners[0]]];
+  for (let i = 0; i < poly.length; i++) {
+    const j = (i + 1) % poly.length;
+    for (const [a, b] of rectEdges) {
+      if (_segmentsIntersect(a, b, poly[i], poly[j])) return true;
+    }
+  }
+  return false;
+}
+
+// ── Тихое удаление сконфигурированной позиции (без confirm-диалога) ──
+function _dSilentRemove(secId) {
+  if (S.pts && S.pts[secId]) S.pts[secId] = [];
+  if (secId === 'porch') S.porch = { x: 0.3125, y: 0.3125, w: 0.203125, h: 0.125 };
+  S.sections = S.sections.filter(s => s !== secId);
+  if (S.mats && S.mats[secId]) delete S.mats[secId];
+  dConfigured.delete(secId);
+  if (dActiveItem === secId) { dActiveItem = null; S.matSubMode = null; }
+}
+
+// ── Toast-уведомление сверху workspace ──
+function _dShowToast(message, duration = 4500) {
+  let toast = document.getElementById('d-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'd-toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.classList.add('show');
+  if (toast._timer) clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => toast.classList.remove('show'), duration);
+}
+
+// ── Проверка конфликта крыльцо ↔ terrace/pool_terrace/pier ──
+// Если есть пересечение — удаляем КРЫЛЬЦО (терраса всегда «побеждает»),
+// показываем toast. Возвращает true, если крыльцо было удалено.
+function _dCheckPorchPolygonConflict() {
+  if (!dConfigured.has('porch')) return false;
+  const polygonSections = ['terrace', 'pool_terrace', 'pier'];
+  for (const polySec of polygonSections) {
+    if (!dConfigured.has(polySec)) continue;
+    const poly = (S.pts[polySec] || []).filter(p => !p.break);
+    if (poly.length < 3) continue;
+    if (_rectPolygonOverlap(S.porch, poly)) {
+      const label = D_SIDEBAR_ITEMS.find(i => i.id === polySec)?.lbl || polySec;
+      _dSilentRemove('porch');
+      _dShowToast(`Крыльцо удалено, т.к. пересекается с «${label}»`);
+      return true;
+    }
+  }
+  return false;
+}
+
 function dConfirmCanvas(secId) {
   dConfigured.add(secId);
   dEditorOpen = false;
   _dCloseAllCanvases();
 
-  // Keep item selected
-  dActiveItem = secId;
+  // Проверка конфликта крыльца с террасой/полигонами. Может удалить порч.
+  _dCheckPorchPolygonConflict();
+
+  // Keep item selected (если крыльцо удалили из-за конфликта — снимаем активность)
+  dActiveItem = dConfigured.has(secId) ? secId : null;
   S.matSubMode = null;
   S.curSec = 0;
 
@@ -824,7 +925,25 @@ function goToPrev() { /* no-op */ }
 function goBack10() { /* no-op */ }
 function selHouse(el, name) { dSelHouse(el, name); }
 function tci(el) { el.classList.toggle('checked'); }
-function ttg(el) { el.classList.toggle('on'); }
+// Парные toggle'ы крыльца ↔ террасы: навес и ограждение синхронизируются автоматически.
+const TG_PAIRS = {
+  'porch-canopy':    'terrace-roof',
+  'terrace-roof':    'porch-canopy',
+  'porch-railing':   'terrace-railing',
+  'terrace-railing': 'porch-railing',
+};
+function ttg(el) {
+  el.classList.toggle('on');
+  const id = el.dataset.id;
+  const partnerId = id && TG_PAIRS[id];
+  if (partnerId) {
+    const partner = document.querySelector(`.tg[data-id="${partnerId}"]`);
+    if (partner) {
+      const isOn = el.classList.contains('on');
+      partner.classList.toggle('on', isOn);
+    }
+  }
+}
 
 // Override renderSec/renderSwatches for desktop
 function renderSec() { _dRenderPanelContent(); }
