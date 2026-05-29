@@ -113,19 +113,36 @@
         <div class="d-center-canvas" id="d-canvas-terrace">
           <div class="d-canvas-header">
             <div>
-              <div class="d-canvas-title">Терраса — разметка</div>
-              <div class="d-canvas-hint">Нажмите на план чтобы отметить углы террасы</div>
+              <div class="d-canvas-title">Терраса/Крыльцо — разметка</div>
+              <div class="d-canvas-hint">Добавляйте прямоугольники, объединяйте в Г/П/О-форму</div>
             </div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="undoPt('terrace')">↩ Отменить</button>
-              <button class="d-canvas-btn" onclick="clrPts('terrace')">✕ Очистить</button>
+              <button class="d-canvas-btn" onclick="addTerraceRect()">＋ Прямоугольник</button>
+              <button class="d-canvas-btn" onclick="delActiveTerraceRect()">✕ Удалить</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('terrace')">✓ Готово</button>
             </div>
           </div>
-          <div class="d-canvas-area" id="cw-terrace"><canvas id="cv-terrace"></canvas></div>
+          <div class="d-canvas-area" id="cw-terrace" style="cursor:default;"><canvas id="cv-terrace"></canvas></div>
           <div class="d-canvas-footer">
             <div class="tg on" onclick="ttg(this)" data-id="terrace-railing"><span class="tg-txt">Ограждение</span><div class="tg-ind"></div></div>
             <div class="tg on" onclick="ttg(this)" data-id="terrace-roof"><span class="tg-txt">Навес</span><div class="tg-ind"></div></div>
+          </div>
+        </div>
+
+        <div class="d-center-canvas" id="d-canvas-steps">
+          <div class="d-canvas-header">
+            <div>
+              <div class="d-canvas-title">Ступени — размещение</div>
+              <div class="d-canvas-hint">Перетащите лестницу, потяните за угол — ширина. Глубина задаётся автоматически.</div>
+            </div>
+            <div class="d-canvas-actions">
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('steps')">✓ Готово</button>
+            </div>
+          </div>
+          <div class="d-canvas-area" id="cw-steps" style="cursor:default;"><canvas id="cv-steps"></canvas></div>
+          <div class="d-canvas-footer">
+            <div class="tg on" onclick="ttg(this)" data-id="steps-railing"><span class="tg-txt">Перила лестницы</span><div class="tg-ind"></div></div>
+            <div class="tg" onclick="ttg(this)" data-id="steps-sheathing"><span class="tg-txt">Зашить</span><div class="tg-ind"></div></div>
           </div>
         </div>
 
@@ -185,23 +202,6 @@
           <div class="d-canvas-footer">
             <div class="tg" onclick="ttg(this)"><span class="tg-txt">Перила причала</span><div class="tg-ind"></div></div>
             <div class="tg" onclick="ttg(this)"><span class="tg-txt">Крыша / навес</span><div class="tg-ind"></div></div>
-          </div>
-        </div>
-
-        <div class="d-center-canvas" id="d-canvas-porch">
-          <div class="d-canvas-header">
-            <div>
-              <div class="d-canvas-title">Крыльцо — размещение</div>
-              <div class="d-canvas-hint">Перетащите крыльцо, потяните за угол — размер</div>
-            </div>
-            <div class="d-canvas-actions">
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('porch')">✓ Готово</button>
-            </div>
-          </div>
-          <div class="d-canvas-area" id="cw-porch" style="cursor:default;"><canvas id="cv-porch"></canvas></div>
-          <div class="d-canvas-footer">
-            <div class="tg on" onclick="ttg(this)" data-id="porch-canopy"><span class="tg-txt">Навес</span><div class="tg-ind"></div></div>
-            <div class="tg on" onclick="ttg(this)" data-id="porch-railing"><span class="tg-txt">Перила</span><div class="tg-ind"></div></div>
           </div>
         </div>
 
@@ -283,14 +283,14 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/EXRLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=14"></script>
-<script src="canvas.js?v=15"></script>
+<script src="state.js?v=16"></script>
+<script src="canvas.js?v=18"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=62"></script>
 <!-- 3D viewer -->
-<script src="viewer3d-core.js?v=39"></script>
+<script src="viewer3d-core.js?v=54"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=25"></script>
+<script src="nav-desktop.js?v=28"></script>
 </body>
 </html>

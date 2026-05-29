@@ -5,8 +5,8 @@
 // ДАННЫЕ
 // ══════════════════════════════════════════════
 const SECS = [
-  {id:'terrace',      lbl:'Терраса',           req:'terrace'},
-  {id:'porch',        lbl:'Крыльцо',            req:'porch'},
+  {id:'terrace',      lbl:'Терраса/Крыльцо',    req:'terrace'},
+  {id:'steps',        lbl:'Ступени',            req:'steps'},
   {id:'paths',        lbl:'Дорожки',            req:'paths'},
   {id:'fence',        lbl:'Забор',              req:'fence'},
   {id:'facade',       lbl:'Фасад',              req:'facade'},
@@ -101,8 +101,16 @@ const STUB_RESULTS = [
 const S = {
   houseType: null,
   sections: [],
-  pts: { terrace:[], pool_terrace:[], paths:[], pier:[], fence:[] },
-  porch: { x:0.3125, y:0.3125, w:0.203125, h:0.125 },
+  // pool_terrace/paths/pier/fence — polygon-режим (массив точек).
+  // terrace — multi-rect (см. terraceRects).
+  pts: { pool_terrace:[], paths:[], pier:[], fence:[] },
+  // Терраса/Крыльцо: массив прямоугольников (boolean union в 3D).
+  // Все координаты нормированные 0..1 (как в canvas).
+  terraceRects: [],
+  activeTerraceRect: null, // индекс выбранного rect или null
+  // Ступени: один rect (положение + ширина = от пользователя; глубина в 3D
+  // пересчитывается автоматически из количества подступенков).
+  steps: { x: 0.45, y: 0.65, w: 0.0625, h: 0.046875 },
   mats: {},
   samples: [],    // [{id, name, color}] — накопленные образцы
   activeSample: null, // {id, name, color} — текущий выбранный для примерки

@@ -124,19 +124,22 @@ Test-house инжектит свой panel-логгер через `HouseBuilder
 ```javascript
 const S = {
   houseType: 'Одноэтажный дом',  // string | null
-  sections: ['terrace', 'porch'], // выбранные конструкции из шага 5
+  sections: ['terrace', 'steps'], // выбранные конструкции (sidebar — кнопки с ✓)
   pts: {
-    terrace:      [{x,y}, ...],   // точки полигона (нормализованные 0..1)
-    pool_terrace: [{x,y}, ...],
+    pool_terrace: [{x,y}, ...],   // полигон (нормализованные 0..1)
     paths:        [{x,y}, ...],   // ломаная; {break:true} — разделитель линий
     pier:         [{x,y}, ...],
     fence:        [{x,y}, ...],   // ломаная; {break:true} — разделитель линий
   },
-  porch:        { x, y, w, h },  // нормализованные координаты 0..1, кратные SNAP/GRID
-  mats:         {},               // выбранные материалы по секции
+  // Терраса/Крыльцо — массив прямоугольников (multi-rect редактор).
+  terraceRects:      [{ x, y, w, h }, ...], // нормализованные 0..1, кратные SNAP/GRID
+  activeTerraceRect: 0,            // индекс выбранного rect или null
+  // Ступени — один прямоугольник; глубина в плане пересчитывается из bh.
+  steps:        { x, y, w, h },
+  mats:         {},                // выбранные материалы по секции
   samples:      [{ id, name, color }], // накопленные образцы
-  activeSample: null,             // текущий образец для примерки
-  matSubMode:   null,             // 'deck' | 'railing' — подрежим материала террасы
+  activeSample: null,              // текущий образец для примерки
+  matSubMode:   null,              // 'deck' | 'railing' — подрежим материала террасы
   curSec:       0,
   catColors:    Set,
   catPrice:     null,
@@ -483,6 +486,28 @@ CREATE TABLE projects (
 ---
 
 ## Recent cleanup (tech debt)
+
+Сделано в итерации v=40–v=54 (Этапы 1–3 рефакторинга «Терраса/Крыльцо ↔ Ступени», правки навеса террасы):
+
+- **Этап 0 — навес террасы стал односкатным**, низом стыкуется с фронтальной кромкой крыльца, верхом — со «стенной» кромкой плиты крыльца. `buildTerraceCanopy3d` принимает `housePoly` и определяет опорную стену дома (ridge параллелен ребру дома с минимальной дистанцией до центра террасы; сторона ridge — где центр bbox ближе к стене). Геометрия — одна объёмная плита `BoxGeometry` с `M.roof` напрямую (без `clone+flatShading+DoubleSide`, чтобы материал не отличался от плиты крыльца). `canopyLow = 2.30`, `canopyHigh = 2.60`, `canopyT = 0.06` — те же значения, что у крыльца.
+- **Этап 1 — снято удаление крыльца при пересечении с террасой.** Удалены `_dCheckPorchPolygonConflict`, `_rectPolygonOverlap`, `_dSilentRemove`, `_dShowToast`, `_pointInPolygon`, `_segmentsIntersect`. Подготовка к объединению крыльца и террасы в одну секцию.
+- **Этап 2 — multi-rect редактор «Терраса/Крыльцо».** Старая секция `porch` удалена; `terrace` теперь хранится как `S.terraceRects = [{x,y,w,h}, ...]` + `S.activeTerraceRect`. Новые функции в `canvas.js`: `initTerraceCanvas`, `drawTerraceCanvas`, `attachTerraceEvents`, `addTerraceRect`, `delActiveTerraceRect`, `hitTerrace`, `applyTerraceDrag`. UX: клик на rect активирует его (с handles), drag тела = move, drag углов = resize. Snap 0.5 м + edge-snap к стенам дома (per-corner — снапается только тот угол, который двигается, противоположный фиксирован через `ds.x/ds.y`). Handle hitbox = `HANDLE_R` (раньше `HANDLE_R*2` — съедал клики по соседним rect'ам, ломал переключение активного). Кнопки `+ Прямоугольник` / `✕ Удалить`. В `buildScene3d` цикл по `_terraceRectsToPolygons()` для `buildTerrace3d`/`buildRailing3d`/`buildTerraceCanopy3d`. **MVP-ограничение**: boolean union не сделан — на стыках rects возможен z-fighting досок настила и «лишние» перила (планируется в Этапе 4).
+- **Этап 3 — отдельная секция «Ступени» (`S.steps = {x,y,w,h}`).** Один rect drag+resize. В 3D `buildSteps3d`: глубина в плане авто-пересчитывается из `bh` (число подъёмов `n = ceil(bh/STEP_RISE)`). Опорная сторона rect определяется через `insideTerrace(mid)`/`insideHouse(mid)` (raycast) — пара противоположных сторон, у которой одна mid внутри опоры, а другая снаружи; внутренняя = верх лестницы. Знаки `dirX/dirZ` указывают наружу от опоры (направление спуска). Toggle'ы `steps-railing` и `steps-sheathing` (зашить).
+  - **Геометрия лестницы (после нескольких итераций):**
+    - `STEP_RISE = 0.17`, `STEP_DEPTH = 0.28`, `TREAD_THICKNESS = 0.04`, `RISER_THICKNESS = 0.025`, `STEP_NOSING = 0.035` — `STEP_NOSING > RISER_THICKNESS`, поэтому проступь нависает над подступенком, а не наоборот.
+    - `realRise = bh / n` — стандартные равные подъёмы.
+    - Подступенок i (всегда): Z от `i·D` до `i·D + RISER_THICKNESS`. Подступенок 0 верхом стыкуется с верхом террасы (Y=bh). Подступенки i≥1 укорочены сверху на `TREAD_THICKNESS` (верх = `bh − i·realRise − TREAD_THICKNESS`), чтобы не пересекать верх предыдущей проступи и убрать z-fighting.
+    - Проступь i (только i=0..n-2; нижняя i=n-1 НЕ строится — спуск с предпоследней проступи прямо на землю, без втыкания в грунт): верх на Y=bh−(i+1)·realRise, длина по направлению спуска = `STEP_DEPTH + STEP_NOSING − RISER_THICKNESS`, по длинной оси = `stairWidth + 2·STEP_NOSING` (нависает над щёками с обеих сторон одинаково с фронтальным nosing).
+    - Нижний подступенок n-1 идёт прямо до Y=0 (земля).
+  - **Щёки (toggle `steps-sheathing`)** — non-convex полигон по реальному силуэту лестницы с включением nosing-кромки и низа проступи. Триангуляция через `THREE.ShapeUtils.triangulateShape` (с разворотом точек в CCW). Профиль строится в 2D (off × Y), конвертируется в 3D на боковой плоскости щеки.
+  - **Перила (toggle `steps-railing`):** наклонный поручень `M.deck` от `bh + railH` (стыкуется с поручнем террасы) до `realRise + railH` (над последней видимой проступью). Балясины `M.post` — по одной на видимую проступь, посередине.
+  - **Опорная сторона + знаки направления** — исправлены за две итерации: алгоритм перешёл от «минимум `distToSupports`» (нестабильно при нескольких сторонах внутри террасы) к paired-check `insideTerrace∪insideHouse`. Знаки `dirX/dirZ` инвертированы — теперь указывают НАРУЖУ от опоры.
+- Sidebar (`nav-desktop.js`): `D_SIDEBAR_ITEMS` — кнопка `porch` удалена, добавлена `steps`; `terrace` переименована в «Терраса/Крыльцо». `D_CANVAS_INIT` соответствующий. `_dResetAllConfigurations` + `dDeleteItem` обновлены под `terraceRects` / `steps`.
+- **Известные tech-debt после Этапов 1–3:**
+  - boolean union для multi-rect террасы (Этап 4) — на стыках z-fighting + «лишние» перила.
+  - врезка ступеней в террасу при пересечении (Этап 4) — сейчас при overlap rect'а ступеней и террасы возможен z-fighting.
+  - подсказка глубины лестницы в canvas — сейчас глубина rect ступеней в canvas игнорируется в 3D (пересчитывается), пользователь не видит реальную глубину при редактировании.
+- Cache-bust: `state.js?v=16`, `canvas.js?v=18`, `viewer3d-core.js?v=54`, `nav-desktop.js?v=28`.
 
 Сделано в итерации v=59–v=62 (новое крыльцо + терраса с навесом, синхронизация опций, обход стен ограждением):
 
