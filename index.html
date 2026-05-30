@@ -277,18 +277,19 @@
 </div>
 
 <!-- ═══ SCRIPTS ═══ -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/RGBELoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/EXRLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<!-- Three.js r128 — захостен локально (cdnjs/jsdelivr недоступны в некоторых сетях) -->
+<script src="vendor/three/three.min.js"></script>
+<script src="vendor/three/OrbitControls.js"></script>
+<script src="vendor/three/RGBELoader.js"></script>
+<script src="vendor/three/EXRLoader.js"></script>
+<script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
 <script src="state.js?v=16"></script>
 <script src="canvas.js?v=18"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=62"></script>
 <!-- 3D viewer -->
-<script src="viewer3d-core.js?v=54"></script>
+<script src="viewer3d-core.js?v=55"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
 <script src="nav-desktop.js?v=28"></script>

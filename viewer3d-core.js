@@ -2039,35 +2039,49 @@ function buildRailing3d(parent,M,pts,deckHeight,houseL,houseW){
     }
   }
 
-  // Возвращает t-диапазоны [t0,t1] на сегменте (ax,az)→(bx,bz), которые
-  // нужно ПРОПУСТИТЬ, потому что сегмент прилегает к стене дома (параллелен ей
-  // в пределах углового допуска И отстоит не дальше pad).
-  function _wallSkipRanges(ax,az,bx,bz,pad){
+  // Рёбра rect ступеней в мировых координатах — для выреза в перилах под вход
+  // на лестницу. Любая сторона rect, параллельная ребру террасы и близкая к нему,
+  // считается «опорной» — её участок вырезается.
+  let stepsEdges = [];
+  if (S.sections.includes('steps') && S.steps) {
+    const sc = canvasToWorld([
+      { x: S.steps.x,             y: S.steps.y },
+      { x: S.steps.x + S.steps.w, y: S.steps.y },
+      { x: S.steps.x + S.steps.w, y: S.steps.y + S.steps.h },
+      { x: S.steps.x,             y: S.steps.y + S.steps.h },
+    ], houseL, houseW);
+    for (let i = 0; i < 4; i++) {
+      const a = sc[i], b = sc[(i+1)%4];
+      stepsEdges.push([a.x, a.z, b.x, b.z]);
+    }
+  }
+
+  // Возвращает t-диапазоны [t0,t1] на сегменте (ax,az)→(bx,bz), которые нужно
+  // ПРОПУСТИТЬ, потому что сегмент прилегает к одному из рёбер `targetEdges`
+  // (параллелен с допуском ~6° И отстоит не дальше pad). Используется и для
+  // выреза у стен дома, и для входа на ступени.
+  function _edgesSkipRanges(ax,az,bx,bz,pad,targetEdges){
     const dx=bx-ax, dz=bz-az;
     const len=Math.sqrt(dx*dx+dz*dz);
     if (len < 0.01) return [];
     const dux=dx/len, duz=dz/len;
     const ranges=[];
-    for (const [h0x,h0z,h1x,h1z] of houseEdges) {
+    for (const [h0x,h0z,h1x,h1z] of targetEdges) {
       const hdx=h1x-h0x, hdz=h1z-h0z;
       const hlen=Math.sqrt(hdx*hdx+hdz*hdz);
       if (hlen < 0.01) continue;
       const hux=hdx/hlen, huz=hdz/hlen;
-      // Параллельность: |векторное произведение| < 0.1 ≈ до ~6° наклона
       if (Math.abs(dux*huz - duz*hux) > 0.1) continue;
-      // Перпендикулярное расстояние от линии (h0,h1) до точки (ax,az)
       const vx=ax-h0x, vz=az-h0z;
       const dot=vx*hux + vz*huz;
       const perpSq = Math.max(0, vx*vx+vz*vz - dot*dot);
       if (perpSq > pad*pad) continue;
-      // Проекция h0,h1 на ось сегмента (ax→bx) с нормировкой к [0..1]
       const t0=((h0x-ax)*dux + (h0z-az)*duz) / len;
       const t1=((h1x-ax)*dux + (h1z-az)*duz) / len;
       const tmin=Math.max(0, Math.min(t0,t1));
       const tmax=Math.min(1, Math.max(t0,t1));
       if (tmax > tmin + 0.001) ranges.push([tmin, tmax]);
     }
-    // Сортировка и слияние перекрывающихся
     ranges.sort((a,b)=>a[0]-b[0]);
     const merged=[];
     for (const r of ranges) {
@@ -2140,12 +2154,25 @@ function buildRailing3d(parent,M,pts,deckHeight,houseL,houseW){
 
   for(let i=0;i<worldPts.length;i++){
     const cur=worldPts[i], next=worldPts[(i+1)%worldPts.length];
-    // 1) Сначала убираем участки, прилегающие к стенам дома (pad = 0.30 м —
-    //    половина типичной толщины стены + сам перильный пост).
-    const wallSkip = _wallSkipRanges(cur.x, cur.z, next.x, next.z, 0.30);
-    const afterWall = _splitBySkipRanges(cur.x, cur.z, next.x, next.z, wallSkip);
-    // 2) Каждый получившийся подсегмент режем вокруг крыльца.
-    for (const ws of afterWall) {
+    // Вырезы: (a) у стен дома, pad = 0.30 м; (b) у входа на ступени, pad = 0.40 м
+    // (чуть больше, чтобы захватить весь rect лестницы вплоть до боковых щёк).
+    const wallSkip  = _edgesSkipRanges(cur.x, cur.z, next.x, next.z, 0.30, houseEdges);
+    const stepsSkip = stepsEdges.length
+      ? _edgesSkipRanges(cur.x, cur.z, next.x, next.z, 0.40, stepsEdges)
+      : [];
+    // Объединяем оба набора диапазонов и снова мержим перекрывающиеся.
+    const allSkips = [...wallSkip, ...stepsSkip].sort((a,b)=>a[0]-b[0]);
+    const merged = [];
+    for (const r of allSkips) {
+      if (merged.length && r[0] <= merged[merged.length-1][1] + 0.001) {
+        merged[merged.length-1][1] = Math.max(merged[merged.length-1][1], r[1]);
+      } else {
+        merged.push([r[0], r[1]]);
+      }
+    }
+    const segments = _splitBySkipRanges(cur.x, cur.z, next.x, next.z, merged);
+    // splitAroundPorch остаётся как заглушка (porchRect = null → возвращает как есть).
+    for (const ws of segments) {
       for (const seg of splitAroundPorch(ws.ax, ws.az, ws.bx, ws.bz)) {
         drawRailSeg(seg.ax, seg.az, seg.bx, seg.bz);
       }
