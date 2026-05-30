@@ -1404,7 +1404,11 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   const treadLen = STEP_DEPTH + STEP_NOSING - RISER_THICKNESS;
   for (let i = 0; i < n; i++) {
     const isLast = (i === n - 1);
-    const yTopRiser = (i === 0) ? bh : (bh - i * realRise - TREAD_THICKNESS);
+    // Подступенок 0 (между террасой и проступью 0) НЕ строится — кромка террасы
+    // с nosing сама закрывает зазор по высоте, а лишняя серая стенка под террасой
+    // создаёт визуальный артефакт. Подступенки i≥1 — как обычно (укорочены сверху).
+    const skipRiser = (i === 0);
+    const yTopRiser = (bh - i * realRise - TREAD_THICKNESS); // (i=0 → bh−TREAD_THICKNESS; используется только для щёк)
     const yBotRiser = isLast ? 0 : (bh - (i + 1) * realRise);
 
     // ── ПРОСТУПЬ i (не строится для последней ступеньки) ──
@@ -1425,7 +1429,8 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       threeState.deckMeshes.push(tread);
     }
 
-    // ── ПОДСТУПЕНОК i ──
+    // ── ПОДСТУПЕНОК i (i=0 пропускается — см. skipRiser) ──
+    if (skipRiser) continue;
     const riserH = yTopRiser - yBotRiser;
     if (riserH < 0.01) continue;
     const riserCenterY = (yTopRiser + yBotRiser) / 2;
@@ -1467,8 +1472,12 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       const points2D = [];
       const addPt = (off, y) => points2D.push(new THREE.Vector2(off, y));
 
-      addPt(0, bh);                                         // top-back
-      addPt(RISER_THICKNESS, bh);                           // верх передней плоскости подступенка 0
+      // Подступенок 0 не строится → щека начинается с верха проступи 0
+      // (bh − realRise), а не с уровня террасы. Это убирает «полочку»
+      // под террасой и z-fighting в районе nosing террасы.
+      const yTop0 = bh - realRise;
+      addPt(0, yTop0);                                      // top-back (на уровне верха первой проступи)
+      addPt(RISER_THICKNESS, yTop0);                        // верх в районе передней плоскости подступенка 0
       for (let i = 0; i < n; i++) {
         const isLast = (i === n - 1);
         const yBotRiser = isLast ? 0 : (bh - (i + 1) * realRise);

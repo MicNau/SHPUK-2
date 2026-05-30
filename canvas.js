@@ -722,16 +722,39 @@ let trDragIdx = -1;      // индекс rect'а, который тащим
 // Snap нормализованной координаты к сетке 0.5 м.
 function snapNorm(v) { return Math.round(v * GRID / SNAP) * SNAP / GRID; }
 
-// Snap координаты к стенам дома (для X/Y отдельно, порог 1 м).
+// Snap координаты (X и Y по отдельности, порог 1 м) к рёбрам:
+//   • стен дома (через getHousePolygonNorm);
+//   • всех S.terraceRects, КРОМЕ активного (чтобы редактируемый rect не снапался
+//     на свои собственные кромки). Это даёт прилипание ступеней к боковым кромкам
+//     террасы и стыковку соседних террасных rect'ов друг к другу.
 function snapToHouseWalls(snX, snY) {
-  if (S.houseType === 'Участок без дома') return { x: snX, y: snY };
-  const hp = getHousePolygonNorm();
   const thr = 1.0 / GRID;
   const xCoords = new Set(), yCoords = new Set();
-  for (const e of hp.edges) {
-    if (e.axis === 'v') xCoords.add(e.coord);
-    else if (e.axis === 'h') yCoords.add(e.coord);
+
+  // 1) Рёбра дома (если есть)
+  if (S.houseType !== 'Участок без дома') {
+    const hp = getHousePolygonNorm();
+    for (const e of hp.edges) {
+      if (e.axis === 'v') xCoords.add(e.coord);
+      else if (e.axis === 'h') yCoords.add(e.coord);
+    }
   }
+
+  // 2) Рёбра террасных rect'ов (кроме активного — иначе rect снапается на самого
+  //    себя при resize). Применимо при редактировании и террасы (skip active rect),
+  //    и ступеней (там activeTerraceRect не редактируется → добавляем все rects).
+  const rects = S.terraceRects || [];
+  for (let i = 0; i < rects.length; i++) {
+    if (i === S.activeTerraceRect) continue;
+    const r = rects[i];
+    xCoords.add(r.x);
+    xCoords.add(r.x + r.w);
+    yCoords.add(r.y);
+    yCoords.add(r.y + r.h);
+  }
+
+  if (xCoords.size === 0 && yCoords.size === 0) return { x: snX, y: snY };
+
   let bestX = snX, bestXD = thr;
   for (const xc of xCoords) {
     const d = Math.abs(snX - xc);
