@@ -508,7 +508,10 @@ function getStepsRectPx(W) {
 
 function hitStepsHandle(wx, wy, W) {
   const { x, y, w, h } = getStepsRectPx(W);
-  const R = HANDLE_R;
+  // Радиус зоны попадания угла = визуальный радиус кружка в мировых координатах
+  // (HANDLE_R / scale) — иначе при зуме-аут клик промахивается мимо угла.
+  const sc = (CV['steps'] && CV['steps'].scale) || 1;
+  const R = HANDLE_R / sc;
   for (const [k, cx, cy] of [['nw',x,y], ['ne',x+w,y], ['sw',x,y+h], ['se',x+w,y+h]]) {
     if (Math.hypot(wx - cx, wy - cy) < R) return k;
   }
@@ -519,53 +522,22 @@ function hitStepsHandle(wx, wy, W) {
 function applyStepsDrag(wx, wy, W) {
   const ds = stepsDragStart;
   const dx = (wx - ds.mx) / W, dy = (wy - ds.my) / W;
-  const mn = SNAP / GRID;
   const s = S.steps;
-
-  if (stepsDrag === 'move') {
-    let nx = Math.max(0, Math.min(1 - ds.w, ds.x + dx));
-    let ny = Math.max(0, Math.min(1 - ds.h, ds.y + dy));
-    nx = snapNorm(nx); ny = snapNorm(ny);
-    const sn = snapToHouseWalls(nx, ny);
-    s.x = sn.x; s.y = sn.y; s.w = ds.w; s.h = ds.h;
-  } else if (stepsDrag === 'se') {
-    let bx = snapNorm(ds.x + Math.max(mn, ds.w + dx));
-    let by = snapNorm(ds.y + Math.max(mn, ds.h + dy));
-    const sn = snapToHouseWalls(bx, by);
-    s.x = ds.x; s.y = ds.y;
-    s.w = snapNorm(Math.max(mn, sn.x - ds.x));
-    s.h = snapNorm(Math.max(mn, sn.y - ds.y));
-  } else if (stepsDrag === 'sw') {
-    let ax = snapNorm(Math.min(ds.x + ds.w - mn, ds.x + dx));
-    let by = snapNorm(ds.y + Math.max(mn, ds.h + dy));
-    const sn = snapToHouseWalls(ax, by);
-    s.x = sn.x; s.y = ds.y;
-    s.w = snapNorm(Math.max(mn, ds.x + ds.w - s.x));
-    s.h = snapNorm(Math.max(mn, sn.y - ds.y));
-  } else if (stepsDrag === 'ne') {
-    let bx = snapNorm(ds.x + Math.max(mn, ds.w + dx));
-    let ay = snapNorm(Math.min(ds.y + ds.h - mn, ds.y + dy));
-    const sn = snapToHouseWalls(bx, ay);
-    s.x = ds.x; s.y = sn.y;
-    s.w = snapNorm(Math.max(mn, sn.x - ds.x));
-    s.h = snapNorm(Math.max(mn, ds.y + ds.h - s.y));
-  } else if (stepsDrag === 'nw') {
-    let ax = snapNorm(Math.min(ds.x + ds.w - mn, ds.x + dx));
-    let ay = snapNorm(Math.min(ds.y + ds.h - mn, ds.y + dy));
-    const sn = snapToHouseWalls(ax, ay);
-    s.x = sn.x; s.y = sn.y;
-    s.w = snapNorm(Math.max(mn, ds.x + ds.w - s.x));
-    s.h = snapNorm(Math.max(mn, ds.y + ds.h - s.y));
-  }
+  // excludeTerraceIdx = -1 — ступени снапаются ко ВСЕМ террасным rect'ам + стенам дома.
+  const res = snapDraggedRect(stepsDrag, ds, dx, dy, -1);
+  s.x = res.x; s.y = res.y; s.w = res.w; s.h = res.h;
   drawStepsCanvas();
 }
 
 function attachStepsEvents(wrap) {
-  const cx = CV['steps'];
+  // Слушатели вешаются один раз (см. attachTerraceEvents) — guard + чтение CV['steps'] свежим.
+  if (wrap._stepsBound) return;
+  wrap._stepsBound = true;
   let touchId = null;
   let pinchActive = false;
 
   const getWorld = (clientX, clientY) => {
+    const cx = CV['steps'] || { ox: 0, oy: 0, scale: 1 };
     const cvEl = document.getElementById('cv-steps');
     const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio||1;
     return {
@@ -574,9 +546,12 @@ function attachStepsEvents(wrap) {
       W: cvEl.width,
     };
   };
+  const stepsActive = () =>
+    CV['steps'] && document.getElementById('d-canvas-steps')?.classList.contains('active');
 
   wrap.addEventListener('touchstart', e => {
     e.preventDefault();
+    const cx = CV['steps']; if (!cx) return;
     if (e.touches.length === 2) {
       pinchActive = true; stepsDrag = null; touchId = null;
       cx.lastDist = Math.hypot(
@@ -598,6 +573,7 @@ function attachStepsEvents(wrap) {
 
   wrap.addEventListener('touchmove', e => {
     e.preventDefault();
+    const cx = CV['steps']; if (!cx) return;
     if (pinchActive && e.touches.length === 2) {
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
@@ -625,6 +601,7 @@ function attachStepsEvents(wrap) {
   }, { passive:true });
 
   wrap.addEventListener('mousedown', e => {
+    if (!stepsActive()) return;
     const {x,y,W} = getWorld(e.clientX, e.clientY);
     const hit = hitStepsHandle(x,y,W);
     if (hit) {
@@ -639,11 +616,13 @@ function attachStepsEvents(wrap) {
     applyStepsDrag(x,y,W);
   });
   document.addEventListener('mouseup', () => {
+    if (!stepsDrag) return;
     stepsDrag = null; stepsDragStart = null; wrap.style.cursor = 'default';
   });
 
   wrap.addEventListener('wheel', e => {
     e.preventDefault();
+    const cx = CV['steps']; if (!cx) return;
     const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio||1;
     const mx=(e.clientX-r.left)*dpr, my=(e.clientY-r.top)*dpr;
     const f = e.deltaY < 0 ? 1.15 : 0.87;
@@ -722,54 +701,103 @@ let trDragIdx = -1;      // индекс rect'а, который тащим
 // Snap нормализованной координаты к сетке 0.5 м.
 function snapNorm(v) { return Math.round(v * GRID / SNAP) * SNAP / GRID; }
 
-// Snap координаты (X и Y по отдельности, порог 1 м) к рёбрам:
-//   • стен дома (через getHousePolygonNorm);
-//   • всех S.terraceRects, КРОМЕ активного (чтобы редактируемый rect не снапался
-//     на свои собственные кромки). Это даёт прилипание ступеней к боковым кромкам
-//     террасы и стыковку соседних террасных rect'ов друг к другу.
-function snapToHouseWalls(snX, snY) {
-  const thr = 1.0 / GRID;
-  const xCoords = new Set(), yCoords = new Set();
-
-  // 1) Рёбра дома (если есть)
+// Собирает координаты вертикальных (xs) и горизонтальных (ys) рёбер,
+// к которым прилипают кромки rect'ов:
+//   • рёбра дома (getHousePolygonNorm);
+//   • рёбра всех S.terraceRects, КРОМЕ excludeTerraceIdx (редактируемый террасный
+//     rect не должен снапаться на собственные кромки; при редактировании ступеней
+//     excludeTerraceIdx = -1 → все террасные rect'ы учитываются).
+function _snapTargets(excludeTerraceIdx) {
+  const xs = [], ys = [];
   if (S.houseType !== 'Участок без дома') {
     const hp = getHousePolygonNorm();
     for (const e of hp.edges) {
-      if (e.axis === 'v') xCoords.add(e.coord);
-      else if (e.axis === 'h') yCoords.add(e.coord);
+      if (e.axis === 'v') xs.push(e.coord);
+      else if (e.axis === 'h') ys.push(e.coord);
     }
   }
-
-  // 2) Рёбра террасных rect'ов (кроме активного — иначе rect снапается на самого
-  //    себя при resize). Применимо при редактировании и террасы (skip active rect),
-  //    и ступеней (там activeTerraceRect не редактируется → добавляем все rects).
   const rects = S.terraceRects || [];
   for (let i = 0; i < rects.length; i++) {
-    if (i === S.activeTerraceRect) continue;
+    if (i === excludeTerraceIdx) continue;
     const r = rects[i];
-    xCoords.add(r.x);
-    xCoords.add(r.x + r.w);
-    yCoords.add(r.y);
-    yCoords.add(r.y + r.h);
+    xs.push(r.x, r.x + r.w);
+    ys.push(r.y, r.y + r.h);
   }
-
-  if (xCoords.size === 0 && yCoords.size === 0) return { x: snX, y: snY };
-
-  let bestX = snX, bestXD = thr;
-  for (const xc of xCoords) {
-    const d = Math.abs(snX - xc);
-    if (d < bestXD) { bestX = xc; bestXD = d; }
-  }
-  let bestY = snY, bestYD = thr;
-  for (const yc of yCoords) {
-    const d = Math.abs(snY - yc);
-    if (d < bestYD) { bestY = yc; bestYD = d; }
-  }
-  return { x: bestX, y: bestY };
+  return { xs, ys };
 }
 
-// (helper удалён — wall-snap делается per-corner внутри applyTerraceDrag,
-// чтобы не «дотягивать» противоположный неподвижный угол к ближайшей стене)
+// Ближайшая snap-цель к координате coord в пределах порога thr; иначе null.
+function _nearestTarget(coord, targets) {
+  const thr = 1.0 / GRID;  // 1 м
+  let best = null, bestD = thr;
+  for (const t of targets) {
+    const d = Math.abs(coord - t);
+    if (d < bestD) { best = t; bestD = d; }
+  }
+  return best;
+}
+
+// Унифицированный снап rect при drag. Возвращает {x,y,w,h} (нормализованные).
+//   kind: 'move' | 'nw' | 'ne' | 'sw' | 'se'
+//   ds:   стартовое состояние {x,y,w,h}
+//   dx,dy: смещение мыши (нормализованное)
+//   excludeTerraceIdx: индекс террасного rect, который НЕ участвует как цель снапа.
+// Принцип: к стене/террасе липнет ТОЛЬКО движущаяся кромка; противоположная остаётся
+// на сетке. Поэтому wall-snap НЕ перетирается финальным snapNorm, и дальние углы
+// не уносит с сетки (исправление «снапается целиком»).
+function snapDraggedRect(kind, ds, dx, dy, excludeTerraceIdx) {
+  const mn = SNAP / GRID;
+  const { xs, ys } = _snapTargets(excludeTerraceIdx);
+
+  if (kind === 'move') {
+    // Ближний угол (top-left) грид-снапим; дальний = left+ds.w (на сетке, если ds.w на сетке).
+    let left = snapNorm(Math.max(0, Math.min(1 - ds.w, ds.x + dx)));
+    let top  = snapNorm(Math.max(0, Math.min(1 - ds.h, ds.y + dy)));
+    let right = left + ds.w, bottom = top + ds.h;
+    // X: пробуем притянуть к стене ЛИБО левую, ЛИБО правую кромку (что ближе).
+    const wL = _nearestTarget(left, xs), wR = _nearestTarget(right, xs);
+    const okL = (wL !== null && wL < right - mn);
+    const okR = (wR !== null && wR > left + mn);
+    if (okL && (!okR || Math.abs(wL - left) <= Math.abs(wR - right))) left = wL;
+    else if (okR) right = wR;
+    // Y
+    const wT = _nearestTarget(top, ys), wB = _nearestTarget(bottom, ys);
+    const okT = (wT !== null && wT < bottom - mn);
+    const okB = (wB !== null && wB > top + mn);
+    if (okT && (!okB || Math.abs(wT - top) <= Math.abs(wB - bottom))) top = wT;
+    else if (okB) bottom = wB;
+    return { x: left, y: top, w: Math.max(mn, right - left), h: Math.max(mn, bottom - top) };
+  }
+
+  // resize: противоположный угол фиксирован (на сетке из ds), движется только dragged-угол.
+  const movingRight  = (kind === 'ne' || kind === 'se');
+  const movingBottom = (kind === 'sw' || kind === 'se');
+  let left, right, top, bottom;
+
+  if (movingRight) {
+    left = ds.x;                                            // фиксирован, на сетке
+    let r = snapNorm(ds.x + Math.max(mn, ds.w + dx));       // грид-кандидат
+    const w = _nearestTarget(r, xs); if (w !== null && w > left + mn) r = w;  // wall имеет приоритет
+    right = Math.max(left + mn, r);
+  } else {
+    right = ds.x + ds.w;                                    // фиксирован
+    let l = snapNorm(Math.min(right - mn, ds.x + dx));
+    const w = _nearestTarget(l, xs); if (w !== null && w < right - mn) l = w;
+    left = Math.min(right - mn, l);
+  }
+  if (movingBottom) {
+    top = ds.y;
+    let b = snapNorm(ds.y + Math.max(mn, ds.h + dy));
+    const w = _nearestTarget(b, ys); if (w !== null && w > top + mn) b = w;
+    bottom = Math.max(top + mn, b);
+  } else {
+    bottom = ds.y + ds.h;
+    let t = snapNorm(Math.min(bottom - mn, ds.y + dy));
+    const w = _nearestTarget(t, ys); if (w !== null && w < bottom - mn) t = w;
+    top = Math.min(bottom - mn, t);
+  }
+  return { x: left, y: top, w: right - left, h: bottom - top };
+}
 
 function initTerraceCanvas() {
   const wrap = document.getElementById('cw-terrace');
@@ -851,9 +879,12 @@ function delActiveTerraceRect() {
 //   Сначала проверяем handles активного rect (приоритет — он сверху).
 function hitTerrace(wx, wy, W) {
   const rects = S.terraceRects || [];
-  // Hitbox handles = радиус самого визуального круга (раньше было *2 — съедало
-  // клики по соседним rect'ам и блокировало переключение активного).
-  const R = HANDLE_R;
+  // Hitbox handle = визуальный радиус кружка В МИРОВЫХ координатах. Кружок рисуется
+  // как HANDLE_R / scale (см. drawTerraceCanvas), поэтому и зона попадания должна
+  // делиться на scale — иначе при зуме-аут клик по видимому кружку промахивается
+  // мимо угла (срывается захват / вместо resize получается move).
+  const sc = (CV['terrace'] && CV['terrace'].scale) || 1;
+  const R = HANDLE_R / sc;
   // 1. Handles активного rect (приоритет).
   if (S.activeTerraceRect !== null && rects[S.activeTerraceRect]) {
     const r = rects[S.activeTerraceRect];
@@ -882,64 +913,24 @@ function applyTerraceDrag(wx, wy, W) {
   if (trDragIdx < 0 || !S.terraceRects[trDragIdx]) return;
   const ds = trDragStart;
   const dx = (wx - ds.mx) / W, dy = (wy - ds.my) / W;
-  const mn = SNAP / GRID;
   const r = S.terraceRects[trDragIdx];
-
-  // Считаем «сырое» новое положение rect от стартовых значений ds (не от текущего r —
-  // иначе ошибка накапливается между событиями). Wall-snap применяется ТОЛЬКО к тому
-  // углу, который пользователь двигает, остальные углы остаются на месте.
-  if (trDrag === 'move') {
-    // Двигается весь rect — опорный угол top-left, размеры не меняются.
-    let nx = Math.max(0, Math.min(1 - ds.w, ds.x + dx));
-    let ny = Math.max(0, Math.min(1 - ds.h, ds.y + dy));
-    nx = snapNorm(nx); ny = snapNorm(ny);
-    const sn = snapToHouseWalls(nx, ny);
-    r.x = sn.x; r.y = sn.y;
-    r.w = ds.w; r.h = ds.h;
-  } else if (trDrag === 'se') {
-    // Двигается правый-нижний угол; левый-верхний (ds.x, ds.y) фиксирован.
-    let bx = snapNorm(ds.x + Math.max(mn, ds.w + dx));
-    let by = snapNorm(ds.y + Math.max(mn, ds.h + dy));
-    const sn = snapToHouseWalls(bx, by);
-    r.x = ds.x; r.y = ds.y;
-    r.w = snapNorm(Math.max(mn, sn.x - ds.x));
-    r.h = snapNorm(Math.max(mn, sn.y - ds.y));
-  } else if (trDrag === 'sw') {
-    // Двигается левый-нижний угол; правый-верхний (ds.x+ds.w, ds.y) фиксирован.
-    let ax = snapNorm(Math.min(ds.x + ds.w - mn, ds.x + dx));
-    let by = snapNorm(ds.y + Math.max(mn, ds.h + dy));
-    const sn = snapToHouseWalls(ax, by);
-    r.x = sn.x;
-    r.y = ds.y;
-    r.w = snapNorm(Math.max(mn, ds.x + ds.w - r.x));
-    r.h = snapNorm(Math.max(mn, sn.y - ds.y));
-  } else if (trDrag === 'ne') {
-    // Двигается правый-верхний угол; левый-нижний (ds.x, ds.y+ds.h) фиксирован.
-    let bx = snapNorm(ds.x + Math.max(mn, ds.w + dx));
-    let ay = snapNorm(Math.min(ds.y + ds.h - mn, ds.y + dy));
-    const sn = snapToHouseWalls(bx, ay);
-    r.x = ds.x;
-    r.y = sn.y;
-    r.w = snapNorm(Math.max(mn, sn.x - ds.x));
-    r.h = snapNorm(Math.max(mn, ds.y + ds.h - r.y));
-  } else if (trDrag === 'nw') {
-    // Двигается левый-верхний угол; правый-нижний (ds.x+ds.w, ds.y+ds.h) фиксирован.
-    let ax = snapNorm(Math.min(ds.x + ds.w - mn, ds.x + dx));
-    let ay = snapNorm(Math.min(ds.y + ds.h - mn, ds.y + dy));
-    const sn = snapToHouseWalls(ax, ay);
-    r.x = sn.x; r.y = sn.y;
-    r.w = snapNorm(Math.max(mn, ds.x + ds.w - r.x));
-    r.h = snapNorm(Math.max(mn, ds.y + ds.h - r.y));
-  }
+  // excludeTerraceIdx = trDragIdx — редактируемый rect не снапается на свои кромки.
+  const res = snapDraggedRect(trDrag, ds, dx, dy, trDragIdx);
+  r.x = res.x; r.y = res.y; r.w = res.w; r.h = res.h;
   drawTerraceCanvas();
 }
 
 function attachTerraceEvents(wrap) {
-  const cx = CV['terrace'];
+  // Слушатели вешаются на wrap/document ОДИН РАЗ. Раньше attach вызывался при каждом
+  // открытии редактора → дубли слушателей и захват устаревшего cx из замыкания
+  // (срыв захвата / двойная обработка). Теперь guard + чтение CV['terrace'] свежим.
+  if (wrap._terraceBound) return;
+  wrap._terraceBound = true;
   let touchId = null;
   let pinchActive = false;
 
   const getWorld = (clientX, clientY) => {
+    const cx = CV['terrace'] || { ox: 0, oy: 0, scale: 1 };
     const cvEl = document.getElementById('cv-terrace');
     const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio||1;
     return {
@@ -973,6 +964,7 @@ function attachTerraceEvents(wrap) {
   // ── TOUCH ──
   wrap.addEventListener('touchstart', e => {
     e.preventDefault();
+    const cx = CV['terrace']; if (!cx) return;
     if (e.touches.length === 2) {
       pinchActive = true; trDrag = null; touchId = null;
       cx.lastDist = Math.hypot(
@@ -989,6 +981,7 @@ function attachTerraceEvents(wrap) {
 
   wrap.addEventListener('touchmove', e => {
     e.preventDefault();
+    const cx = CV['terrace']; if (!cx) return;
     if (pinchActive && e.touches.length === 2) {
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
@@ -1020,6 +1013,8 @@ function attachTerraceEvents(wrap) {
 
   // ── МЫШЬ ──
   wrap.addEventListener('mousedown', e => {
+    // Реагируем только когда открыт редактор террасы (слушатель на wrap живёт всегда).
+    if (!CV['terrace'] || !document.getElementById('d-canvas-terrace')?.classList.contains('active')) return;
     const {x, y, W} = getWorld(e.clientX, e.clientY);
     if (startDrag(x, y, W)) {
       wrap.style.cursor = (trDrag === 'move') ? 'move' : 'nwse-resize';
@@ -1031,6 +1026,7 @@ function attachTerraceEvents(wrap) {
     applyTerraceDrag(x, y, W);
   });
   document.addEventListener('mouseup', () => {
+    if (!trDrag) return;
     trDrag = null; trDragStart = null; trDragIdx = -1;
     wrap.style.cursor = 'default';
   });
@@ -1038,6 +1034,7 @@ function attachTerraceEvents(wrap) {
   // Колесо → zoom
   wrap.addEventListener('wheel', e => {
     e.preventDefault();
+    const cx = CV['terrace']; if (!cx) return;
     const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio||1;
     const mx = (e.clientX - r.left)*dpr, my = (e.clientY - r.top)*dpr;
     const f = e.deltaY < 0 ? 1.15 : 0.87;

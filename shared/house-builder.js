@@ -56,6 +56,9 @@ function collectModuleIds(desc) {
   ids.add('pillar');
   ids.add('base_segment');
   ids.add('base_pillar');
+  // porch_column нужен фронтенду для опор навеса террасы (buildTerraceCanopy3d),
+  // независимо от наличия features.porch в дескрипторе — грузим всегда.
+  ids.add('porch_column');
   const roofMods = {
     hip:         ['roof_hip_slope', 'roof_hip_ridge'],
     gable:       ['roof_gable_slope', 'roof_gable_front'],
