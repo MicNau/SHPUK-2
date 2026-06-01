@@ -878,12 +878,9 @@ function buildScene3d() {
 
   const terraceCanopyOn = document.querySelector('.tg[data-id="terrace-roof"]')?.classList.contains('on');
   if (terraceCanopyOn && S.sections.includes('terrace')) {
-    for (let ri = 0; ri < terraceRectPolys.length; ri++) {
-      const otherRects = allRectsWorld.filter((_, j) => j !== ri);
-      try {
-        buildTerraceCanopy3d(houseGroup, M, terraceRectPolys[ri], isNoHouse ? 0.35 : bh, houseL, houseW, otherRects);
-      } catch (e) { console.error('[buildTerraceCanopy3d]', e); }
-    }
+    try {
+      buildTerraceCanopies(houseGroup, M, terraceRectPolys, isNoHouse ? 0.35 : bh, houseL, houseW);
+    } catch (e) { console.error('[buildTerraceCanopies]', e); }
   }
 
   // Собираем зоны, занятые конструкциями (для проверки растительности)
@@ -1580,12 +1577,14 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   // Перила лестницы (toggle steps-railing).
   const hasRailing = !!document.querySelector('.tg[data-id="steps-railing"]')?.classList.contains('on');
   if (hasRailing) {
-    const railH = 0.95, handT = 0.05, balW = 0.04, balStep = 0.18, newelW = 0.09;
+    const railH = 0.95, handT = 0.05, balW = 0.04, balStep = 0.18;
     // Перила сдвинуты от краёв ступеней внутрь — не конфликтуют с углом террасы
     // и стоят на проступи, а не на свесе. latOff = полуширина минус inset.
-    const STAIR_RAIL_INSET = 0.12;
+    // STAIR_RAIL_INSET — модульная константа: тем же значением сужается проём перил
+    // террасы под лестницу, чтобы колонна навеса на углу проёма встала соосно перилам
+    // лестницы (см. terracePerimeterSegments).
     const latOff = Math.max(0.10, stairWidth / 2 - STAIR_RAIL_INSET);
-    // Поручень + балясины + ньюэлы в цвете колонн (как у перил террасы) — единый вид.
+    // Поручень + балясины в цвете колонн (как у перил террасы) — единый вид.
     const stairRailMat = new THREE.MeshStandardMaterial({ color: PORCH_COLUMN_COLOR, roughness: 0.72, metalness: 0.04 });
     const handMat = stairRailMat;
     const baluMat = stairRailMat;
@@ -1602,23 +1601,20 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       }
       const topY = bh + railH;            // над верхом террасы (стыкуется с поручнем террасы)
       const botY = realRise + railH;      // над последней видимой проступью (Y=realRise) + высота поручня
-      // Поручень — наклонный брус
-      const ddx = botPx - topPx, ddy = botY - topY, ddz = botPz - topPz;
-      const len = Math.hypot(ddx, ddy, ddz);
+      // Поручень — наклонный брус. Верхний конец продлеваем НАЗАД по скату вглубь террасы
+      // (на RAIL_INSET + полколонны), чтобы он входил в ствол колонны на углу проёма, а не
+      // висел в воздухе (ньюэлы убраны в v=66; колонна соосна перилам лестницы — v=67).
+      const run = Math.hypot(botPx - topPx, botPz - topPz) || 1e-6;            // горизонт. ход (= stairDepth)
+      const slope0 = Math.hypot(botPx - topPx, botY - topY, botPz - topPz) || 1e-6;
+      const topExt = (RAIL_INSET + CANOPY_COL_HALF) * slope0 / run;            // длина продления вдоль ската
+      const ux = (topPx - botPx) / slope0, uy = (topY - botY) / slope0, uz = (topPz - botPz) / slope0;
+      const hTopX = topPx + ux * topExt, hTopY = topY + uy * topExt, hTopZ = topPz + uz * topExt;
+      const len = Math.hypot(botPx - hTopX, botY - hTopY, botPz - hTopZ);
       const hand = mesh(box(handT, handT, len), handMat);
-      hand.position.set((topPx+botPx)/2, (topY+botY)/2, (topPz+botPz)/2);
+      hand.position.set((hTopX + botPx)/2, (hTopY + botY)/2, (hTopZ + botPz)/2);
       hand.lookAt(botPx, botY, botPz);
       stairGroup.add(hand);
       threeState.railingMeshes.push(hand);
-
-      // Ньюэл-стойки — вертикальные столбы на концах марша, в них входит поручень.
-      // Верхний: от верха террасы (bh) до поручня. Нижний: от земли (0) до поручня.
-      const topNewel = mesh(box(newelW, topY - bh, newelW), baluMat);
-      topNewel.position.set(topPx, (bh + topY) / 2, topPz);
-      stairGroup.add(topNewel); threeState.railingMeshes.push(topNewel);
-      const botNewel = mesh(box(newelW, botY, newelW), baluMat);
-      botNewel.position.set(botPx, botY / 2, botPz);
-      stairGroup.add(botNewel); threeState.railingMeshes.push(botNewel);
 
       // Балясины — по одной на каждую видимую проступь (i=0..n-2).
       for (let i = 0; i < n - 1; i++) {
@@ -2029,30 +2025,95 @@ function buildPorch3d(parent,M,porch,houseL,houseW,bh){
   parent.add(porchGroup);
 }
 
-function buildPaths3d(parent,M,pts,houseL,houseW){
-  const realPts=pts.filter(p=>!p.break);
-  if(realPts.length<2)return;
-  const pathW=parseFloat(document.getElementById('v-paths-width')?.value||120)/100;
-  const boardW=.14,boardH=.022,gap=.005;
-  const pathGroup=new THREE.Group();
-  const box=(sx,sy,sz)=>new THREE.BoxGeometry(sx,sy,sz);
-  const meshFn=(geo,mat)=>{const m=new THREE.Mesh(geo,mat);m.castShadow=m.receiveShadow=true;return m;};
-  // Разбиваем на сегменты по маркерам break
-  const segments = (typeof splitAtBreaks==='function') ? splitAtBreaks(pts) : [realPts];
-  for(const seg of segments){
-    if(seg.length<2)continue;
-    const worldPts=canvasToWorld(seg,houseL,houseW);
-    for(let i=0;i<worldPts.length-1;i++){
-      const a=worldPts[i],b=worldPts[i+1],dx=b.x-a.x,dz=b.z-a.z;
-      const segLen=Math.sqrt(dx*dx+dz*dz); if(segLen<.1)continue;
-      const angle=Math.atan2(dx,dz);
-      for(let d=boardW/2;d<segLen;d+=boardW+gap){
-        const t=d/segLen,bx=a.x+dx*t,bz=a.z+dz*t;
-        const bd=meshFn(box(pathW,boardH,boardW),M.deck);bd.position.set(bx,boardH/2,bz);bd.rotation.y=angle;pathGroup.add(bd);threeState.deckMeshes.push(bd);
-      }
-    }
+// Смещение полилинии (world {x,z}) на halfW в обе стороны со стыками-миттерами на углах
+// (как у навеса террасы). Возвращает левую и правую кромки ленты.
+function _offsetPolyline(pts, halfW) {
+  const n = pts.length;
+  const segN = [];
+  for (let i = 0; i < n - 1; i++) {
+    const dx = pts[i+1].x - pts[i].x, dz = pts[i+1].z - pts[i].z;
+    const L = Math.hypot(dx, dz) || 1;
+    segN.push({ x: -dz / L, z: dx / L });                 // левая нормаль сегмента
   }
-  parent.add(pathGroup);
+  const left = [], right = [];
+  for (let i = 0; i < n; i++) {
+    let nx, nz;
+    if (i === 0)            { nx = segN[0].x;     nz = segN[0].z; }
+    else if (i === n - 1)   { nx = segN[n-2].x;   nz = segN[n-2].z; }
+    else {                                                // внутренний угол → миттер
+      const a = segN[i-1], b = segN[i];
+      let mx = a.x + b.x, mz = a.z + b.z;
+      const mL = Math.hypot(mx, mz) || 1; mx /= mL; mz /= mL;
+      const cos = Math.max(mx * b.x + mz * b.z, 0.34);    // лимит миттера (не даём «шипам» расти)
+      const k = Math.min(1 / cos, 3);
+      nx = mx * k; nz = mz * k;
+    }
+    left.push ({ x: pts[i].x + nx * halfW, z: pts[i].z + nz * halfW });
+    right.push({ x: pts[i].x - nx * halfW, z: pts[i].z - nz * halfW });
+  }
+  return { left, right };
+}
+
+// Монолитная лента-настил по левой/правой кромкам (как terrace box, но вдоль полилинии).
+// UV вдоль дорожки: U = длина по осевой, V = поперёк (ширина) → доски (грувы текстуры =
+// const V) идут ВДОЛЬ дорожки, поворачивая на углах вместе с лентой. Так фактура deck_diff
+// смотрится естественно (волокно вдоль длинных досок). DoubleSide — winding не важен.
+function _buildPathRibbon(parent, left, right, yBot, yTop, pathW, mat, meshArray) {
+  const n = left.length; if (n < 2) return;
+  const T = DECK_TILE, crossV = pathW / T;
+  const runs = [0];                                   // накопленная длина по осевой (середины кромок)
+  for (let i = 1; i < n; i++) {
+    const ax=(left[i-1].x+right[i-1].x)/2, az=(left[i-1].z+right[i-1].z)/2;
+    const bx=(left[i].x+right[i].x)/2,     bz=(left[i].z+right[i].z)/2;
+    runs.push(runs[i-1] + Math.hypot(bx-ax, bz-az));
+  }
+  const pos = [], uv = [], idx = [];
+  for (let i = 0; i < n; i++) {
+    const u = runs[i] / T;
+    pos.push(left[i].x,  yTop, left[i].z);  uv.push(u, 0);        // LT
+    pos.push(right[i].x, yTop, right[i].z); uv.push(u, crossV);   // RT
+    pos.push(left[i].x,  yBot, left[i].z);  uv.push(u, 0);        // LB
+    pos.push(right[i].x, yBot, right[i].z); uv.push(u, crossV);   // RB
+  }
+  const LT=i=>i*4, RT=i=>i*4+1, LB=i=>i*4+2, RB=i=>i*4+3;
+  for (let i = 0; i < n - 1; i++) {
+    idx.push(LT(i),RT(i),LT(i+1),  RT(i),RT(i+1),LT(i+1));     // верх
+    idx.push(LB(i),LB(i+1),RB(i),  RB(i),LB(i+1),RB(i+1));     // низ
+    idx.push(LT(i),LT(i+1),LB(i),  LB(i),LT(i+1),LB(i+1));     // левая кромка
+    idx.push(RT(i),RB(i),RT(i+1),  RT(i+1),RB(i),RB(i+1));     // правая кромка
+  }
+  idx.push(LT(0),LB(0),RT(0),  RT(0),LB(0),RB(0));             // торец начала
+  const e = n - 1; idx.push(LT(e),RT(e),LB(e),  RT(e),RB(e),LB(e));  // торец конца
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv',       new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, mat);
+  m.castShadow = m.receiveShadow = true;
+  parent.add(m);
+  if (meshArray && threeState[meshArray]) threeState[meshArray].push(m);
+}
+
+function buildPaths3d(parent, M, pts, houseL, houseW) {
+  if (pts.filter(p => !p.break).length < 2) return;
+  const pathW = parseFloat(document.getElementById('v-paths-width')?.value || 120) / 100;
+  const halfW = pathW / 2, PATH_H = 0.05;
+  const group = new THREE.Group();
+  // Один материал на все ленты — мировой UV даёт непрерывную текстуру (как у настила).
+  const pathMat = (M.deck && M.deck.clone) ? M.deck.clone()
+                                           : new THREE.MeshStandardMaterial({ color: 0x9a6b3f, roughness: 0.85 });
+  pathMat.side = THREE.DoubleSide;
+  const segments = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [pts.filter(p => !p.break)];
+  for (const seg of segments) {
+    const raw = canvasToWorld(seg.filter(p => !p.break), houseL, houseW);
+    const wp = [];                                            // выкидываем совпадающие точки
+    for (const p of raw) if (!wp.length || Math.hypot(p.x - wp[wp.length-1].x, p.z - wp[wp.length-1].z) > 0.05) wp.push(p);
+    if (wp.length < 2) continue;
+    const { left, right } = _offsetPolyline(wp, halfW);
+    _buildPathRibbon(group, left, right, 0, PATH_H, pathW, pathMat, 'deckMeshes');
+  }
+  parent.add(group);
 }
 
 function buildFence3d(parent,M,pts,houseL,houseW){
@@ -2203,7 +2264,17 @@ function terracePerimeterSegments(worldPts, houseL, houseW, otherRects){
   for(let i=0;i<worldPts.length;i++){
     const cur=worldPts[i], next=worldPts[(i+1)%worldPts.length];
     const wallSkip  = _railEdgesSkipRanges(cur.x, cur.z, next.x, next.z, 0.30, houseEdges);
-    const stepsSkip = stepsEdges.length ? _railEdgesSkipRanges(cur.x, cur.z, next.x, next.z, 0.40, stepsEdges) : [];
+    // Проём под лестницу сужаем на STAIR_RAIL_INSET с каждой «внутренней» границы:
+    // перила лестницы сдвинуты внутрь на тот же inset (latOff), и теперь конец перил
+    // террасы + колонна навеса на углу проёма встают на ту же линию (соосно).
+    // Границу, упирающуюся в конец сегмента (угол террасы), не двигаем.
+    const segLen = Math.hypot(next.x - cur.x, next.z - cur.z);
+    const inT = segLen > 0.01 ? STAIR_RAIL_INSET / segLen : 0;
+    const stepsSkip = (stepsEdges.length
+        ? _railEdgesSkipRanges(cur.x, cur.z, next.x, next.z, 0.40, stepsEdges)
+        : [])
+      .map(([s, e]) => [s > 0.001 ? s + inT : s, e < 0.999 ? e - inT : e])
+      .filter(([s, e]) => e > s + 0.001);
     const interSkip = _railInterTerraceSkip(cur.x, cur.z, next.x, next.z, cX, cZ, otherRects);
     const allSkips = [...wallSkip, ...stepsSkip, ...interSkip].sort((a,b)=>a[0]-b[0]);
     const merged=[];
@@ -2222,6 +2293,10 @@ function terracePerimeterSegments(worldPts, houseL, houseW, otherRects){
 const PORCH_COLUMN_COLOR = 0xc7a878;
 // Inset перил и колонн внутрь от кромки настила (чтобы не свисали за край).
 const RAIL_INSET = 0.10;
+// Inset перил лестницы от боковой грани ступеней (latOff в buildSteps3d). Тем же
+// значением сужается проём перил террасы под лестницу — конец перил террасы и колонна
+// навеса на углу проёма встают соосно с перилами лестницы.
+const STAIR_RAIL_INSET = 0.12;
 
 // Возвращает прямоугольный полигон, сжатый внутрь на inset со всех сторон
 // (порядок углов как у исходного rect). Для маленьких rect inset ограничен.
@@ -2296,21 +2371,36 @@ function buildRailing3d(parent,M,pts,deckHeight,houseL,houseW,otherRects){
     hand.rotation.y = angle;
     railGroup.add(hand);
     threeState.railingMeshes.push(hand);
-    // Балясины: равномерно с малым отступом от концов; пропускаем те, что попадают
-    // в зону колонны (обход — балясины не протыкают колонны, фигуры стыкуются вплотную).
-    const colClear = CANOPY_COL_HALF + balW;   // ~0.11 — радиус «запрета» вокруг колонны
-    const margin = colClear;
-    const usable = sLen - 2 * margin;
-    if (usable < 0) return;
-    const n = Math.max(1, Math.round(usable / balStep));
-    for (let i = 0; i <= n; i++) {
-      const t = margin + (n > 0 ? i * usable / n : 0);
-      const bxR = a_x + ux * t, bzR = a_z + uz * t;
-      if (colPts && colPts.some(c => Math.hypot(c.x - bxR, c.z - bzR) < colClear)) continue;
-      const balu = meshFn(box(balW, railH, balW), baluMat);
-      balu.position.set(bxR, deckHeight + railH/2, bzR);
-      railGroup.add(balu);
-      threeState.railingMeshes.push(balu);
+    // Балясины: пролётами МЕЖДУ колоннами, равным шагом, с прижимом к колоннам —
+    // крайняя балясина каждого пролёта стоит у самой кромки столба (раньше зона
+    // «запрета» + дискретный шаг оставляли заметный зазор у колонн).
+    const colClear = balW / 2 + 0.035;   // ~0.055: балясина подходит к тонкому стволу колонны
+                                          // (база/капитель шире 0.14, но короткие — лёгкое перекрытие незаметно)
+    // t-координаты ВНУТРЕННИХ колонн на этом сегменте (проекция на ось сегмента).
+    const stops = [0, sLen];
+    if (colPts) for (const c of colPts) {
+      const tc = (c.x - a_x) * ux + (c.z - a_z) * uz;
+      const perp = Math.hypot((a_x + ux * tc) - c.x, (a_z + uz * tc) - c.z);
+      if (tc > 0.02 && tc < sLen - 0.02 && perp < 0.20) stops.push(tc);
+    }
+    stops.sort((p, q) => p - q);
+    // Прижим у концов сегмента: конец у колонны → colClear, свободный конец → balW.
+    const endPad = (ex, ez) =>
+      (colPts && colPts.some(c => Math.hypot(c.x - ex, c.z - ez) < 0.18)) ? colClear : balW;
+    const padStart = endPad(a_x, a_z), padEnd = endPad(b_x, b_z);
+    for (let k = 0; k < stops.length - 1; k++) {
+      const from = stops[k]     + (k === 0 ? padStart : colClear);
+      const to   = stops[k + 1] - (k === stops.length - 2 ? padEnd : colClear);
+      if (to <= from + 0.02) continue;                 // колонны вплотную — пролёта нет
+      const span = to - from;
+      const nb = Math.max(1, Math.round(span / balStep));
+      for (let i = 0; i <= nb; i++) {
+        const t = from + span * i / nb;
+        const balu = meshFn(box(balW, railH, balW), baluMat);
+        balu.position.set(a_x + ux * t, deckHeight + railH / 2, a_z + uz * t);
+        railGroup.add(balu);
+        threeState.railingMeshes.push(balu);
+      }
     }
   }
 
@@ -2327,41 +2417,19 @@ function buildRailing3d(parent,M,pts,deckHeight,houseL,houseW,otherRects){
 // Навес над террасой — вальмовая (hip) крыша над bbox полигона + колонны
 // по периметру (на углах и с шагом ~2.5 м по длинным рёбрам).
 // Высота согласована с навесом крыльца: низ на 2.30 м над настилом, ридж на 2.60 м.
-function buildTerraceCanopy3d(parent, M, pts, deckHeight, houseL, houseW, otherRects) {
-  const realPts = pts.filter(p => !p.break);
-  if (realPts.length < 3) return;
-  const worldPts = canvasToWorld(realPts, houseL, houseW);
-  otherRects = otherRects || [];
-
-  // Параметры синхронизированы с навесом крыльца (buildPorch3d):
-  //   canopyLow  = bh + canopyClear           — высота низа плиты у фронта (eave) крыльца
-  //   canopyHigh = bh + canopyClear + slope   — высота низа плиты у стены (ridge) крыльца
-  //   canopyT, matRoof — те же, чтобы визуально материалы и кромки стыковались.
-  //
-  // Навес террасы — односкатный: высокая опора (ridge) у стены дома,
-  // низкая опора (eave) на противоположной от дома стороне bbox террасы.
-  // Это «ридж вдоль стены»: ridge-линия параллельна опорной стене и поднята
-  // до уровня задней кромки плиты крыльца.
-  const canopyLow  = 2.30;    // = canopyClear крыльца
-  const canopyHigh = 2.60;    // = canopyClear + canopySlope крыльца
-  const canopyT    = 0.06;
-  const colT = 0.14;          // сечение колонны (= 2·CANOPY_COL_HALF)
-  const matRoof = M.roof || M.deck;
-  const matPost = M.post || M.step;
-
-  // bbox полигона
+// Параметры одностороннего навеса одного rect: bbox, ось/сторона ridge и план-высота
+// низа плиты planeH(x,z) (canopyHigh у стены-ridge → canopyLow у дальней кромки-eave).
+function _terraceCanopyParams(worldPts, houseL, houseW) {
+  const CANOPY_LOW = 2.30, CANOPY_HIGH = 2.60;
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const p of worldPts) {
-    if (p.x < minX) minX = p.x;
-    if (p.x > maxX) maxX = p.x;
-    if (p.z < minZ) minZ = p.z;
-    if (p.z > maxZ) maxZ = p.z;
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+    if (p.z < minZ) minZ = p.z; if (p.z > maxZ) maxZ = p.z;
   }
   const W = maxX - minX, D = maxZ - minZ;
-  const cx = (minX + maxX) / 2;
-  const cz = (minZ + maxZ) / 2;
+  const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
 
-  // Полигон дома (нужен и для определения опорной стены, и для пропуска колонн у стен).
+  // Опорная стена дома → ось ridge + сторона (ребро дома, ближайшее к центру bbox).
   let housePoly = null;
   if (typeof HouseBuilder !== 'undefined'
       && typeof HouseBuilder.getHouseFloorPolygon === 'function'
@@ -2370,99 +2438,178 @@ function buildTerraceCanopy3d(parent, M, pts, deckHeight, houseL, houseW, otherR
     const poly = HouseBuilder.getHouseFloorPolygon(_houseCache.desc, params);
     if (poly && poly.corners) housePoly = poly.corners;
   }
-
-  // Поиск опорной стены дома: ребро с минимальным расстоянием до центра bbox террасы.
-  // Из него получаем (а) ось ridge — ось этого ребра; (б) сторону bbox у стены — по знаку
-  // вектора от центра bbox к ближайшей точке стены.
-  let ridgeAlongX;
-  let ridgeAtMaxZ = false, ridgeAtMaxX = false;
+  let ridgeAlongX, ridgeAtMaxZ = false, ridgeAtMaxX = false;
   if (housePoly && housePoly.length >= 2) {
-    let bestDist = Infinity;
-    let bestPx = cx, bestPz = cz, bestDx = 0, bestDz = 0;
+    let bestDist = Infinity, bestPz = cz, bestPx = cx, bestDx = 0, bestDz = 0;
     for (let i = 0; i < housePoly.length; i++) {
       const a = housePoly[i], b = housePoly[(i+1) % housePoly.length];
-      const dx = b.x - a.x, dz = b.z - a.z;
-      const lenSq = dx*dx + dz*dz;
+      const dx = b.x - a.x, dz = b.z - a.z, lenSq = dx*dx + dz*dz;
       if (lenSq < 1e-6) continue;
-      let t = ((cx - a.x)*dx + (cz - a.z)*dz) / lenSq;
-      t = Math.max(0, Math.min(1, t));
-      const px = a.x + t*dx, pz = a.z + t*dz;
-      const dist = Math.hypot(cx - px, cz - pz);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestPx = px; bestPz = pz;
-        bestDx = dx; bestDz = dz;
-      }
+      let t = ((cx - a.x)*dx + (cz - a.z)*dz) / lenSq; t = Math.max(0, Math.min(1, t));
+      const px = a.x + t*dx, pz = a.z + t*dz, dist = Math.hypot(cx - px, cz - pz);
+      if (dist < bestDist) { bestDist = dist; bestPx = px; bestPz = pz; bestDx = dx; bestDz = dz; }
     }
     ridgeAlongX = Math.abs(bestDx) >= Math.abs(bestDz);
-    if (ridgeAlongX) ridgeAtMaxZ = (bestPz > cz);
-    else              ridgeAtMaxX = (bestPx > cx);
+    if (ridgeAlongX) ridgeAtMaxZ = (bestPz > cz); else ridgeAtMaxX = (bestPx > cx);
   } else {
-    // Fallback без дома: ridge вдоль длинной оси, сторона ridge — minZ/minX.
-    ridgeAlongX = (W >= D);
+    ridgeAlongX = (W >= D);   // fallback без дома
   }
-
-  // ── Односкатный навес: одна объёмная плита (BoxGeometry + matRoof, как у крыльца). ──
-  // Скат строится горизонтально, потом поворачивается вокруг ridge-кромки так,
-  // чтобы ridge остался на высоте canopyHigh, а eave опустился на canopyLow.
-  {
-    const dh = canopyHigh - canopyLow;
-    let geoBox, posX, posZ, rotAxis, rotSign;
+  const dHL = CANOPY_HIGH - CANOPY_LOW;
+  const planeH = (x, z) => {
     if (ridgeAlongX) {
-      // Скат идёт вдоль Z (от ridge у одного края bbox до eave у другого).
-      const slopeLen = Math.hypot(D, dh);
-      const tilt = Math.atan2(dh, D);
-      geoBox = new THREE.BoxGeometry(W, canopyT, slopeLen);
-      posX = cx; posZ = cz;
-      rotAxis = 'x';
-      // ridge на minZ → локальный -Z должен быть выше → rotation.x = +tilt.
-      // ridge на maxZ → локальный +Z должен быть выше → rotation.x = -tilt.
-      rotSign = ridgeAtMaxZ ? -1 : +1;
-      var ridgeTilt = tilt;
-    } else {
-      const slopeLen = Math.hypot(W, dh);
-      const tilt = Math.atan2(dh, W);
-      geoBox = new THREE.BoxGeometry(slopeLen, canopyT, D);
-      posX = cx; posZ = cz;
-      rotAxis = 'z';
-      // ridge на minX → локальный -X выше → rotation.z = -tilt
-      // ridge на maxX → локальный +X выше → rotation.z = +tilt
-      rotSign = ridgeAtMaxX ? +1 : -1;
-      var ridgeTilt = tilt;
+      const zr = ridgeAtMaxZ ? maxZ : minZ;
+      return CANOPY_HIGH - dHL * (D > 1e-6 ? Math.abs(z - zr) / D : 0);
     }
-    const m = new THREE.Mesh(geoBox, matRoof);
-    m.position.set(posX, deckHeight + (canopyLow + canopyHigh) / 2, posZ);
-    if (rotAxis === 'x') m.rotation.x = rotSign * ridgeTilt;
-    else                  m.rotation.z = rotSign * ridgeTilt;
-    m.castShadow = m.receiveShadow = true;
-    parent.add(m);
-    threeState.canopyMeshes.push(m);
+    const xr = ridgeAtMaxX ? maxX : minX;
+    return CANOPY_HIGH - dHL * (W > 1e-6 ? Math.abs(x - xr) / W : 0);
+  };
+  return { minX, maxX, minZ, maxZ, cx, cz, W, D, planeH, ridgeAlongX, ridgeAtMaxX, ridgeAtMaxZ };
+}
+
+// Обрезка выпуклого полигона foot (world {x,z}) полуплоскостью прямой через I→U,
+// оставляя сторону, где лежит keep-точка. Sutherland–Hodgman по одной грани.
+function _clipFootByDiagonal(foot, I, U, keep) {
+  const ex = U.x - I.x, ez = U.z - I.z;
+  const sideOf = (p) => ex * (p.z - I.z) - ez * (p.x - I.x);
+  const refSign = sideOf(keep) >= 0 ? 1 : -1;
+  const inside = (p) => sideOf(p) * refSign >= -1e-7;
+  const out = [];
+  for (let i = 0; i < foot.length; i++) {
+    const a = foot[i], b = foot[(i + 1) % foot.length];
+    const ina = inside(a), inb = inside(b);
+    if (ina) out.push(a);
+    if (ina !== inb) {
+      const sa = sideOf(a) * refSign, sb = sideOf(b) * refSign;
+      const t = sa / (sa - sb);
+      out.push({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
+    }
+  }
+  return out;
+}
+
+// Плита навеса по выпуклому плановому полигону foot, высоты из params.planeH.
+// Низ плиты = deckHeight + planeH, толщина canopyT вверх. Веер-триангуляция (выпуклый).
+// Материал клонируем с DoubleSide — не зависим от winding обрезанного полигона.
+function _buildCanopySlab(parent, foot, params, deckHeight, canopyT, matRoof) {
+  if (foot.length < 3) return;
+  const n = foot.length, pos = [], idx = [];
+  for (const p of foot) pos.push(p.x, deckHeight + params.planeH(p.x, p.z) + canopyT, p.z); // top [0..n-1]
+  for (const p of foot) pos.push(p.x, deckHeight + params.planeH(p.x, p.z),           p.z); // bottom [n..2n-1]
+  for (let i = 1; i < n - 1; i++) idx.push(0, i, i + 1);            // верх
+  for (let i = 1; i < n - 1; i++) idx.push(n, n + i + 1, n + i);    // низ (обратный обход)
+  for (let i = 0; i < n; i++) { const j = (i + 1) % n; idx.push(i, n + i, j, j, n + i, n + j); } // боковины
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const mat = matRoof.clone(); mat.side = THREE.DoubleSide;
+  const m = new THREE.Mesh(geo, mat);
+  m.castShadow = m.receiveShadow = true;
+  parent.add(m);
+  threeState.canopyMeshes.push(m);
+}
+
+// Навесы составной (multi-rect) террасы. Каждый rect → односкатная плита, обрезанная
+// по диагонали перекрытия с соседями: I — угол перекрытия, где оба ската высокие (у дома),
+// U — противоположный «уличный» угол (с колонной). Оставляем сторону центра rect → шов
+// идёт ровно по линии I→U («угловая колонна → угол дома»), плиты делят перекрытие без
+// двойного покрытия. Колонны — глобально, с дедупликацией на стыках.
+function buildTerraceCanopies(parent, M, rectPolys, deckHeight, houseL, houseW) {
+  const canopyT = 0.06, colT = 0.14;
+  const matRoof = M.roof || M.deck;
+  const matPost = M.post || M.step;
+  const rects = rectPolys.map(pp => {
+    const wp = canvasToWorld(pp.filter(p => !p.break), houseL, houseW);
+    return { wp, P: _terraceCanopyParams(wp, houseL, houseW) };
+  }).filter(r => r.wp.length >= 3 && r.P.W > 0.3 && r.P.D > 0.3);
+
+  // Плиты с вальмовым швом на стыках перпендикулярных «крыльев».
+  // Работает и для перекрытия, и для стыка встык: для каждой пары перпендикулярных
+  // rect строится угловая «коробка» (по оси своего ската — диапазон P, по оси ската
+  // соседа — диапазон Q). I — угол у дома (оба конька), U — внешний угол (оба свеса,
+  // там колонна). Bbox ската расширяется до коробки, затем режется по диагонали I→U
+  // (оставляем сторону центра rect) → ровный шов «угловая колонна → угол дома».
+  for (let i = 0; i < rects.length; i++) {
+    const P = rects[i].P;
+    let exMinX = P.minX, exMaxX = P.maxX, exMinZ = P.minZ, exMaxZ = P.maxZ;
+    const clips = [];
+    for (let j = 0; j < rects.length; j++) {
+      if (j === i) continue;
+      const Q = rects[j].P;
+      if (P.ridgeAlongX === Q.ridgeAlongX) continue;   // нужны перпендикулярные скаты
+      // Угловой стык: диапазоны по обеим осям должны соприкасаться/перекрываться.
+      const xAdj = Math.min(P.maxX, Q.maxX) >= Math.max(P.minX, Q.minX) - 1e-6;
+      const zAdj = Math.min(P.maxZ, Q.maxZ) >= Math.max(P.minZ, Q.minZ) - 1e-6;
+      if (!xAdj || !zAdj) continue;
+      let bxMin, bxMax, bzMin, bzMax, I, U;
+      if (!P.ridgeAlongX) {            // P — уклон по X, Q — уклон по Z
+        bxMin = P.minX; bxMax = P.maxX; bzMin = Q.minZ; bzMax = Q.maxZ;
+        I = { x: P.ridgeAtMaxX ? P.maxX : P.minX, z: Q.ridgeAtMaxZ ? Q.maxZ : Q.minZ };
+        U = { x: P.ridgeAtMaxX ? P.minX : P.maxX, z: Q.ridgeAtMaxZ ? Q.minZ : Q.maxZ };
+      } else {                          // P — уклон по Z, Q — уклон по X
+        bxMin = Q.minX; bxMax = Q.maxX; bzMin = P.minZ; bzMax = P.maxZ;
+        I = { x: Q.ridgeAtMaxX ? Q.maxX : Q.minX, z: P.ridgeAtMaxZ ? P.maxZ : P.minZ };
+        U = { x: Q.ridgeAtMaxX ? Q.minX : Q.maxX, z: P.ridgeAtMaxZ ? P.minZ : P.maxZ };
+      }
+      if (bxMax - bxMin < 0.15 || bzMax - bzMin < 0.15) continue;
+      exMinX = Math.min(exMinX, bxMin); exMaxX = Math.max(exMaxX, bxMax);
+      exMinZ = Math.min(exMinZ, bzMin); exMaxZ = Math.max(exMaxZ, bzMax);
+      clips.push({ I, U });
+    }
+    let foot = [
+      { x: exMinX, z: exMinZ }, { x: exMaxX, z: exMinZ },
+      { x: exMaxX, z: exMaxZ }, { x: exMinX, z: exMaxZ },
+    ];
+    for (const c of clips) {
+      foot = _clipFootByDiagonal(foot, c.I, c.U, { x: P.cx, z: P.cz });
+      if (foot.length < 3) break;
+    }
+    rects[i].ext = { minX: exMinX, maxX: exMaxX, minZ: exMinZ, maxZ: exMaxZ };
+    _buildCanopySlab(parent, foot, P, deckHeight, canopyT, matRoof);
   }
 
-  // ── Колонны навеса: общий расчёт точек (концы сегментов перил + промежуточные,
-  // минус точки у стены дома). Inset тот же, что у перил → опоры совпадают с углами
-  // ограждения и не свисают за край.
-  const colPoints = _terraceColumnPoints(_insetWorldRect(worldPts, RAIL_INSET), houseL, houseW, otherRects);
-  // Высота колонны = canopyLow (= низ eave-стороны навеса), стоит от настила вверх до плиты.
-  // Декоративная GLB-колонна (mod_porch_column) с базой/капителью; fallback — BoxGeometry.
+  // Колонны: точки опор всех rect, дедуп на стыках. Высота = низ навеса над точкой =
+  // МИНИМУМ planeH по всем крыльям, что её накрывают (вальма — нижняя огибающая скатов).
+  // Брать максимум нельзя: у шва соседнее крыло near-конёк высоко, но реально над колонной
+  // — низкий скат другого крыла, и колонна пробивала бы навес.
+  const canopyHeightAt = (x, z) => {
+    let h = Infinity;
+    for (const r of rects) {
+      const e = r.ext || { minX: r.P.minX, maxX: r.P.maxX, minZ: r.P.minZ, maxZ: r.P.maxZ };
+      if (x >= e.minX - 1e-3 && x <= e.maxX + 1e-3 && z >= e.minZ - 1e-3 && z <= e.maxZ + 1e-3) {
+        h = Math.min(h, r.P.planeH(x, z));
+      }
+    }
+    return h;
+  };
+  const colPts = [];
+  for (let i = 0; i < rects.length; i++) {
+    const insetPts = _insetWorldRect(rects[i].wp, RAIL_INSET);
+    const otherRects = rects.filter((_, j) => j !== i).map(r => ({
+      minX: r.P.minX, maxX: r.P.maxX, minZ: r.P.minZ, maxZ: r.P.maxZ,
+    }));
+    for (const c of _terraceColumnPoints(insetPts, houseL, houseW, otherRects)) {
+      if (colPts.some(o => Math.hypot(o.x - c.x, o.z - c.z) < 0.30)) continue;  // дедуп по позиции
+      let h = canopyHeightAt(c.x, c.z);
+      if (!isFinite(h)) h = rects[i].P.planeH(c.x, c.z);
+      colPts.push({ x: c.x, z: c.z, h });
+    }
+  }
   const useGlbCol = (typeof HouseBuilder !== 'undefined'
                      && HouseBuilder.placeScaledGlb
                      && _houseCache.modules
                      && _houseCache.modules.porch_column);
-  for (const p of colPoints) {
+  for (const p of colPts) {
     if (useGlbCol) {
       HouseBuilder.placeScaledGlb(
         parent, _houseCache.modules, 'porch_column',
-        colT, canopyLow, colT,
-        p.x, deckHeight + canopyLow / 2, p.z,
+        colT, p.h, colT,
+        p.x, deckHeight + p.h / 2, p.z,
         0, 'mat_porch_column', PORCH_COLUMN_COLOR
       );
     } else {
-      const col = new THREE.Mesh(
-        new THREE.BoxGeometry(colT, canopyLow, colT),
-        matPost
-      );
-      col.position.set(p.x, deckHeight + canopyLow/2, p.z);
+      const col = new THREE.Mesh(new THREE.BoxGeometry(colT, p.h, colT), matPost);
+      col.position.set(p.x, deckHeight + p.h / 2, p.z);
       col.castShadow = col.receiveShadow = true;
       parent.add(col);
       threeState.canopyMeshes.push(col);

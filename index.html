@@ -181,7 +181,7 @@
           <div class="d-canvas-footer">
             <div class="p-row" style="margin:0; max-width:280px;">
               <div class="p-lbl">Ширина дорожки (см):</div>
-              <input class="p-inp" type="number" id="v-paths-width" value="120" min="60" max="300">
+              <input class="p-inp" type="number" id="v-paths-width" value="120" min="60" max="300" oninput="dOnPathWidth()">
             </div>
           </div>
         </div>
@@ -285,13 +285,13 @@
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
 <script src="state.js?v=16"></script>
-<script src="canvas.js?v=21"></script>
+<script src="canvas.js?v=22"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=63"></script>
 <!-- 3D viewer -->
-<script src="viewer3d-core.js?v=65"></script>
+<script src="viewer3d-core.js?v=80"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=28"></script>
+<script src="nav-desktop.js?v=29"></script>
 </body>
 </html>

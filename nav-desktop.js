@@ -389,6 +389,13 @@ function dOnParam() {
   if (typeof onParamChange === 'function') onParamChange();
 }
 
+// Ширина дорожки: сразу обновляем превью в canvas-редакторе и пересобираем 3D
+// (раньше ширина применялась только при повторном входе в редактор).
+function dOnPathWidth() {
+  if (typeof drawSnapCanvas === 'function') drawSnapCanvas('paths');
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
 function _dSyncRanges() {
   // Глобальные слайдеры
   [['v-area','r-area'],['v-found','r-found']].forEach(([inp,rng]) => {

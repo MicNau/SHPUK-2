@@ -343,7 +343,7 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
       const segs = splitAtBreaks(pp);
       for (const seg of segs) {
         if (seg.length < 2) continue;
-        ctx.strokeStyle='rgba(51,102,0,.3)'; ctx.lineWidth=pathHalfW*2; ctx.lineCap='round'; ctx.lineJoin='round';
+        ctx.strokeStyle='rgba(51,102,0,.3)'; ctx.lineWidth=pathHalfW*2; ctx.lineCap='butt'; ctx.lineJoin='miter';
         ctx.beginPath(); ctx.moveTo(seg[0].x*W, seg[0].y*H);
         for (let i=1; i<seg.length; i++) ctx.lineTo(seg[i].x*W, seg[i].y*H);
         ctx.stroke();
@@ -415,7 +415,7 @@ function drawSnapCanvas(name) {
       for (const seg of segments) {
         if (seg.length < 1) continue;
         // Полоса
-        ctx.strokeStyle='rgba(51,102,0,.25)'; ctx.lineWidth=pathW; ctx.lineCap='round'; ctx.lineJoin='round';
+        ctx.strokeStyle='rgba(51,102,0,.25)'; ctx.lineWidth=pathW; ctx.lineCap='butt'; ctx.lineJoin='miter';
         ctx.beginPath(); ctx.moveTo(seg[0].x*W, seg[0].y*H);
         for(let i=1;i<seg.length;i++) ctx.lineTo(seg[i].x*W, seg[i].y*H);
         ctx.stroke();
