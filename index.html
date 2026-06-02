@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css">
+<link rel="stylesheet" href="styles-desktop.css?v=2">
 </head>
 <body>
 
@@ -109,23 +109,23 @@
           <div class="d-3d-hint">ЛКМ — вращение · ПКМ — перемещение · Колесо — зум</div>
         </div>
 
-        <!-- Canvas editors (one at a time) -->
+        <!-- Canvas editors (one at a time). Кнопки действий — в футере, в правом нижнем углу. -->
         <div class="d-center-canvas" id="d-canvas-terrace">
           <div class="d-canvas-header">
             <div>
               <div class="d-canvas-title">Терраса/Крыльцо — разметка</div>
               <div class="d-canvas-hint">Добавляйте прямоугольники, объединяйте в Г/П/О-форму</div>
             </div>
-            <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addTerraceRect()">＋ Прямоугольник</button>
-              <button class="d-canvas-btn" onclick="delActiveTerraceRect()">✕ Удалить</button>
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('terrace')">✓ Готово</button>
-            </div>
           </div>
           <div class="d-canvas-area" id="cw-terrace" style="cursor:default;"><canvas id="cv-terrace"></canvas></div>
           <div class="d-canvas-footer">
             <div class="tg on" onclick="ttg(this)" data-id="terrace-railing"><span class="tg-txt">Ограждение</span><div class="tg-ind"></div></div>
             <div class="tg on" onclick="ttg(this)" data-id="terrace-roof"><span class="tg-txt">Навес</span><div class="tg-ind"></div></div>
+            <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="addTerraceRect()">＋ Прямоугольник</button>
+              <button class="d-canvas-btn" onclick="delActiveTerraceRect()">✕ Удалить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('terrace')">✓ Готово</button>
+            </div>
           </div>
         </div>
 
@@ -135,14 +135,42 @@
               <div class="d-canvas-title">Ступени — размещение</div>
               <div class="d-canvas-hint">Перетащите лестницу, потяните за угол — ширина. Глубина задаётся автоматически.</div>
             </div>
-            <div class="d-canvas-actions">
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('steps')">✓ Готово</button>
-            </div>
           </div>
           <div class="d-canvas-area" id="cw-steps" style="cursor:default;"><canvas id="cv-steps"></canvas></div>
           <div class="d-canvas-footer">
             <div class="tg on" onclick="ttg(this)" data-id="steps-railing"><span class="tg-txt">Перила лестницы</span><div class="tg-ind"></div></div>
             <div class="tg" onclick="ttg(this)" data-id="steps-sheathing"><span class="tg-txt">Зашить</span><div class="tg-ind"></div></div>
+            <div class="d-canvas-actions">
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('steps')">✓ Готово</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="d-center-canvas" id="d-canvas-beds">
+          <div class="d-canvas-header">
+            <div>
+              <div class="d-canvas-title">Грядки — размещение</div>
+              <div class="d-canvas-hint">Перетащите грядку (3×1 м), «⟳ Повернуть» — ориентация. Высота — ниже.</div>
+            </div>
+          </div>
+          <div class="d-canvas-area" id="cw-beds" style="cursor:default;"><canvas id="cv-beds"></canvas></div>
+          <div class="d-canvas-footer">
+            <div class="bed-h-row">
+              <span class="bed-h-lbl">Высота борта:</span>
+              <div class="bed-h-seg" id="bed-h-seg">
+                <button class="bed-h-btn" data-mm="150" onclick="dSetBedHeight(150)">150</button>
+                <button class="bed-h-btn active" data-mm="200" onclick="dSetBedHeight(200)">200</button>
+                <button class="bed-h-btn" data-mm="270" onclick="dSetBedHeight(270)">270</button>
+                <button class="bed-h-btn" data-mm="300" onclick="dSetBedHeight(300)">300</button>
+              </div>
+              <span class="bed-h-unit">мм</span>
+            </div>
+            <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="addBed()">＋ Грядка</button>
+              <button class="d-canvas-btn" onclick="rotateActiveBed()">⟳ Повернуть</button>
+              <button class="d-canvas-btn" onclick="delActiveBed()">✕ Удалить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('beds')">✓ Готово</button>
+            </div>
           </div>
         </div>
 
@@ -152,15 +180,15 @@
               <div class="d-canvas-title">Терраса у бассейна — разметка</div>
               <div class="d-canvas-hint">Нажмите на план чтобы отметить углы</div>
             </div>
+          </div>
+          <div class="d-canvas-area" id="cw-pool_terrace"><canvas id="cv-pool_terrace"></canvas></div>
+          <div class="d-canvas-footer">
+            <div class="tg" onclick="ttg(this)"><span class="tg-txt">Ограждение бассейна</span><div class="tg-ind"></div></div>
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="undoPt('pool_terrace')">↩ Отменить</button>
               <button class="d-canvas-btn" onclick="clrPts('pool_terrace')">✕ Очистить</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('pool_terrace')">✓ Готово</button>
             </div>
-          </div>
-          <div class="d-canvas-area" id="cw-pool_terrace"><canvas id="cv-pool_terrace"></canvas></div>
-          <div class="d-canvas-footer">
-            <div class="tg" onclick="ttg(this)"><span class="tg-txt">Ограждение бассейна</span><div class="tg-ind"></div></div>
           </div>
         </div>
 
@@ -170,18 +198,18 @@
               <div class="d-canvas-title">Дорожки — разметка</div>
               <div class="d-canvas-hint">Нажимайте точки последовательно вдоль дорожки</div>
             </div>
-            <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addBreak('paths')">＋ Новая линия</button>
-              <button class="d-canvas-btn" onclick="undoPt('paths')">↩ Отменить</button>
-              <button class="d-canvas-btn" onclick="clrPts('paths')">✕ Очистить</button>
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('paths')">✓ Готово</button>
-            </div>
           </div>
           <div class="d-canvas-area" id="cw-paths"><canvas id="cv-paths"></canvas></div>
           <div class="d-canvas-footer">
             <div class="p-row" style="margin:0; max-width:280px;">
               <div class="p-lbl">Ширина дорожки (см):</div>
               <input class="p-inp" type="number" id="v-paths-width" value="120" min="60" max="300" oninput="dOnPathWidth()">
+            </div>
+            <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="addBreak('paths')">＋ Новая линия</button>
+              <button class="d-canvas-btn" onclick="undoPt('paths')">↩ Отменить</button>
+              <button class="d-canvas-btn" onclick="clrPts('paths')">✕ Очистить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('paths')">✓ Готово</button>
             </div>
           </div>
         </div>
@@ -192,16 +220,16 @@
               <div class="d-canvas-title">Причал — разметка</div>
               <div class="d-canvas-hint">Нажмите на план чтобы отметить форму причала</div>
             </div>
-            <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="undoPt('pier')">↩ Отменить</button>
-              <button class="d-canvas-btn" onclick="clrPts('pier')">✕ Очистить</button>
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('pier')">✓ Готово</button>
-            </div>
           </div>
           <div class="d-canvas-area" id="cw-pier"><canvas id="cv-pier"></canvas></div>
           <div class="d-canvas-footer">
             <div class="tg" onclick="ttg(this)"><span class="tg-txt">Перила причала</span><div class="tg-ind"></div></div>
             <div class="tg" onclick="ttg(this)"><span class="tg-txt">Крыша / навес</span><div class="tg-ind"></div></div>
+            <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="undoPt('pier')">↩ Отменить</button>
+              <button class="d-canvas-btn" onclick="clrPts('pier')">✕ Очистить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('pier')">✓ Готово</button>
+            </div>
           </div>
         </div>
 
@@ -211,6 +239,9 @@
               <div class="d-canvas-title">Забор — разметка</div>
               <div class="d-canvas-hint">Точки прилипают к сетке (шаг 0.5 м)</div>
             </div>
+          </div>
+          <div class="d-canvas-area" id="cw-fence"><canvas id="cv-fence"></canvas></div>
+          <div class="d-canvas-footer">
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="addBreak('fence')">＋ Новая линия</button>
               <button class="d-canvas-btn" onclick="undoPt('fence')">↩ Отменить</button>
@@ -218,7 +249,6 @@
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('fence')">✓ Готово</button>
             </div>
           </div>
-          <div class="d-canvas-area" id="cw-fence"><canvas id="cv-fence"></canvas></div>
         </div>
 
       </div>
@@ -232,6 +262,9 @@
       <div class="d-panel-body" id="d-panel-body">
         <!-- Sub-toggle (Терраса / Ограждение — only for terrace) -->
         <div class="d-panel-sub-toggle" id="d-panel-sub-toggle" style="display:none;"></div>
+
+        <!-- Раздел каталога (реальные секции API) -->
+        <div class="d-section-row" id="d-section-row"></div>
 
         <!-- Color filter -->
         <div class="d-color-section">
@@ -284,14 +317,19 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=16"></script>
-<script src="canvas.js?v=22"></script>
+<script src="state.js?v=20"></script>
+<script src="canvas.js?v=23"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=63"></script>
+<!-- Каталожный API: домен. '' = same-origin (локальный dev-прокси devserver.py
+     проксирует /api и /static на sollersdev.ru — обходит отсутствие CORS).
+     Когда бэкенд включит CORS — поставить 'https://sollersdev.ru' и прокси не нужен. -->
+<script>window.RESOURCE_API_DOMAIN = '';</script>
+<script src="ResourceManager.js?v=1"></script>
 <!-- 3D viewer -->
-<script src="viewer3d-core.js?v=80"></script>
+<script src="viewer3d-core.js?v=87"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=29"></script>
+<script src="nav-desktop.js?v=36"></script>
 </body>
 </html>

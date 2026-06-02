@@ -16,7 +16,7 @@ const D_SIDEBAR_ITEMS = [
   { id: 'paths',         lbl: 'Дорожки',             hasEditor: true  },
   { id: 'fence',         lbl: 'Забор',               hasEditor: true  },
   { id: 'facade',        lbl: 'Отделка фасада',      hasEditor: false },
-  { id: 'beds',          lbl: 'Грядки',              hasEditor: false },
+  { id: 'beds',          lbl: 'Грядки',              hasEditor: true  },
   { id: 'furniture',     lbl: 'Садовая мебель',      hasEditor: false },
   { id: 'pool_terrace',  lbl: 'Терраса у бассейна',  hasEditor: true  },
   { id: 'pier',          lbl: 'Причал',              hasEditor: true  },
@@ -30,6 +30,7 @@ const D_CANVAS_INIT = {
   paths:        () => initPathsCanvas(),
   pier:         () => initSnapCanvas('pier'),
   fence:        () => initSnapCanvas('fence'),
+  beds:         () => initBedsCanvas(),
 };
 
 // ══════════════════════════════════════════════
@@ -223,7 +224,12 @@ function _dResetAllConfigurations() {
   S.terraceRects = [];
   S.activeTerraceRect = null;
   S.steps = { x: 0.45, y: 0.65, w: 0.0625, h: 0.046875 };
+  S.beds = [];
+  S.activeBed = null;
+  S.bedH = 0.20;
   S.mats = {};
+  S.elementMat = {};
+  S.estimate = {};
   S.activeSample = null;
   S.matSubMode = null;
   S.curSec = 0;
@@ -396,6 +402,16 @@ function dOnPathWidth() {
   if (typeof onParamChange === 'function') onParamChange();
 }
 
+// Высота грядки (одна на все). mm ∈ {150, 200, 270, 300}. Подсвечивает активную
+// кнопку и пересобирает 3D (если грядки уже видны в сцене).
+function dSetBedHeight(mm) {
+  S.bedH = mm / 1000;
+  document.querySelectorAll('#bed-h-seg .bed-h-btn').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.mm, 10) === mm);
+  });
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
 function _dSyncRanges() {
   // Глобальные слайдеры
   [['v-area','r-area'],['v-found','r-found']].forEach(([inp,rng]) => {
@@ -478,8 +494,11 @@ function dDeleteItem(secId) {
   if (S.pts && S.pts[secId]) S.pts[secId] = [];
   if (secId === 'terrace') { S.terraceRects = []; S.activeTerraceRect = null; }
   if (secId === 'steps')   { S.steps = { x: 0.45, y: 0.65, w: 0.0625, h: 0.046875 }; }
+  if (secId === 'beds')    { S.beds = []; S.activeBed = null; }
   S.sections = S.sections.filter(s => s !== secId);
   if (S.mats && S.mats[secId]) delete S.mats[secId];
+  if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
+  if (S.estimate && S.estimate[secId]) delete S.estimate[secId];
   dConfigured.delete(secId);
 
   // Если удаляемая позиция активна — сбрасываем активность
@@ -627,6 +646,12 @@ function _dRenderPanelContent() {
     }
   }
 
+  // Дефолтный раздел каталога для текущего элемента (сбрасываем явный выбор при
+  // смене элемента/подрежима). Для ограждения террасы — раздел «Ограждения террасы».
+  let defSec = (typeof CONSTRUCTION_TO_SECTION !== 'undefined') ? CONSTRUCTION_TO_SECTION[secId] : null;
+  if (secId === 'terrace' && S.matSubMode === 'railing') defSec = 2332;
+  S.catSection = defSec || null;
+
   // Render swatches
   dRenderSwatches();
   // Auto-show catalog results
@@ -660,12 +685,33 @@ function dRenderSwatches() {
     </div>`).join('');
 }
 
+// Элементы с настилом — материал у каждого свой (S.elementMat[el]).
+const DECK_MAT_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'pier'];
+// Текущий активный элемент красится как настил? (Ограждение террасы — нет.)
+function _activeIsDeck() {
+  if (dActiveItem === 'terrace' && S.matSubMode === 'railing') return false;
+  return DECK_MAT_ELEMENTS.includes(dActiveItem);
+}
+
+// Применяет образец (текстуры/цвет) к АКТИВНОМУ элементу. Деко-элементы — через
+// S.elementMat[el] + пересборку (каждый независимо); прочие (фасад/забор/ограждение)
+// — прежним способом (цвет live / глобально).
+function _applySampleToActive(sample) {
+  S.activeSample = sample;                 // для подсветки образца
+  if (_activeIsDeck()) {
+    S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures }
+                              : (sample.color ? { color: sample.color } : null);
+    if (typeof buildScene3d === 'function') buildScene3d();
+  } else if (sample.color && typeof applyMaterialToScene === 'function') {
+    applyMaterialToScene(sample.color);    // фасад/забор/ограждение — цвет
+  }
+  dRenderSwatches();
+}
+
 function dApplySwatch(idx) {
   const s = S.samples[idx];
-  if (!s || !s.color) return;
-  S.activeSample = { ...s, _idx: idx };
-  if (typeof applyMaterialToScene === 'function') applyMaterialToScene(s.color);
-  dRenderSwatches();
+  if (!s) return;
+  _applySampleToActive({ ...s, _idx: idx });
 }
 
 function dRemoveSwatch(i) {
@@ -715,11 +761,149 @@ function dSelectPrice(tid) {
   dShowResults();
 }
 
+// ══════════════════════════════════════════════
+// КАТАЛОГ ИЗ API (ResourceManager) + fallback на заглушки
+// ══════════════════════════════════════════════
+let _rm = null;                 // singleton ResourceManager
+const _catalogCache = {};       // bitrix_id -> ProductResource[] | null
+const _catalogLoading = {};     // bitrix_id -> bool
+
+function _getRM() {
+  if (!_rm && typeof ResourceManager !== 'undefined') {
+    try { _rm = new ResourceManager(); } catch (e) { console.warn('[catalog] RM init:', e); _rm = null; }
+  }
+  return _rm;
+}
+
+// Активный раздел каталога: явный выбор пользователя (S.catSection) или дефолт по
+// текущему элементу проекта (CONSTRUCTION_TO_SECTION), иначе террасная доска.
+function _activeSectionId() {
+  if (S.catSection) return S.catSection;
+  const def = (typeof CONSTRUCTION_TO_SECTION !== 'undefined') ? CONSTRUCTION_TO_SECTION[dActiveItem] : null;
+  return def || 2314;
+}
+
+// Загружает товары раздела (section_id) один раз и кэширует.
+//   [] — раздел реально пуст (fallback на заглушки, не перезапрашиваем);
+//   null — ошибка/недоступно (перезапросим при следующем показе);
+//   undefined — ещё не грузили.
+async function _ensureCatalogSection(sectionId) {
+  if (Array.isArray(_catalogCache[sectionId])) return _catalogCache[sectionId];
+  if (_catalogLoading[sectionId]) return undefined;
+  const rm = _getRM();
+  if (!rm || typeof Filter === 'undefined') return null;
+  _catalogLoading[sectionId] = true;
+  try {
+    const res = await rm.getResources(new Filter(FilterType.SECTION_ID, sectionId), new Filter(FilterType.LIMIT, 16));
+    // res === null → ошибка запроса → null (повторяемо); иначе массив (возможно пустой).
+    _catalogCache[sectionId] = res ? (res.products || []) : null;
+  } catch (e) {
+    console.warn('[catalog] section load failed', sectionId, e);
+    _catalogCache[sectionId] = null;
+  }
+  _catalogLoading[sectionId] = false;
+  return _catalogCache[sectionId];
+}
+
+function _productPrice(p) {
+  const v = p && p.prices && p.prices[0] ? parseFloat(p.prices[0].price) : NaN;
+  return isNaN(v) ? null : v;
+}
+
+// Клиентский фильтр по выбранному ценовому тиру (реальные цены — ₽/м.пог).
+function _filterRealByPrice(products) {
+  if (!S.catPrice) return products;
+  const num = p => _productPrice(p) ?? 0;
+  if (S.catPrice === 'budget')   return products.filter(p => num(p) < 2000);
+  if (S.catPrice === 'balanced') return products.filter(p => num(p) >= 2000 && num(p) <= 5000);
+  if (S.catPrice === 'premium')  return products.filter(p => num(p) > 5000);
+  if (S.catPrice === 'mpk')      return products.filter(p => /мпк/i.test(p.name || ''));
+  return products;
+}
+
+// Селектор раздела каталога (реальные разделы API из CATALOG_SECTIONS).
+function _dRenderSectionSelect() {
+  const host = document.getElementById('d-section-row');
+  if (!host || typeof CATALOG_SECTIONS === 'undefined') return;
+  const active = _activeSectionId();
+  host.innerHTML = `
+    <label class="d-section-lbl">Раздел каталога:</label>
+    <select class="d-section-select" onchange="dSelectCatSection(this.value)">
+      ${CATALOG_SECTIONS.map(s => `<option value="${s.id}" ${s.id === active ? 'selected' : ''}>${s.label}</option>`).join('')}
+    </select>`;
+}
+
+function dSelectCatSection(id) {
+  S.catSection = parseInt(id, 10) || null;
+  dShowResults();
+}
+
+// Плейсхолдер «идёт загрузка раздела» (вместо заглушек-досок, чтобы не создавать
+// ложного впечатления «доска везде», пока медленный API отвечает).
+function _dRenderCatalogLoading() {
+  const list = document.getElementById('d-mat-list');
+  if (!list) return;
+  list.innerHTML = '<div class="d-cat-loading"><div class="d-cat-spinner"></div>Загрузка товаров раздела…</div>';
+}
+
 // ── Catalog results (auto-shown) ──
+// Показываем товары реального раздела каталога. Пока грузится — «Загрузка…»;
+// раздел реально пуст или API недоступен — fallback на заглушки STUB_RESULTS.
 function dShowResults() {
   _dRenderColorGrid();
   _dRenderPriceGrid();
+  _dRenderSectionSelect();
+  const secId = _activeSectionId();
+  const cached = _catalogCache[secId];
+  if (Array.isArray(cached)) {
+    if (cached.length) _dRenderRealResults(cached);
+    else               _dRenderStubResults();   // раздел реально пуст → заглушки
+    return;
+  }
+  // undefined (не грузили) или null (прошлая попытка не удалась) → грузим.
+  _dRenderCatalogLoading();
+  if (!_catalogLoading[secId]) {
+    _ensureCatalogSection(secId).then(() => dShowResults());
+  }
+}
 
+function _dRenderRealResults(allProducts) {
+  const list = document.getElementById('d-mat-list');
+  if (!list) return;
+  const products = _filterRealByPrice(allProducts);
+  if (!products.length) {
+    list.innerHTML = '<div style="padding:16px;color:#999;font-size:13px;">Нет товаров под выбранный фильтр цены</div>';
+    return;
+  }
+  list.innerHTML = products.map(p => {
+    const price = _productPrice(p);
+    const thumb = (p.textureUrls && p.textureUrls.textures_dpc_diffusion) || '';
+    const thumbStyle = thumb
+      ? `background-image:url('${thumb}');background-size:cover;background-position:center;`
+      : 'background:#bbb;';
+    const desc = (p.previewText && p.previewTextType !== 'html') ? p.previewText : '';
+    return `
+    <div class="d-mat-card" id="dmc-${p.id}">
+      <div class="d-mat-head" onclick="dToggleMatCard(${p.id})">
+        <div class="d-mat-thumb" style="${thumbStyle}"></div>
+        <div class="d-mat-info">
+          <div class="d-mat-name">${p.name || ''}</div>
+          <div class="d-mat-price">${price != null ? 'от ' + Math.round(price) + ' ₽' : 'цена по запросу'}</div>
+        </div>
+        <button class="d-mat-exp">▼</button>
+      </div>
+      <div class="d-mat-body"><div class="d-mat-detail">
+        <div class="d-mat-desc">${desc}</div>
+        <div class="d-mat-actions">
+          <button class="d-mat-btn d-mat-btn-apply" onclick="dApplyRealMat(event, ${p.id})">Применить</button>
+          <button class="d-mat-btn d-mat-btn-estimate" onclick="dEstimateRealMat(event, ${p.id})">В смету</button>
+        </div>
+      </div></div>
+    </div>`;
+  }).join('');
+}
+
+function _dRenderStubResults() {
   let results = [...STUB_RESULTS];
   if (S.catPrice === 'budget')        results = results.filter(r => r.id === 4);
   else if (S.catPrice === 'balanced') results = results.filter(r => [1, 4].includes(r.id));
@@ -757,7 +941,7 @@ function dShowResults() {
             Сравнить
           </button>
           <button class="d-mat-btn d-mat-btn-estimate"
-                  onclick="dEstimateMat(event, ${m.id}, '${m.name.replace(/'/g, "\\'")}')">
+                  onclick="dEstimateMat(event, ${m.id}, '${m.name.replace(/'/g, "\\'")}', '${m.price}')">
             В смету
           </button>
         </div>
@@ -769,6 +953,33 @@ function dShowResults() {
     </div>`).join('');
 }
 
+// Применить реальный товар к активному элементу (каждый элемент — независимо).
+async function dApplyRealMat(e, pid) {
+  const btn = e.currentTarget;
+  const orig = btn.textContent;
+  btn.textContent = '…';
+  let product = null;
+  for (const k in _catalogCache) {
+    const arr = _catalogCache[k];
+    if (Array.isArray(arr)) { const f = arr.find(p => p.id === pid); if (f) { product = f; break; } }
+  }
+  const rm = _getRM();
+  if (!product && rm) { try { product = await rm.getProductById(pid); } catch (_) {} }
+  if (!product) { btn.textContent = orig; return; }
+  try { await product.loadTextures(); } catch (_) {}
+
+  // В образцы кладём с превью-цветом и текстурами (чтобы повторное применение работало).
+  let idx = S.samples.findIndex(s => s.id === product.id);
+  if (idx < 0) {
+    S.samples.push({ id: product.id, name: product.name, color: '#C8A96E', textures: product.textures });
+    idx = S.samples.length - 1;
+  }
+  _applySampleToActive({ id: product.id, name: product.name, color: null, textures: product.textures, _idx: idx });
+
+  btn.textContent = '✓'; btn.style.background = '#444';
+  setTimeout(() => { btn.textContent = orig; btn.style.background = '#000'; }, 700);
+}
+
 function dToggleMatCard(mid) {
   const el = document.getElementById('dmc-' + mid);
   const was = el.classList.contains('open');
@@ -778,14 +989,12 @@ function dToggleMatCard(mid) {
 
 function dApplyMat(e, mid, name, color) {
   S.samples.push({ id: mid, name, color });
-  S.activeSample = { id: mid, name, color, _idx: S.samples.length - 1 };
-  if (typeof applyMaterialToScene === 'function') applyMaterialToScene(color);
+  _applySampleToActive({ id: mid, name, color, _idx: S.samples.length - 1 });
   const btn = e.currentTarget;
   const orig = btn.textContent;
   btn.textContent = '✓';
   btn.style.background = '#444';
   setTimeout(() => { btn.textContent = orig; btn.style.background = '#000'; }, 600);
-  dRenderSwatches();
 }
 
 function dCompareMat(e, mid, name, color) {
@@ -795,12 +1004,117 @@ function dCompareMat(e, mid, name, color) {
   setTimeout(() => { btn.textContent = 'Сравнить'; btn.style.fontWeight = '700'; }, 1000);
 }
 
-function dEstimateMat(e, mid, name) {
-  const btn = e.currentTarget;
+function _estimateToast(btn) {
   btn.textContent = '✓ В смете';
   btn.style.fontWeight = '400';
   setTimeout(() => { btn.textContent = 'В смету'; btn.style.fontWeight = '700'; }, 1000);
 }
+
+// Заглушки: цена приходит строкой ("от 2 400 ₽/м²") → вытаскиваем число.
+function _parsePriceNum(s) {
+  if (typeof s === 'number') return s;
+  const digits = String(s || '').replace(/[^\d]/g, '');
+  const v = parseInt(digits, 10);
+  return isNaN(v) ? null : v;
+}
+
+function dEstimateMat(e, mid, name, priceStr) {
+  if (dActiveItem) S.estimate[dActiveItem] = { id: mid, name, price: _parsePriceNum(priceStr) };
+  _estimateToast(e.currentTarget);
+}
+
+// Реальный товар «В смету»: записываем выбор для активного элемента проекта.
+function dEstimateRealMat(e, pid) {
+  let product = null;
+  for (const k in _catalogCache) {
+    const arr = _catalogCache[k];
+    if (Array.isArray(arr)) { const f = arr.find(p => p.id === pid); if (f) { product = f; break; } }
+  }
+  if (product && dActiveItem) {
+    S.estimate[dActiveItem] = { id: product.id, name: product.name, price: _productPrice(product) };
+  }
+  _estimateToast(e.currentTarget);
+}
+
+// ── Геометрические метрики элементов (для сметы) ──
+const _GRIDm = () => (typeof GRID !== 'undefined' ? GRID : 32);
+
+function _rectsAreaM2(rects) {
+  const G = _GRIDm(); let a = 0;
+  for (const r of (rects || [])) a += (r.w * G) * (r.h * G);
+  return a;
+}
+function _polyLenM(pts) {
+  if (!pts) return 0;
+  const G = _GRIDm();
+  const segs = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [pts.filter(p => !p.break)];
+  let L = 0;
+  for (const s of segs) for (let i = 0; i < s.length - 1; i++) {
+    L += Math.hypot((s[i + 1].x - s[i].x) * G, (s[i + 1].y - s[i].y) * G);
+  }
+  return L;
+}
+function _polyAreaM2(pts) {
+  const G = _GRIDm();
+  const p = (pts || []).filter(q => !q.break);
+  if (p.length < 3) return 0;
+  let a = 0;
+  for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+    a += (p[j].x * G) * (p[i].y * G) - (p[i].x * G) * (p[j].y * G);
+  }
+  return Math.abs(a) / 2;
+}
+// Ширина доски из названия товара ("140х22мм" → 0.14 м), иначе 0.14 м.
+function _boardWidthM(name) {
+  const m = /(\d{2,3})\s*[*хxX×]\s*(\d{1,3})/.exec(name || '');
+  if (m) { const w = parseInt(m[1], 10); if (w >= 80 && w <= 300) return w / 1000; }
+  return 0.14;
+}
+
+// Метрика элемента: {kind:'deck'|'linear'|'piece', value, text}.
+function _elementMetric(el) {
+  if (el === 'terrace') { const a = _rectsAreaM2(S.terraceRects); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
+  if (el === 'steps')   { const G = _GRIDm(); const a = (S.steps.w * G) * (S.steps.h * G); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
+  if (el === 'paths')   { const len = _polyLenM(S.pts.paths); const w = parseFloat(document.getElementById('v-paths-width')?.value || 120) / 100; const a = len * w; return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
+  if (el === 'pool_terrace') { const a = _polyAreaM2(S.pts.pool_terrace); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
+  if (el === 'pier')    { const a = _polyAreaM2(S.pts.pier); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
+  if (el === 'fence')   { const len = _polyLenM(S.pts.fence); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
+  if (el === 'beds')    { const n = (S.beds || []).length; return n > 0 ? { kind: 'piece', value: n, text: n + ' шт' } : null; }
+  return null;
+}
+
+// Считает смету: строки по элементам + итог. Расчёт ориентировочный:
+//   deck   — площадь → погонаж доски (площадь / ширина доски × 1.1 запас) × цена/м.пог;
+//   linear — длина × 1.05 × цена/м.пог;
+//   piece  — количество × цена/шт.
+function _computeEstimate() {
+  const order = ['terrace', 'steps', 'paths', 'pool_terrace', 'pier', 'fence', 'beds'];
+  const rows = [];
+  for (const el of order) {
+    if (!S.sections.includes(el)) continue;
+    const metric = _elementMetric(el);
+    if (!metric || metric.value <= 0) continue;
+    const lbl = (D_SIDEBAR_ITEMS.find(i => i.id === el) || {}).lbl || el;
+    const mat = S.estimate[el] || null;
+    let qtyUnits = null, subtotal = null;
+    if (mat && mat.price) {
+      if (metric.kind === 'deck') {
+        const lin = Math.ceil(metric.value / _boardWidthM(mat.name) * 1.1);
+        qtyUnits = lin + ' м.пог'; subtotal = lin * mat.price;
+      } else if (metric.kind === 'linear') {
+        const lin = Math.ceil(metric.value * 1.05);
+        qtyUnits = lin + ' м.пог'; subtotal = lin * mat.price;
+      } else {
+        qtyUnits = metric.value + ' шт'; subtotal = metric.value * mat.price;
+      }
+    }
+    rows.push({ el, lbl, metric, mat, qtyUnits, subtotal });
+  }
+  const total = rows.reduce((s, r) => s + (r.subtotal || 0), 0);
+  return { rows, total };
+}
+
+function _fmtRub(n) { return Math.round(n).toLocaleString('ru-RU') + ' ₽'; }
 
 // ══════════════════════════════════════════════
 // SUMMARY
@@ -825,13 +1139,36 @@ function dShowSummary() {
     ['Настроено', dConfigured.size
       ? [...dConfigured].map(s => D_SIDEBAR_ITEMS.find(x => x.id === s)?.lbl || s).join(', ')
       : 'не выбрано'],
-    ...Object.entries(S.mats).map(([k, v]) => [
-      D_SIDEBAR_ITEMS.find(x => x.id === k)?.lbl || k, v.name
-    ]),
   );
-  document.getElementById('d-sum-body').innerHTML = rows.map(([k, v]) =>
+  const infoHTML = rows.map(([k, v]) =>
     `<div class="sum-row"><span class="sum-k">${k}</span><span class="sum-v">${v}</span></div>`
   ).join('');
+
+  // ── Предварительная смета ──
+  const est = _computeEstimate();
+  let estHTML = '<div class="est-title">Предварительная смета</div>';
+  if (!est.rows.length) {
+    estHTML += '<div class="est-empty">Разметьте конструкции, чтобы рассчитать смету.</div>';
+  } else {
+    estHTML += `
+      <table class="est-table">
+        <thead><tr><th>Элемент</th><th>Объём</th><th>Материал</th><th class="est-r">Кол-во</th><th class="est-r">Сумма</th></tr></thead>
+        <tbody>
+          ${est.rows.map(r => `
+            <tr>
+              <td>${r.lbl}</td>
+              <td>${r.metric.text}</td>
+              <td class="est-mat">${r.mat ? r.mat.name : '<span class="est-nomat">материал не выбран</span>'}</td>
+              <td class="est-r">${r.qtyUnits || '—'}</td>
+              <td class="est-r">${r.subtotal != null ? _fmtRub(r.subtotal) : '—'}</td>
+            </tr>`).join('')}
+        </tbody>
+        <tfoot><tr><td colspan="4" class="est-r">Итого:</td><td class="est-r est-total">${_fmtRub(est.total)}</td></tr></tfoot>
+      </table>
+      <div class="est-note">Расчёт ориентировочный: цены из каталога; расход доски с запасом 10%, забора — 5%.</div>`;
+  }
+
+  document.getElementById('d-sum-body').innerHTML = infoHTML + estHTML;
   document.getElementById('d-summary-overlay').classList.add('active');
 }
 

@@ -1,11 +1,13 @@
 /* DESKTOP STYLES — 3-column layout for configurator */
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+/* Без скруглений: острые углы у всех элементов интерфейса. */
+*, *::before, *::after { border-radius: 0 !important; }
 :root {
   --bg: #fff;
   --card: #d9d9d9;
   --card-hover: #ccc;
   --text: #000;
-  --r: 12px;
+  --r: 0;
   --sidebar-w: 300px;
   --panel-w: 340px;
   --topbar-h: 56px;
@@ -293,6 +295,8 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
 .d-canvas-title { font-size: 16px; font-weight: 700; }
 .d-canvas-hint { font-size: 12px; color: #999; }
 .d-canvas-actions { display: flex; gap: 8px; }
+/* Кнопки действий редактора — в правый нижний угол (в футере, прижаты вправо). */
+.d-canvas-footer .d-canvas-actions { margin-left: auto; }
 .d-canvas-btn {
   height: 32px; padding: 0 14px; background: var(--card); border: none;
   border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;
@@ -326,6 +330,20 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
   display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;
 }
 .d-canvas-toggle-label { font-size: 13px; font-weight: 600; }
+
+/* Селектор высоты грядки (дискретный) */
+.bed-h-row { display: flex; align-items: center; gap: 10px; }
+.bed-h-lbl { font-size: 14px; font-weight: 700; }
+.bed-h-unit { font-size: 13px; color: #888; }
+.bed-h-seg { display: inline-flex; border: 1px solid #ccc; border-radius: 8px; overflow: hidden; }
+.bed-h-btn {
+  border: none; background: var(--card, #e8e8e8); color: #333;
+  padding: 7px 14px; font-size: 14px; font-weight: 600; cursor: pointer;
+  border-right: 1px solid #ccc;
+}
+.bed-h-btn:last-child { border-right: none; }
+.bed-h-btn:hover { background: var(--card-hover, #ddd); }
+.bed-h-btn.active { background: #1a1a1a; color: #fff; }
 
 /* RIGHT PANEL — materials / catalog */
 .d-panel {
@@ -363,6 +381,28 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
 }
 .d-sub-btn:hover { background: var(--card-hover); }
 .d-sub-btn.active { border-color: #000; background: #f0f0f0; }
+
+/* Catalog section selector */
+.d-section-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.d-section-row:empty { display: none; }
+.d-section-lbl { font-size: 13px; font-weight: 700; color: #333; white-space: nowrap; }
+.d-section-select {
+  flex: 1; height: 36px; padding: 0 10px; border: 1px solid #ccc; border-radius: 8px;
+  background: var(--card, #f0f0f0); font-size: 14px; color: #222; cursor: pointer;
+}
+.d-section-select:focus { outline: none; border-color: #000; }
+
+/* Индикатор загрузки товаров раздела (прямоугольная индет-полоса) */
+.d-cat-loading { padding: 28px 16px; color: #888; font-size: 13px; text-align: center; }
+.d-cat-spinner {
+  width: 140px; height: 3px; background: #e3e3e3; margin: 0 auto 14px;
+  position: relative; overflow: hidden;
+}
+.d-cat-spinner::after {
+  content: ''; position: absolute; top: 0; left: -40%; width: 40%; height: 100%;
+  background: #555; animation: dcatbar 1s linear infinite;
+}
+@keyframes dcatbar { from { left: -40%; } to { left: 100%; } }
 
 /* Samples in panel */
 .d-samples-title { font-size: 12px; color: #999; margin-bottom: 8px; }
@@ -500,3 +540,16 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
 .sum-row:last-child { border-bottom:none; }
 .sum-k { font-weight:300; color:#666; }
 .sum-v { font-weight:700; text-align:right; max-width:60%; }
+
+/* Смета в окне «Итог» */
+.est-title { font-size:16px; font-weight:700; margin:20px 0 10px; }
+.est-empty { font-size:13px; color:#999; padding:8px 0; }
+.est-table { width:100%; border-collapse:collapse; font-size:13px; }
+.est-table th, .est-table td { padding:8px 8px; border-bottom:1px solid #eee; text-align:left; vertical-align:top; }
+.est-table thead th { font-weight:700; color:#555; font-size:12px; text-transform:uppercase; letter-spacing:.02em; }
+.est-table .est-r { text-align:right; white-space:nowrap; }
+.est-mat { color:#333; }
+.est-nomat { color:#bbb; font-style:italic; }
+.est-table tfoot td { border-top:2px solid #333; border-bottom:none; font-weight:700; padding-top:10px; }
+.est-total { font-size:16px; }
+.est-note { font-size:11px; color:#999; margin-top:8px; }

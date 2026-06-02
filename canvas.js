@@ -301,6 +301,21 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
     ctx.fillText('Терраса', (bx0+bx1)/2*W, (by0+by1)/2*H);
   }
 
+  // Грядки — массив rect'ов фиксированного размера (фон, если редактируем другую секцию)
+  if (excludeName !== 'beds' && S.beds && S.beds.length) {
+    for (const b of S.beds) {
+      const rx = b.x * W, ry = b.y * H, rw = b.w * W, rh = b.h * H;
+      ctx.fillStyle = 'rgba(120,75,35,.16)';
+      ctx.fillRect(rx, ry, rw, rh);
+      ctx.strokeStyle = 'rgba(120,75,35,.55)'; ctx.lineWidth = 2/sc;
+      ctx.setLineDash([5/sc, 3/sc]); ctx.strokeRect(rx, ry, rw, rh); ctx.setLineDash([]);
+    }
+    const b0 = S.beds[0];
+    ctx.fillStyle = 'rgba(120,75,35,.7)';
+    ctx.font = `${10/sc}px Roboto`; ctx.textAlign = 'center';
+    ctx.fillText('Грядки', (b0.x + b0.w/2)*W, (b0.y + b0.h/2)*H + 4/sc);
+  }
+
   // 2. Полигоны: pool_terrace, pier, fence
   for (const [secId, style] of Object.entries(layerStyles)) {
     if (secId === excludeName) continue;
@@ -1120,6 +1135,313 @@ function drawTerraceCanvas() {
     ctx.font = `${13 / cx.scale}px Roboto`;
     ctx.textAlign = 'center';
     ctx.fillText('Нажмите «＋ Прямоугольник» чтобы добавить террасу', W/2, H * 0.92);
+  }
+
+  ctx.restore();
+}
+
+// ══════════════════════════════════════════════
+// ГРЯДКИ: размещение rect'ов фиксированного размера 3×1 м
+// Размер не меняется (resize запрещён) — только перемещение (drag тела) и
+// поворот на 90° (кнопка). Ориентация ортогональная: длинная сторона (3 м)
+// вдоль X (w>h) или вдоль Y (w<h). Высота борта — глобальная (S.bedH).
+// ══════════════════════════════════════════════
+const BED_LEN = 3;   // длина грядки, м
+const BED_WID = 1;   // ширина грядки, м
+let bedDrag = null;       // 'move' | null
+let bedDragStart = null;  // { mx, my, x, y, w, h }
+let bedDragIdx = -1;
+
+// Размеры rect'а в нормализованных координатах по ориентации.
+//   horizontal=true  → длинная сторона (3 м) вдоль X.
+function _bedDims(horizontal) {
+  return horizontal
+    ? { w: BED_LEN / GRID, h: BED_WID / GRID }
+    : { w: BED_WID / GRID, h: BED_LEN / GRID };
+}
+
+function _clampBedPos(x, y, w, h) {
+  return {
+    x: Math.max(0, Math.min(1 - w, x)),
+    y: Math.max(0, Math.min(1 - h, y)),
+  };
+}
+
+// Грядка по умолчанию — горизонтальная, у нижней кромки дома.
+function _defaultBed() {
+  const d = _bedDims(true);
+  const hp = (typeof getHousePolygonNorm === 'function') ? getHousePolygonNorm() : null;
+  let x, y;
+  if (hp && hp.bboxNorm) {
+    const b = hp.bboxNorm;
+    x = snapNorm(b.nx + b.nw / 2 - d.w / 2);
+    y = snapNorm(b.ny + b.nh + 1 / GRID);   // на 1 м ниже дома
+  } else {
+    x = snapNorm(0.4); y = snapNorm(0.6);
+  }
+  const c = _clampBedPos(x, y, d.w, d.h);
+  return { x: c.x, y: c.y, w: d.w, h: d.h };
+}
+
+function initBedsCanvas() {
+  const wrap = document.getElementById('cw-beds');
+  const cv   = document.getElementById('cv-beds');
+  const dpr = window.devicePixelRatio || 1, sz = wrap.offsetWidth;
+  cv.width = sz * dpr; cv.height = sz * dpr;
+  cv.style.width = sz + 'px'; cv.style.height = sz + 'px';
+  CV['beds'] = mkCvState();
+
+  if (!S.beds || S.beds.length === 0) {
+    S.beds = [_defaultBed()];
+    S.activeBed = 0;
+  } else if (S.activeBed === null || S.activeBed >= S.beds.length) {
+    S.activeBed = 0;
+  }
+  // Прилипаем все грядки к сетке.
+  for (const b of S.beds) { b.x = snapNorm(b.x); b.y = snapNorm(b.y); }
+
+  // Синхронизируем кнопки высоты с текущим S.bedH.
+  if (typeof dSetBedHeight === 'function') dSetBedHeight(Math.round((S.bedH || 0.20) * 1000));
+
+  const newCv = cv.cloneNode(false);
+  newCv.width = sz * dpr; newCv.height = sz * dpr;
+  newCv.style.width = sz + 'px'; newCv.style.height = sz + 'px';
+  wrap.replaceChild(newCv, cv);
+
+  drawBedsCanvas();
+  attachBedsEvents(wrap);
+}
+
+function addBed() {
+  if (!S.beds) S.beds = [];
+  const mn = SNAP / GRID;
+  const d = _bedDims(true);
+  let nx, ny;
+  if (S.activeBed !== null && S.beds[S.activeBed]) {
+    const a = S.beds[S.activeBed];
+    nx = snapNorm(a.x + a.w + mn);       // справа от активной
+    ny = a.y;
+    if (nx + d.w > 1) nx = snapNorm(Math.max(0, a.x - d.w - mn));
+  } else {
+    nx = snapNorm(0.4); ny = snapNorm(0.55);
+  }
+  const c = _clampBedPos(nx, ny, d.w, d.h);
+  S.beds.push({ x: c.x, y: c.y, w: d.w, h: d.h });
+  S.activeBed = S.beds.length - 1;
+  drawBedsCanvas();
+}
+
+function delActiveBed() {
+  if (!S.beds || S.activeBed === null) return;
+  S.beds.splice(S.activeBed, 1);
+  S.activeBed = S.beds.length ? Math.min(S.activeBed, S.beds.length - 1) : null;
+  drawBedsCanvas();
+}
+
+// Поворот активной грядки на 90° вокруг её центра (swap w↔h).
+function rotateActiveBed() {
+  if (S.activeBed === null || !S.beds[S.activeBed]) return;
+  const b = S.beds[S.activeBed];
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+  const nw = b.h, nh = b.w;
+  const c = _clampBedPos(snapNorm(cx - nw / 2), snapNorm(cy - nh / 2), nw, nh);
+  b.w = nw; b.h = nh; b.x = c.x; b.y = c.y;
+  drawBedsCanvas();
+}
+
+function hitBeds(wx, wy, W) {
+  const beds = S.beds || [];
+  const order = [];
+  if (S.activeBed !== null) order.push(S.activeBed);
+  for (let i = 0; i < beds.length; i++) if (i !== S.activeBed) order.push(i);
+  for (const i of order) {
+    const b = beds[i];
+    const rx = b.x * W, ry = b.y * W, rw = b.w * W, rh = b.h * W;
+    if (wx >= rx && wx <= rx + rw && wy >= ry && wy <= ry + rh) return { idx: i, kind: 'move' };
+  }
+  return null;
+}
+
+// Перемещение грядки целиком (размер фиксирован). Прилипание любой кромки к
+// сетке + рёбрам дома/террас (через _snapTargets), w/h не меняются.
+function snapBedMove(ds, dx, dy) {
+  const { xs, ys } = _snapTargets(-1);
+  let left = snapNorm(Math.max(0, Math.min(1 - ds.w, ds.x + dx)));
+  let top  = snapNorm(Math.max(0, Math.min(1 - ds.h, ds.y + dy)));
+  const right = left + ds.w, bottom = top + ds.h;
+  const wL = _nearestTarget(left, xs), wR = _nearestTarget(right, xs);
+  if (wL !== null && (wR === null || Math.abs(wL - left) <= Math.abs(wR - right))) left = wL;
+  else if (wR !== null) left = wR - ds.w;
+  const wT = _nearestTarget(top, ys), wB = _nearestTarget(bottom, ys);
+  if (wT !== null && (wB === null || Math.abs(wT - top) <= Math.abs(wB - bottom))) top = wT;
+  else if (wB !== null) top = wB - ds.h;
+  const c = _clampBedPos(left, top, ds.w, ds.h);
+  return { x: c.x, y: c.y, w: ds.w, h: ds.h };
+}
+
+function applyBedDrag(wx, wy, W) {
+  if (bedDragIdx < 0 || !S.beds[bedDragIdx]) return;
+  const ds = bedDragStart;
+  const dx = (wx - ds.mx) / W, dy = (wy - ds.my) / W;
+  const res = snapBedMove(ds, dx, dy);
+  const b = S.beds[bedDragIdx];
+  b.x = res.x; b.y = res.y; b.w = res.w; b.h = res.h;
+  drawBedsCanvas();
+}
+
+function attachBedsEvents(wrap) {
+  if (wrap._bedsBound) return;
+  wrap._bedsBound = true;
+  let touchId = null;
+  let pinchActive = false;
+
+  const getWorld = (clientX, clientY) => {
+    const cx = CV['beds'] || { ox: 0, oy: 0, scale: 1 };
+    const cvEl = document.getElementById('cv-beds');
+    const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    return {
+      x: ((clientX - r.left) * dpr - cx.ox) / cx.scale,
+      y: ((clientY - r.top ) * dpr - cx.oy) / cx.scale,
+      W: cvEl.width,
+    };
+  };
+  const bedsActive = () =>
+    CV['beds'] && document.getElementById('d-canvas-beds')?.classList.contains('active');
+
+  const startDrag = (worldX, worldY, W) => {
+    const hit = hitBeds(worldX, worldY, W);
+    if (!hit) { S.activeBed = null; drawBedsCanvas(); return false; }
+    if (hit.idx !== S.activeBed) { S.activeBed = hit.idx; drawBedsCanvas(); }
+    const b = S.beds[hit.idx];
+    bedDrag = 'move'; bedDragIdx = hit.idx;
+    bedDragStart = { mx: worldX, my: worldY, x: b.x, y: b.y, w: b.w, h: b.h };
+    return true;
+  };
+
+  // ── TOUCH ──
+  wrap.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const cx = CV['beds']; if (!cx) return;
+    if (e.touches.length === 2) {
+      pinchActive = true; bedDrag = null; touchId = null;
+      cx.lastDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY);
+      return;
+    }
+    if (e.touches.length === 1 && !pinchActive) {
+      const t = e.touches[0];
+      const { x, y, W } = getWorld(t.clientX, t.clientY);
+      if (startDrag(x, y, W)) touchId = t.identifier;
+    }
+  }, { passive: false });
+
+  wrap.addEventListener('touchmove', e => {
+    e.preventDefault();
+    const cx = CV['beds']; if (!cx) return;
+    if (pinchActive && e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY);
+      const ratio = dist / cx.lastDist; cx.lastDist = dist;
+      const mid = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+      const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      const mx = (mid.x - r.left) * dpr, my = (mid.y - r.top) * dpr;
+      const ns = Math.min(cx.maxScale, Math.max(cx.minScale, cx.scale * ratio));
+      cx.ox = mx - (mx - cx.ox) * (ns / cx.scale);
+      cx.oy = my - (my - cx.oy) * (ns / cx.scale);
+      cx.scale = ns;
+      drawBedsCanvas(); return;
+    }
+    if (bedDrag && touchId !== null) {
+      const t = [...e.touches].find(t => t.identifier === touchId); if (!t) return;
+      const { x, y, W } = getWorld(t.clientX, t.clientY);
+      applyBedDrag(x, y, W);
+    }
+  }, { passive: false });
+
+  wrap.addEventListener('touchend', e => {
+    if (e.touches.length < 2) pinchActive = false;
+    if (e.touches.length === 0) { bedDrag = null; bedDragStart = null; bedDragIdx = -1; touchId = null; }
+  }, { passive: true });
+
+  // ── МЫШЬ ──
+  wrap.addEventListener('mousedown', e => {
+    if (!bedsActive()) return;
+    const { x, y, W } = getWorld(e.clientX, e.clientY);
+    if (startDrag(x, y, W)) wrap.style.cursor = 'move';
+  });
+  document.addEventListener('mousemove', e => {
+    if (!bedDrag) return;
+    const { x, y, W } = getWorld(e.clientX, e.clientY);
+    applyBedDrag(x, y, W);
+  });
+  document.addEventListener('mouseup', () => {
+    if (!bedDrag) return;
+    bedDrag = null; bedDragStart = null; bedDragIdx = -1; wrap.style.cursor = 'default';
+  });
+
+  wrap.addEventListener('wheel', e => {
+    e.preventDefault();
+    const cx = CV['beds']; if (!cx) return;
+    const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const mx = (e.clientX - r.left) * dpr, my = (e.clientY - r.top) * dpr;
+    const f = e.deltaY < 0 ? 1.15 : 0.87;
+    const ns = Math.min(cx.maxScale, Math.max(cx.minScale, cx.scale * f));
+    cx.ox = mx - (mx - cx.ox) * (ns / cx.scale);
+    cx.oy = my - (my - cx.oy) * (ns / cx.scale);
+    cx.scale = ns;
+    drawBedsCanvas();
+  }, { passive: false });
+}
+
+function drawBedsCanvas() {
+  const cvEl = document.getElementById('cv-beds'); if (!cvEl) return;
+  const ctx = cvEl.getContext('2d'), W = cvEl.width, H = cvEl.height;
+  const cx = CV['beds'] || { scale: 1, ox: 0, oy: 0 };
+  applyTransform(ctx, cx, W, H);
+
+  ctx.fillStyle = '#d9d9d9'; ctx.fillRect(0, 0, W, H);
+  // Сетка
+  const step = W / CELLS;
+  for (let r = 0; r <= CELLS; r++) for (let c = 0; c <= CELLS; c++) {
+    const isMajor = (r * SNAP) % 1 === 0 && (c * SNAP) % 1 === 0;
+    ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
+    ctx.beginPath(); ctx.arc(c * step, r * step, (isMajor ? 2 : 1.2) / cx.scale, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.fillStyle = '#999'; ctx.font = `${9 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+  for (let m = 5; m <= GRID; m += 5) { const px = m / GRID * W; ctx.fillText(m + 'м', px, H - 3 / cx.scale); }
+
+  drawPreviousLayers(ctx, W, H, cx, 'beds');
+
+  // Грядки (текущая секция)
+  const beds = S.beds || [];
+  const COL = '#7a4b23';          // дерево борта
+  const COL_SOIL = 'rgba(60,38,18,.45)';
+  for (let i = 0; i < beds.length; i++) {
+    const b = beds[i];
+    const isActive = (i === S.activeBed);
+    const rx = b.x * W, ry = b.y * W, rw = b.w * W, rh = b.h * W;
+    // Борт
+    ctx.fillStyle = isActive ? 'rgba(122,75,35,.30)' : 'rgba(122,75,35,.16)';
+    ctx.fillRect(rx, ry, rw, rh);
+    // Земля (внутренняя вставка ~8 см от борта)
+    const inN = 0.08 / GRID * W;
+    if (rw > inN * 2.5 && rh > inN * 2.5) {
+      ctx.fillStyle = COL_SOIL;
+      ctx.fillRect(rx + inN, ry + inN, rw - inN * 2, rh - inN * 2);
+    }
+    ctx.strokeStyle = COL; ctx.lineWidth = (isActive ? 2.6 : 1.8) / cx.scale;
+    if (!isActive) ctx.setLineDash([6 / cx.scale, 3 / cx.scale]);
+    ctx.strokeRect(rx, ry, rw, rh);
+    ctx.setLineDash([]);
+    ctx.fillStyle = COL; ctx.font = `bold ${10 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+    ctx.fillText(`${BED_LEN}×${BED_WID} м`, rx + rw / 2, ry + rh / 2 + 4 / cx.scale);
+  }
+
+  if (!beds.length) {
+    ctx.fillStyle = '#aaa'; ctx.font = `${13 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+    ctx.fillText('Нажмите «＋ Грядка» чтобы добавить', W / 2, H * 0.92);
   }
 
   ctx.restore();

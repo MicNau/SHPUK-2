@@ -495,7 +495,10 @@ function getHouseMats() {
   const post  = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.80, metalness: 0.20, envMap: env, envMapIntensity: eI * 0.2 });
   const step  = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.80, metalness: 0.05, envMap: env, envMapIntensity: eI * 0.3 });
 
-  return { wall, base, roof, glass, frame, door, deck, joist, post, step };
+  // Земля в грядке (верхний слой почвы). Тёмно-коричневая, матовая.
+  const soil  = new THREE.MeshStandardMaterial({ color: 0x3c2a18, roughness: 0.97, metalness: 0.0, envMap: env, envMapIntensity: eI * 0.1 });
+
+  return { wall, base, roof, glass, frame, door, deck, joist, post, step, soil };
 }
 
 // ── Земля (процедурная текстура без тайлинга) ──
@@ -679,6 +682,47 @@ function _applyDeckUV(mesh, plankAlongX) {
   if (!plankAlongX) _rotateBoxTopUV90(mesh.geometry);
 }
 
+// Накладывает реальные PBR-текстуры товара (из каталога API, ProductResource.textures)
+// на deck-материал — то есть на террасы, дорожки и борта грядок. Текстуры
+// бесшовные → RepeatWrapping; тайлинг задаётся UV-проекцией (_applyBoxUV, мир/DECK_TILE),
+// поэтому repeat остаётся (1,1). Вызывается ДО построения deck-мешей (порядок в buildScene3d).
+function _applyDeckProductTextures(M, textures) {
+  if (!textures || !M || !M.deck) return false;
+  let applied = false;
+  const set = (tex, slot, srgb) => {
+    if (!tex) return;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    if (srgb) tex.encoding = THREE.sRGBEncoding;
+    tex.needsUpdate = true;
+    M.deck[slot] = tex;
+    applied = true;
+  };
+  set(textures.textures_dpc_diffusion, 'map', true);
+  set(textures.textures_dpc_normal, 'normalMap', false);
+  set(textures.textures_dpc_roughness, 'roughnessMap', false);
+  if (applied) {
+    M.deck.color.set(0xffffff); // не подкрашиваем поверх реальной текстуры
+    M.deck.needsUpdate = true;
+  }
+  return applied; // false → у товара нет PBR-текстур (напр. мебель), деке не трогаем
+}
+
+// Деко-элементы, у каждого свой материал настила (S.elementMat[el]).
+const DECK_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'pier'];
+
+// Материал настила для конкретного элемента: дефолтный baseDeck, либо его клон с
+// текстурами товара / цветом из S.elementMat[el]. Клон попадёт в меш и будет
+// освобождён clearGroup при следующей пересборке.
+function _resolveDeckMat(baseDeck, el) {
+  const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat[el] : null;
+  if (!em) return baseDeck;
+  const m = baseDeck.clone();
+  if (em.textures && _applyDeckProductTextures({ deck: m }, em.textures)) return m;
+  if (em.color) { m.color.set(em.color); return m; }
+  m.dispose();
+  return baseDeck;
+}
+
 // ══════════════════════════════════════════════
 // ПРОЦЕДУРНОЕ НЕБО (пока нет HDRI)
 // ══════════════════════════════════════════════
@@ -729,17 +773,22 @@ function buildScene3d() {
   threeState.fenceMeshes   = [];
   threeState.railingMeshes = [];
   threeState.canopyMeshes  = [];
+  threeState.bedMeshes     = [];
 
   const M = getHouseMats();
 
-  // Применяем цвет активного образца к нужной секции
+  // Базовый deck-материал. Деко-элементы (терраса/ступени/дорожки/грядки/бассейн/
+  // причал) красятся НЕЗАВИСИМО: перед сборкой каждого M.deck подменяется на его
+  // материал из S.elementMat (см. _resolveDeckMat). Базовый используется как дефолт.
+  const _baseDeck = M.deck;
+
+  // Цвет активного образца для НЕ-deck элементов (фасад/крыльцо). Деко-элементы
+  // красятся per-element ниже, поэтому здесь deck НЕ трогаем.
   if (S.activeSample && S.activeSample.color) {
     const sec   = getActive()[S.curSec];
-    const secId = sec ? sec.id : 'terrace';
+    const secId = sec ? sec.id : '';
     if      (secId === 'facade') M.wall.color.set(S.activeSample.color);
     else if (secId === 'porch')  M.step.color.set(S.activeSample.color);
-    else if (secId === 'fence')  { /* fence uses its own mat */ }
-    else                         M.deck.color.set(S.activeSample.color);
   }
 
   const isNoHouse = (S.houseType === 'Участок без дома');
@@ -830,6 +879,7 @@ function buildScene3d() {
   // На стыках возможен z-fighting (MVP); boolean union — следующая итерация.
   const terraceRectPolys = _terraceRectsToPolygons();
   if (S.sections.includes('terrace')) {
+    M.deck = _resolveDeckMat(_baseDeck, 'terrace');
     for (const polyPts of terraceRectPolys) {
       try {
         buildTerraceBox3d(houseGroup, M, polyPts, (isNoHouse ? 0.35 : bh) - 0.01, houseL, houseW, 'deckMeshes');
@@ -837,24 +887,46 @@ function buildScene3d() {
     }
   }
 
-  if (S.sections.includes('pool_terrace') && S.pts.pool_terrace.length >= 3)
+  if (S.sections.includes('pool_terrace') && S.pts.pool_terrace.length >= 3) {
+    M.deck = _resolveDeckMat(_baseDeck, 'pool_terrace');
     buildTerrace3d(houseGroup, M, S.pts.pool_terrace, (isNoHouse ? 0.35 : bh) - 0.01, houseL, houseW, 'deckMeshes');
+  }
 
-  if (S.sections.includes('pier') && S.pts.pier.length >= 3)
+  if (S.sections.includes('pier') && S.pts.pier.length >= 3) {
+    M.deck = _resolveDeckMat(_baseDeck, 'pier');
     buildTerrace3d(houseGroup, M, S.pts.pier, 0.5, houseL, houseW, 'deckMeshes');
+  }
 
-  if (S.sections.includes('paths') && S.pts.paths.filter(p=>!p.break).length >= 2)
+  if (S.sections.includes('paths') && S.pts.paths.filter(p=>!p.break).length >= 2) {
+    M.deck = _resolveDeckMat(_baseDeck, 'paths');
     buildPaths3d(houseGroup, M, S.pts.paths, houseL, houseW);
+  }
 
   if (S.sections.includes('fence') && S.pts.fence.filter(p=>!p.break).length >= 2)
     buildFence3d(houseGroup, M, S.pts.fence, houseL, houseW);
 
   // Ступени — отдельная секция. Глубина в плане пересчитывается из bh.
   if (S.sections.includes('steps') && S.steps) {
+    M.deck = _resolveDeckMat(_baseDeck, 'steps');
     try {
       buildSteps3d(houseGroup, M, S.steps, isNoHouse ? 0.35 : bh, houseL, houseW);
     } catch (e) { console.error('[buildSteps3d]', e); }
   }
+
+  // Грядки — GLB-модуль planter. Если ещё не загружен — грузим и перестраиваем сцену.
+  if (S.sections.includes('beds') && S.beds && S.beds.length) {
+    if (_planterCache) {
+      M.deck = _resolveDeckMat(_baseDeck, 'beds');
+      try {
+        buildBeds3d(houseGroup, M, S.beds, S.bedH || 0.20, houseL, houseW);
+      } catch (e) { console.error('[buildBeds3d]', e); }
+    } else {
+      ensurePlanterLoaded().then(c => { if (c && threeState) buildScene3d(); });
+    }
+  }
+
+  // Восстанавливаем базовый deck в M (на случай, если ниже что-то на него опирается).
+  M.deck = _baseDeck;
 
   // Мировые bbox всех террасных rect'ов — для пропуска перил/опор на внутренних
   // (стыкующихся) рёбрах: контур строится только по внешнему периметру union.
@@ -903,14 +975,24 @@ function buildScene3d() {
     const segs2=(typeof splitAtBreaks==='function')?splitAtBreaks(S.pts.paths):[S.pts.paths.filter(p=>!p.break)];
     for(const seg of segs2){if(seg.length<2)continue; threeState.occupiedZones.push({type:'path',points:canvasToWorld(seg,houseL,houseW),width:pw2});}
   }
-
-  // Антураж (растительность) — только когда есть размеченные конструкции
-  const hasLayout = terraceRectPolys.length > 0
-    || S.pts.paths.length >= 2
-    || S.pts.fence.length >= 2;
-  if (hasLayout && typeof _buildEntourage === 'function') {
-    _buildEntourage(threeState.vegGroup || threeState.scene);
+  if (S.sections.includes('beds') && S.beds) {
+    for (const b of S.beds) {
+      threeState.occupiedZones.push({ type:'poly', points: canvasToWorld([
+        { x:b.x, y:b.y }, { x:b.x+b.w, y:b.y }, { x:b.x+b.w, y:b.y+b.h }, { x:b.x, y:b.y+b.h },
+      ], houseL, houseW) });
+    }
   }
+
+  // Антураж (растительность) отключён по требованию — кусты/деревья в сцену не
+  // добавляются. vegGroup очищается в начале buildScene3d, поэтому остаётся пустым.
+  // (Чтобы вернуть растительность — раскомментировать вызов _buildEntourage.)
+  // const hasLayout = terraceRectPolys.length > 0
+  //   || S.pts.paths.length >= 2
+  //   || S.pts.fence.length >= 2
+  //   || (S.beds && S.beds.length > 0);
+  // if (hasLayout && typeof _buildEntourage === 'function') {
+  //   _buildEntourage(threeState.vegGroup || threeState.scene);
+  // }
 
   const cx = isNoHouse ? 0 : houseL/2;
   const cy = isNoHouse ? 1 : (bh+wh)/2;
@@ -1151,6 +1233,111 @@ function buildTerraceBox3d(parent, M, pts, deckHeight, houseL, houseW, meshArray
   _applyDeckUV(m, W >= D);   // доски вдоль длинной стороны
   parent.add(m);
   threeState[trackArray].push(m);
+}
+
+// ══════════════════════════════════════════════
+// ГРЯДКИ (raised beds) — GLB-модуль mod_planter_a
+// ══════════════════════════════════════════════
+// Модель смоделирована в натуральном размере: дерево (planter_wood) X[0..3],
+// Y[0..0.1566], Z[-1..0]; земля (planter_soil) — тонкая плита внутри.
+// Дерево перекрываем deck-материалом + кубическим UV (как терраса/дорожки),
+// земля сохраняет свой материал. Высота — масштаб по Y (одна на все грядки).
+const PLANTER_NATIVE_H   = 0.1566;  // родная высота борта (верх дерева), м
+const PLANTER_SOIL_TOP   = 0.0908;  // родная высота верха земли, м
+const PLANTER_SOIL_GAP   = PLANTER_NATIVE_H - PLANTER_SOIL_TOP; // отступ земли от борта (~65 мм)
+let _planterCache = null;       // { woodGeo, soilGeo } — клоны геометрий в родном базисе
+let _planterLoadPromise = null; // защита от повторной загрузки
+
+function ensurePlanterLoaded() {
+  if (_planterCache) return Promise.resolve(_planterCache);
+  if (_planterLoadPromise) return _planterLoadPromise;
+  _planterLoadPromise = new Promise(resolve => {
+    if (typeof THREE === 'undefined' || !THREE.GLTFLoader) { resolve(null); return; }
+    const loader = new THREE.GLTFLoader();
+    loader.load(
+      'assets/houses/modules/site/mod_planter_a.glb?v=1',
+      gltf => {
+        let woodGeo = null, soilGeo = null;
+        gltf.scene.traverse(o => {
+          if (!o.isMesh || !o.geometry) return;
+          o.updateWorldMatrix(true, false);
+          const g = o.geometry.clone();
+          g.applyMatrix4(o.matrixWorld); // запекаем трансформ узла (у модуля — единичный)
+          if ((o.name || '').toLowerCase().includes('soil')) soilGeo = g;
+          else woodGeo = g;
+        });
+        _planterCache = { woodGeo, soilGeo };
+        resolve(_planterCache);
+      },
+      undefined,
+      err => { console.warn('[planter] не удалось загрузить GLB:', err); resolve(null); }
+    );
+  });
+  return _planterLoadPromise;
+}
+
+// Матрица, отображающая родной базис планки в мировой прямоугольник грядки.
+//   rot=false: длинная сторона (3 м) вдоль X; rot=true: вдоль Z (поворот +90°).
+//   sy: масштаб по высоте = bedH / PLANTER_NATIVE_H.
+function _planterMatrix(minX, maxX, minZ, maxZ, rot, sy) {
+  const S4 = new THREE.Matrix4().makeScale(1, sy, 1);
+  let M4;
+  if (!rot) {
+    // X[0,3]→[minX,maxX]; Z[-1,0]→[minZ,maxZ] (z=0→maxZ); Y база на земле.
+    const T = new THREE.Matrix4().makeTranslation(minX, 0, maxZ);
+    M4 = T.multiply(S4);
+  } else {
+    // поворот +90° по Y: (x,y,z)→(z,y,-x). X[0,1]?? см. вывод в комментарии.
+    const R = new THREE.Matrix4().makeRotationY(Math.PI / 2);
+    const T = new THREE.Matrix4().makeTranslation(maxX, 0, maxZ);
+    M4 = T.multiply(R).multiply(S4);
+  }
+  return M4;
+}
+
+function buildBeds3d(parent, M, beds, bedH, houseL, houseW) {
+  if (!_planterCache || !_planterCache.woodGeo) return;
+  const sy = Math.max(0.2, bedH / PLANTER_NATIVE_H);
+  // Земля: верх на (bedH - PLANTER_SOIL_GAP), то есть сохраняем родной отступ от борта.
+  const soilExtraY = (bedH - PLANTER_SOIL_GAP) - PLANTER_SOIL_TOP * sy;
+
+  for (const b of beds) {
+    const worldPts = canvasToWorld([
+      { x: b.x,        y: b.y        },
+      { x: b.x + b.w,  y: b.y        },
+      { x: b.x + b.w,  y: b.y + b.h  },
+      { x: b.x,        y: b.y + b.h  },
+    ], houseL, houseW);
+    const minX = Math.min(...worldPts.map(p => p.x)), maxX = Math.max(...worldPts.map(p => p.x));
+    const minZ = Math.min(...worldPts.map(p => p.z)), maxZ = Math.max(...worldPts.map(p => p.z));
+    const wX = maxX - minX, wZ = maxZ - minZ;
+    if (wX < 0.3 || wZ < 0.3) continue;
+    const rot = wZ > wX; // длинная сторона вдоль Z → поворот
+
+    const mat4 = _planterMatrix(minX, maxX, minZ, maxZ, rot, sy);
+
+    // Дерево: deck-материал + кубический мировой UV (масштаб как терраса/дорожки).
+    const woodGeo = _planterCache.woodGeo.clone();
+    woodGeo.applyMatrix4(mat4);
+    const wood = new THREE.Mesh(woodGeo, M.deck);
+    wood.castShadow = wood.receiveShadow = true;
+    _applyBoxUV(wood, DECK_TILE); // mesh.position=0 → локальные коорд. = мировые
+    parent.add(wood);
+    threeState.bedMeshes.push(wood);
+    // Дерево = deck-материал → перекрашивается вместе с террасой/дорожками.
+    threeState.deckMeshes.push(wood);
+
+    // Земля: свой материал, верх — у борта.
+    if (_planterCache.soilGeo) {
+      const soilGeo = _planterCache.soilGeo.clone();
+      soilGeo.applyMatrix4(mat4);
+      if (soilExtraY) soilGeo.translate(0, soilExtraY, 0);
+      const soil = new THREE.Mesh(soilGeo, M.soil);
+      soil.castShadow = false; soil.receiveShadow = true;
+      parent.add(soil);
+      threeState.bedMeshes.push(soil);
+    }
+  }
 }
 
 function buildTerrace3d(parent, M, pts, deckHeight, houseL, houseW, meshArrayName) {
@@ -2084,6 +2271,11 @@ function _buildPathRibbon(parent, left, right, yBot, yTop, pathW, mat, meshArray
   }
   idx.push(LT(0),LB(0),RT(0),  RT(0),LB(0),RB(0));             // торец начала
   const e = n - 1; idx.push(LT(e),RT(e),LB(e),  RT(e),RB(e),LB(e));  // торец конца
+  // Намотка треугольников была инвертирована (верх ленты давал нормаль −Y, низ +Y):
+  // для diffuse при DoubleSide незаметно, но normalMap из товара даёт «вывернутые»
+  // нормали. Разворачиваем каждый треугольник → computeVertexNormals даёт наружные
+  // нормали (верх +Y, низ −Y, кромки наружу), и normalMap кладётся корректно.
+  for (let t = 0; t < idx.length; t += 3) { const s = idx[t+1]; idx[t+1] = idx[t+2]; idx[t+2] = s; }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('uv',       new THREE.Float32BufferAttribute(uv, 2));
@@ -2116,29 +2308,75 @@ function buildPaths3d(parent, M, pts, houseL, houseW) {
   parent.add(group);
 }
 
+// Типовые размеры секции забора. У разных производителей отличаются — поэтому
+// вынесены в константы (при желании можно вывести в UI как параметры).
+const FENCE_SECTION_W  = 2.0;   // ширина стандартной секции, м
+const FENCE_PANEL_H    = 1.4;   // высота полотна секции, м
+const FENCE_GROUND_GAP = 0.05;  // просвет под полотном, м
+const FENCE_POST_W     = 0.10;  // сечение столба, м
+const FENCE_POST_CAP   = 0.10;  // на сколько столб выше полотна, м
+const FENCE_PANEL_T    = 0.04;  // толщина полотна, м
+
+// Забор из стандартных секций: каждый пролёт ломаной делится на секции по
+// FENCE_SECTION_W; последняя секция — остаток (подрезанная панель). Столбы
+// ставятся на границах секций и на углах (дедуплицируются на стыках сегментов).
 function buildFence3d(parent,M,pts,houseL,houseW){
   const realPts=pts.filter(p=>!p.break);
   if(realPts.length<2)return;
-  const fenceH=1.8,postW=.1,boardH=fenceH-.2,boardT=.02;
   const fenceGroup=new THREE.Group();
   const box=(sx,sy,sz)=>new THREE.BoxGeometry(sx,sy,sz);
   const meshFn=(geo,mat)=>{const m=new THREE.Mesh(geo,mat);m.castShadow=m.receiveShadow=true;return m;};
   const fenceMat=new THREE.MeshStandardMaterial({color:0x8B7355,roughness:.80,metalness:.05});
-  // Разбиваем на сегменты по маркерам break
+
+  const postH   = FENCE_GROUND_GAP + FENCE_PANEL_H + FENCE_POST_CAP;
+  const panelCY = FENCE_GROUND_GAP + FENCE_PANEL_H/2;
+
+  // Позиции столбов — дедуплицируются (углы/стыки секций общие у соседних пролётов).
+  const postMap = new Map();
+  const addPost = (x,z) => { const k = `${x.toFixed(3)},${z.toFixed(3)}`; if(!postMap.has(k)) postMap.set(k,{x,z}); };
+
+  // Разбиваем на сегменты по маркерам break (мультилинейный забор).
   const segments = (typeof splitAtBreaks==='function') ? splitAtBreaks(pts) : [realPts];
   for(const seg of segments){
     if(seg.length<2)continue;
     const worldPts=canvasToWorld(seg,houseL,houseW);
-    for(let i=0;i<worldPts.length;i++){
-      const p=worldPts[i],postH=fenceH+.2;
-      const post=meshFn(box(postW,postH,postW),M.post);post.position.set(p.x,postH/2,p.z);fenceGroup.add(post);
-      if(i<worldPts.length-1){
-        const a=worldPts[i],b=worldPts[i+1],dx=b.x-a.x,dz=b.z-a.z;
-        const segLen=Math.sqrt(dx*dx+dz*dz); if(segLen<.2)continue;
-        const angle=Math.atan2(dx,dz),mx=(a.x+b.x)/2,mz=(a.z+b.z)/2;
-        const panel=meshFn(box(boardT,boardH,segLen-postW),fenceMat);panel.position.set(mx,.2+boardH/2,mz);panel.rotation.y=angle;fenceGroup.add(panel);threeState.fenceMeshes.push(panel);
+    for(let i=0;i<worldPts.length-1;i++){
+      const a=worldPts[i], b=worldPts[i+1];
+      const dx=b.x-a.x, dz=b.z-a.z;
+      const segLen=Math.hypot(dx,dz);
+      if(segLen<.05) continue;
+      const ux=dx/segLen, uz=dz/segLen;
+      const angle=Math.atan2(dx,dz);
+
+      // Ширины секций: целые по FENCE_SECTION_W + остаток.
+      const nFull = Math.floor(segLen/FENCE_SECTION_W + 1e-6);
+      const rem   = segLen - nFull*FENCE_SECTION_W;
+      const widths = [];
+      for(let k=0;k<nFull;k++) widths.push(FENCE_SECTION_W);
+      if(rem > 0.05) widths.push(rem);
+      if(widths.length===0) widths.push(segLen); // пролёт короче одной секции
+
+      let dist=0;
+      addPost(a.x, a.z); // столб в начале пролёта
+      for(const w of widths){
+        const cd = dist + w/2;
+        const cx = a.x + ux*cd, cz = a.z + uz*cd;
+        const panelLen = Math.max(0.05, w - FENCE_POST_W); // зазор под столбы
+        const panel=meshFn(box(FENCE_PANEL_T,FENCE_PANEL_H,panelLen),fenceMat);
+        panel.position.set(cx, panelCY, cz);
+        panel.rotation.y=angle;
+        fenceGroup.add(panel); threeState.fenceMeshes.push(panel);
+        dist += w;
+        addPost(a.x+ux*dist, a.z+uz*dist); // столб на границе секции / в конце пролёта
       }
     }
+  }
+
+  // Столбы (после дедупликации).
+  for(const {x,z} of postMap.values()){
+    const post=meshFn(box(FENCE_POST_W,postH,FENCE_POST_W),M.post);
+    post.position.set(x,postH/2,z);
+    fenceGroup.add(post);
   }
   parent.add(fenceGroup);
 }
