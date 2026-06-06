@@ -502,10 +502,8 @@ function initStepsCanvas() {
   cv.style.width = sz + 'px'; cv.style.height = sz + 'px';
   CV['steps'] = mkCvState();
 
-  // Снап стартовых координат к сетке
-  const s = S.steps;
-  s.x = snapNorm(s.x); s.y = snapNorm(s.y);
-  s.w = snapNorm(s.w); s.h = snapNorm(s.h);
+  // НЕ переснапиваем ступени на сетку при открытии — иначе rect, прижатый к стене
+  // дома/кромке террасы (обычно не на сетке 0.5 м), отрывается («съезжает»).
 
   const newCv = cv.cloneNode(false);
   newCv.width = sz * dpr; newCv.height = sz * dpr;
@@ -829,11 +827,10 @@ function initTerraceCanvas() {
   } else if (S.activeTerraceRect === null || S.activeTerraceRect >= S.terraceRects.length) {
     S.activeTerraceRect = 0;
   }
-  // Прилипаем к сетке все существующие rects.
-  for (const r of S.terraceRects) {
-    r.x = snapNorm(r.x); r.y = snapNorm(r.y);
-    r.w = snapNorm(r.w); r.h = snapNorm(r.h);
-  }
+  // НЕ переснапиваем существующие rects на сетку при открытии: они уже корректно
+  // расставлены при создании/перетаскивании (на сетке ИЛИ вплотную к стене дома,
+  // которая обычно не на сетке 0.5 м). Грид-снап здесь отрывал террасу от стены
+  // («съезжала» при повторном редактировании).
 
   const newCv = cv.cloneNode(false);
   newCv.width = sz * dpr; newCv.height = sz * dpr;
@@ -1197,8 +1194,8 @@ function initBedsCanvas() {
   } else if (S.activeBed === null || S.activeBed >= S.beds.length) {
     S.activeBed = 0;
   }
-  // Прилипаем все грядки к сетке.
-  for (const b of S.beds) { b.x = snapNorm(b.x); b.y = snapNorm(b.y); }
+  // НЕ переснапиваем грядки на сетку при открытии — сохраняем позицию, к которой
+  // их прижали (сетка или стена/кромка), иначе «съезжают» при повторном открытии.
 
   // Синхронизируем кнопки высоты с текущим S.bedH.
   if (typeof dSetBedHeight === 'function') dSetBedHeight(Math.round((S.bedH || 0.20) * 1000));

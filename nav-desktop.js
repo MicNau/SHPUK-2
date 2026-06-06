@@ -213,11 +213,11 @@ function _dApplyPreviewToCard(typeId, dataURL) {
   hcp.innerHTML = `<img class="preview-img" src="${dataURL}" alt="">`;
 }
 
-// Универсальная функция выбора дома по typeId. Без отдельной кнопки «Дальше» —
-// сразу переходим на step 2.
-// Сброс всех настроек конструкций (террасы, крыльца, дорожек и т.д.) и
-// материалов — при смене типа дома. Сохраняет накопленные образцы (S.samples)
-// и каталожные фильтры, т.к. они не привязаны к конкретному дому.
+// Полный сброс ВСЕХ настроек проекта: конструкции (терраса/крыльцо/дорожки/забор/
+// грядки/…), материалы по элементам, смета, накопленные образцы, каталожные фильтры
+// и UI-состояние. Вызывается при смене типа дома И при переходе к «Размеры дома»
+// (шаг 2) — меняя габариты дома, всё размещённое становится невалидным.
+// 3D-объекты удаляются при следующей пересборке сцены (buildScene3d чистит houseGroup).
 function _dResetAllConfigurations() {
   S.sections = [];
   S.pts = { pool_terrace: [], paths: [], pier: [], fence: [] };
@@ -230,7 +230,11 @@ function _dResetAllConfigurations() {
   S.mats = {};
   S.elementMat = {};
   S.estimate = {};
+  S.samples = [];
   S.activeSample = null;
+  S.catColors = new Set();
+  S.catPrice = null;
+  S.catSection = null;
   S.matSubMode = null;
   S.curSec = 0;
   dConfigured.clear();
@@ -297,6 +301,9 @@ function dSelHouse(el, name) {
 // STEP 2 — Parameters + 3D
 // ══════════════════════════════════════════════
 function _dInitParamsView() {
+  // Переход к «Размеры дома» обнуляет ВСЕ настройки проекта и удаляет 3D-объекты:
+  // меняя габариты дома, размещённые конструкции/материалы становятся невалидными.
+  _dResetAllConfigurations();
   // Перерендерим параметры по дескриптору (если уже загружен) или по дефолтам.
   _dRenderFloorParams();
   _dSyncRanges();
