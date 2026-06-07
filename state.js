@@ -76,6 +76,34 @@ const CONSTRUCTION_TO_SECTION = {
   steps: 2330, beds: 2357, fence: 2348, facade: 2683, furniture: 2442,
 };
 
+// Материалы дома (шаг «Параметры дома»). Образцы — квадраты: с текстурой (img из
+// assets/) или однотонные (color). id используются в 3D (_houseTexSet в viewer3d-core).
+const HOUSE_MATERIALS = {
+  roof: {
+    label: 'Материал крыши',
+    items: [
+      { id: 'tile',        img: 'assets/roof_diff_01.jpg' }, // черепица
+      { id: 'metal_green', img: 'assets/roof_diff_02.jpg' }, // металл зелёный
+      { id: 'metal_red',   img: 'assets/roof_diff_03.jpg' }, // металл красный
+    ],
+  },
+  base: {
+    label: 'Материал фундамента',
+    items: [
+      { id: 'concrete', color: '#9a9a9a' },                  // бетон (без текстуры, серый)
+      { id: 'stone',    img: 'assets/base_diff_01.jpg' },    // камень
+    ],
+  },
+  wall: {
+    label: 'Материал стен',
+    items: [
+      { id: 'stucco', color: '#efe2c8' },                    // штукатурка (без текстуры, св.-бежевая)
+      { id: 'brick',  img: 'assets/wall_diff_01.jpg' },      // кирпич
+      { id: 'siding', img: 'assets/wall_diff_02.jpg' },      // сайдинг
+    ],
+  },
+};
+
 // Позиции из каталога outdoor-mebel.ru — Доска ДПК универсальная
 const STUB_RESULTS = [
   {
@@ -151,6 +179,10 @@ const S = {
   catSection: null,    // выбранный раздел каталога (bitrix_id) или null = дефолт по элементу
   catShowResults: false,
   estimate: {},        // elementId -> { id, name, price } — выбранный в смету товар по элементу
+  // Материалы дома (шаг «Параметры дома»).
+  roofMat: 'tile',     // tile | metal_green | metal_red
+  baseMat: 'concrete', // concrete | stone
+  wallMat: 'stucco',   // stucco | brick | siding
 };
 const TOTAL = 10;
 let step = 1;

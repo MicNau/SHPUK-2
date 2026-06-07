@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=2">
+<link rel="stylesheet" href="styles-desktop.css?v=3">
 </head>
 <body>
 
@@ -70,6 +70,9 @@
 
       <!-- Per-floor параметры (генерируются динамически на основе дескриптора) -->
       <div id="d-floors-params"></div>
+
+      <!-- Материалы дома (крыша/фундамент/стены) — квадратные образцы -->
+      <div id="d-house-mats"></div>
 
       <div class="d-params-actions">
         <button class="d-btn d-btn-back" onclick="dGoTo(1)">← Назад</button>
@@ -317,19 +320,19 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=20"></script>
+<script src="state.js?v=21"></script>
 <script src="canvas.js?v=24"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
-<script src="shared/house-builder.js?v=63"></script>
+<script src="shared/house-builder.js?v=66"></script>
 <!-- Каталожный API: домен. '' = same-origin (локальный dev-прокси devserver.py
      проксирует /api и /static на sollersdev.ru — обходит отсутствие CORS).
      Когда бэкенд включит CORS — поставить 'https://sollersdev.ru' и прокси не нужен. -->
 <script>window.RESOURCE_API_DOMAIN = '';</script>
 <script src="ResourceManager.js?v=1"></script>
 <!-- 3D viewer -->
-<script src="viewer3d-core.js?v=87"></script>
+<script src="viewer3d-core.js?v=90"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=37"></script>
+<script src="nav-desktop.js?v=38"></script>
 </body>
 </html>

@@ -210,7 +210,7 @@ function init3dCanvas(targetSlotId) {
   renderer.shadowMap.enabled   = true;
   renderer.shadowMap.type      = isMobile ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
   renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 0.82;
   renderer.outputEncoding      = THREE.sRGBEncoding;
   renderer.physicallyCorrectLights = true;
   targetSlot.appendChild(renderer.domElement);
@@ -234,10 +234,10 @@ function init3dCanvas(targetSlotId) {
   scene.add(skyMesh);
 
   // ── Освещение ─────────────────────────────────
-  const ambLight = new THREE.AmbientLight(0xfff8e8, 0.35);
+  const ambLight = new THREE.AmbientLight(0xfff8e8, 0.2);
   scene.add(ambLight);
 
-  const sunLight = new THREE.DirectionalLight(0xfff4e0, 2.0);
+  const sunLight = new THREE.DirectionalLight(0xfff4e0, 1.6);
   sunLight.position.set(14, 22, 10);
   sunLight.castShadow = true;
   const smSz = isMobile ? 1024 : 2048;
@@ -249,7 +249,8 @@ function init3dCanvas(targetSlotId) {
   sunLight.shadow.normalBias    = 0.02;
   sunLight.shadow.radius        = isMobile ? 3 : 5;
   scene.add(sunLight);
-  scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a8a3c, 0.7));
+  // Заливка неба/земли — снижена: тени глубже (раньше 0.7 размывало тени).
+  scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a8a3c, 0.3));
 
   // ── Земля ─────────────────────────────────────
   const groundMesh = new THREE.Mesh(
@@ -334,9 +335,9 @@ function _applyHdri(texture) {
   scene.environment = envMap;
   scene.background  = envMap;
   skyMesh.visible   = false;
-  sunLight.intensity = 1.8;
+  sunLight.intensity = 1.5;
   ambLight.intensity = 0.0;
-  renderer.toneMappingExposure = 0.85;
+  renderer.toneMappingExposure = 0.72;   // меньше пересвета (текстуры не разбеливаются)
   threeState.envMap  = envMap;
 
   // Перестраиваем дом — материалы получат envMap
@@ -404,44 +405,38 @@ function getHouseMats() {
   const env = threeState?.envMap || null;
   const eI  = env ? 1.0 : 0.0;
 
-  // Штукатурка стен
+  // Стены — карты по выбранному материалу (штукатурка/кирпич/сайдинг). Текстуры через
+  // _houseTexSet (новые имена *_01/_02); UV на меш — _applyBoxUV в buildHouseMeshes (fallback).
   const wall = new THREE.MeshStandardMaterial({
-    color:           0xf5e6c8,
+    color:           0xefe2c8,
     roughness:       0.85,
     metalness:       0.0,
     envMap:          env,
     envMapIntensity: eI * 0.7,
   });
-  wall.map          = _loadTex('wall_diff.jpg', 1);
-  wall.normalMap    = _loadNorm('wall_norm.jpg', 1);
   wall.normalScale  = new THREE.Vector2(0.5, 0.5);
-  wall.roughnessMap = _loadData('wall_roug.jpg', 1);
-  // UV назначаются на меш через _applyBoxUV(mesh, 2.0) в buildHouseMeshes
+  _assignHouseMatTex(wall, _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'stucco'));
 
-  // Цоколь
+  // Цоколь — бетон (однотонный) или камень (текстура).
   const base = new THREE.MeshStandardMaterial({
-    color:           0x8a8278,
+    color:           0x9a9a9a,
     roughness:       0.88,
     metalness:       0.04,
     envMap:          env,
     envMapIntensity: eI * 0.4,
   });
-  base.map       = _loadTex('base_diff.jpg', 1);
-  base.normalMap = _loadNorm('base_norm.jpg', 1);
-  // UV назначаются на меш через _applyBoxUV(mesh, 1.0) в buildHouseMeshes
+  _assignHouseMatTex(base, _houseTexSet('base', (typeof S !== 'undefined' && S.baseMat) || 'concrete'));
 
-  // Крыша
+  // Крыша — черепица / металл (зелёный/красный).
   const roof = new THREE.MeshStandardMaterial({
-    color:           0x8b3a3a,
+    color:           0xffffff,
     roughness:       0.80,
     metalness:       0.04,
     side:            THREE.DoubleSide,
     envMap:          env,
     envMapIntensity: eI * 0.6,
   });
-  roof.map          = _loadTex('roof_diff.jpg', 6);
-  roof.normalMap    = _loadNorm('roof_norm.jpg', 6);
-  roof.roughnessMap = _loadData('roof_roug.jpg', 6);
+  _assignHouseMatTex(roof, _houseTexSet('roof', (typeof S !== 'undefined' && S.roofMat) || 'tile'));
 
   // Стекло — тёмное с отражением, сквозь него плохо видно
   // MeshStandardMaterial надёжнее MeshPhysicalMaterial.transmission в r128
@@ -450,7 +445,7 @@ function getHouseMats() {
     roughness:       0.04,
     metalness:       0.82,      // высокий metalness даёт отражение без transmission
     transparent:     true,
-    opacity:         0.38,      // менее прозрачное — скрывает отсутствие интерьера
+    opacity:         0.5,       // ~50% — менее прозрачное (скрывает отсутствие интерьера)
     side:            THREE.DoubleSide,
     envMap:          env,
     envMapIntensity: eI * 2.5,
@@ -724,6 +719,172 @@ function _resolveDeckMat(baseDeck, el) {
 }
 
 // ══════════════════════════════════════════════
+// МАТЕРИАЛЫ ДОМА (выбор на шаге «Параметры дома»)
+// ══════════════════════════════════════════════
+const HOUSE_ROOF_TILE  = 2.0;      // метров на тайл текстуры крыши
+const HOUSE_WALL_TILE  = 1.5;      // стен
+const HOUSE_BASE_TILE  = 1.0;      // цоколя
+const HOUSE_WOOD_COLOR = 0x4a2f18; // коричневый для деревянных частей (рамы/двери/перила)
+
+// Текстурный набор для материала дома: {color, map, normalMap, roughnessMap}.
+// Для однотонных (штукатурка/бетон) карты = null. repeat=1 — тайлинг задаётся
+// мировым UV (_applyWorldBoxUV).
+function _houseTexSet(kind, variant) {
+  const D = {
+    roof: {
+      tile:        { c: 0xffffff, d: 'roof_diff_01', n: 'roof_norm_01', r: 'roof_roug_01' },
+      metal_green: { c: 0xffffff, d: 'roof_diff_02', n: 'roof_norm_02', r: 'roof_roug_02' },
+      metal_red:   { c: 0xffffff, d: 'roof_diff_03', n: 'roof_norm_03', r: 'roof_roug_03' },
+    },
+    wall: {
+      stucco: { c: 0xefe2c8 },
+      brick:  { c: 0xffffff, d: 'wall_diff_01', n: 'wall_norm_01', r: 'wall_roug_01' },
+      siding: { c: 0xffffff, d: 'wall_diff_02', n: 'wall_norm_02', r: 'wall_roug_02' },
+    },
+    base: {
+      concrete: { c: 0x9a9a9a },
+      stone:    { c: 0xffffff, d: 'base_diff_01', n: 'base_norm', r: 'base_roug_01' },
+    },
+  };
+  const grp = D[kind] || {};
+  const e = grp[variant] || grp[Object.keys(grp)[0]] || { c: 0xffffff };
+  return {
+    color:        e.c,
+    map:          e.d ? _loadTex(e.d + '.jpg', 1) : null,
+    normalMap:    e.n ? _loadNorm(e.n + '.jpg', 1) : null,
+    roughnessMap: e.r ? _loadData(e.r + '.jpg', 1) : null,
+  };
+}
+
+// Присваивает материалу цвет+карты из texSet (без UV — для getHouseMats/fallback,
+// где UV ставит _applyBoxUV на меше).
+function _assignHouseMatTex(m, tex) {
+  if (!m) return;
+  m.color.set(tex.color);
+  m.map = tex.map || null;
+  m.normalMap = tex.normalMap || null;
+  m.roughnessMap = tex.roughnessMap || null;
+  m.needsUpdate = true;
+}
+
+// Мировой box-UV: проекция по доминантной оси нормали в МИРОВЫХ координатах (через
+// matrixWorld) → тайлинг корректен на трансформированных/масштабированных мешах дома.
+// Клонирует геометрию (она может быть общей у GLB-инстансов).
+function _applyWorldBoxUV(mesh, tileSize) {
+  mesh.updateWorldMatrix(true, false);
+  const geo = mesh.geometry = mesh.geometry.clone();
+  const pos = geo.attributes.position, nor = geo.attributes.normal;
+  if (!pos) return;
+  const mw = mesh.matrixWorld;
+  const nmat = new THREE.Matrix3().getNormalMatrix(mw);
+  const uv = new Float32Array(pos.count * 2);
+  const vP = new THREE.Vector3(), vN = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    vP.fromBufferAttribute(pos, i).applyMatrix4(mw);
+    if (nor) { vN.fromBufferAttribute(nor, i).applyMatrix3(nmat).normalize(); } else vN.set(0, 1, 0);
+    const ax = Math.abs(vN.x), ay = Math.abs(vN.y), az = Math.abs(vN.z);
+    let u, v;
+    if (ay >= ax && ay >= az) { u = vP.x / tileSize; v = vP.z / tileSize; }
+    else if (ax >= az)        { u = vP.z / tileSize; v = vP.y / tileSize; }
+    else                      { u = vP.x / tileSize; v = vP.y / tileSize; }
+    uv[i * 2] = u; uv[i * 2 + 1] = v;
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.attributes.uv.needsUpdate = true;
+}
+
+// UV крыши: на КАЖДОМ скате текстура ориентируется одинаково — V идёт вдоль линии
+// СПУСКА ската (от конька к свесу), U — поперёк (вдоль конька/свеса). Тогда
+// вертикальные полосы текстуры (металл — постоянный U) идут сверху вниз по скату на
+// всех скатах одинаково; ряды черепицы (постоянный V) идут горизонтально вдоль свеса.
+// Геометрию де-индексируем (toNonIndexed), чтобы у каждого треугольника был свой UV,
+// нормаль грани берём из позиций (не из сглаженных вершинных нормалей).
+function _applyRoofUV(mesh, tileSize) {
+  mesh.updateWorldMatrix(true, false);
+  let geo = mesh.geometry.clone();
+  if (geo.index) geo = geo.toNonIndexed();
+  const pos = geo.attributes.position;
+  if (!pos) { mesh.geometry = geo; return; }
+  const mw = mesh.matrixWorld, t = new THREE.Vector3(), wp = [];
+  for (let i = 0; i < pos.count; i++) { t.fromBufferAttribute(pos, i).applyMatrix4(mw); wp.push(t.clone()); }
+  const uv = new Float32Array(pos.count * 2);
+  const UPNEG = new THREE.Vector3(0, -1, 0);
+  const N = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
+  const down = new THREE.Vector3(), ridge = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i += 3) {
+    const a = wp[i], b = wp[i + 1], c = wp[i + 2];
+    e1.subVectors(b, a); e2.subVectors(c, a);
+    N.crossVectors(e1, e2).normalize();
+    if (N.y < 0) N.negate();
+    down.copy(UPNEG).addScaledVector(N, -UPNEG.dot(N));        // проекция -Y на плоскость ската
+    if (down.lengthSq() < 1e-8) down.set(0, 0, 1); else down.normalize();
+    ridge.crossVectors(N, down).normalize();                  // поперёк ската (вдоль конька)
+    for (let k = 0; k < 3; k++) {
+      const p = wp[i + k];
+      uv[(i + k) * 2]     = p.dot(ridge) / tileSize;
+      uv[(i + k) * 2 + 1] = p.dot(down)  / tileSize;
+    }
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.attributes.uv.needsUpdate = true;
+  mesh.geometry = geo;
+}
+
+function _applyHouseTexSet(mesh, tex, tileSize, uvFn) {
+  const m = mesh.material; if (!m) return;
+  m.color.set(tex.color);
+  if (tex.map) {
+    m.map = tex.map; m.normalMap = tex.normalMap || null; m.roughnessMap = tex.roughnessMap || null;
+    (uvFn || _applyWorldBoxUV)(mesh, tileSize);
+  } else {
+    m.map = null; m.normalMap = null; m.roughnessMap = null;
+  }
+  m.needsUpdate = true;
+}
+
+// Накладывает выбранные материалы дома на меши по имени материала (mat_roof/mat_wall/
+// mat_base) и красит деревянные части (рамы/двери) в коричневый. Вызывать после сборки
+// дома, ДО постройки террасы (чтобы не задеть deck-меши — у них нет mat_* имён).
+function _applyHouseMaterials(parent) {
+  if (!parent) return;
+  const roofT = _houseTexSet('roof', (typeof S !== 'undefined' && S.roofMat) || 'tile');
+  const wallT = _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'stucco');
+  const baseT = _houseTexSet('base', (typeof S !== 'undefined' && S.baseMat) || 'concrete');
+  parent.traverse(o => {
+    if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
+    const nm = o.material.name || '';
+    if      (nm === 'mat_roof') _applyHouseTexSet(o, roofT, HOUSE_ROOF_TILE, _applyRoofUV);
+    else if (nm === 'mat_wall') _applyHouseTexSet(o, wallT, HOUSE_WALL_TILE);
+    else if (nm === 'mat_base') _applyHouseTexSet(o, baseT, HOUSE_BASE_TILE);
+    else if (nm === 'mat_reveal') {
+      // Простенки окон (заполнение над/под окном) — белый матовый материал.
+      o.material.color.set(0xf2f2f0);
+      o.material.map = null; o.material.normalMap = null; o.material.roughnessMap = null;
+      o.material.metalness = 0.0; o.material.roughness = 0.9;
+      o.material.needsUpdate = true;
+    } else if (nm === 'mat_metal') {
+      // Водостоки + труба — единый металл.
+      o.material.color.set(0x66666b);
+      o.material.map = null;
+      o.material.metalness = 0.85; o.material.roughness = 0.30;
+      o.material.needsUpdate = true;
+    } else if (nm === 'mat_glass') {
+      // Стекло: меньше прозрачности (~50%).
+      o.material.transparent = true;
+      o.material.opacity = 0.5;
+      o.material.needsUpdate = true;
+    } else if (nm === 'mat_door' || nm.indexOf('mat_frame') === 0) {
+      // Деревянные части (рамы/двери) — матовый коричневый.
+      o.material.color.set(HOUSE_WOOD_COLOR);
+      o.material.metalness = 0.0;
+      o.material.roughness = 0.65;
+      o.material.map = null;
+      o.material.needsUpdate = true;
+    }
+  });
+}
+
+// ══════════════════════════════════════════════
 // ПРОЦЕДУРНОЕ НЕБО (пока нет HDRI)
 // ══════════════════════════════════════════════
 function _buildProceduralSky() {
@@ -873,6 +1034,9 @@ function buildScene3d() {
       padMesh.receiveShadow = true;
       houseGroup.add(padMesh);
     }
+    // Выбранные материалы дома (крыша/цоколь/стены) + деревянные части коричневым.
+    // ДО постройки террасы — deck-меши не имеют mat_* имён и не затрагиваются.
+    _applyHouseMaterials(houseGroup);
   }
 
   // Терраса/Крыльцо — multi-rect. Каждый rect → 4-точечный polygon → buildTerrace3d.
@@ -2169,7 +2333,7 @@ function buildPorch3d(parent,M,porch,houseL,houseW,bh){
           porchGroup, _houseCache.modules, 'porch_column',
           colT, canopyClear, colT,
           c.x, bh + canopyClear / 2, c.z,
-          0, 'mat_porch_column', 0xc7a878
+          0, 'mat_porch_column', PORCH_COLUMN_COLOR
         );
       } else {
         const colMesh = mesh(box(colT, canopyClear, colT), matPost);
@@ -2528,7 +2692,7 @@ function terracePerimeterSegments(worldPts, houseL, houseW, otherRects){
 
 // Цвет деревянных колонн (mod_porch_column fallback) — им же красим перила/балясины,
 // чтобы ограждение визуально совпадало с колоннами навеса.
-const PORCH_COLUMN_COLOR = 0xc7a878;
+const PORCH_COLUMN_COLOR = 0x6e4a2a; // дерево — коричневый (перила/колонны/балясины)
 // Inset перил и колонн внутрь от кромки настила (чтобы не свисали за край).
 const RAIL_INSET = 0.10;
 // Inset перил лестницы от боковой грани ступеней (latOff в buildSteps3d). Тем же

@@ -306,12 +306,41 @@ function _dInitParamsView() {
   _dResetAllConfigurations();
   // Перерендерим параметры по дескриптору (если уже загружен) или по дефолтам.
   _dRenderFloorParams();
+  _dRenderHouseMaterials();
   _dSyncRanges();
   setTimeout(() => {
     const slot = document.getElementById('d-slot-params');
     if (slot && slot.offsetWidth > 0) init3dCanvas('d-slot-params');
     else setTimeout(() => init3dCanvas('d-slot-params'), 100);
   }, 80);
+}
+
+// Материалы дома (крыша/фундамент/стены) — квадратные образцы без подписей.
+function _dRenderHouseMaterials() {
+  const host = document.getElementById('d-house-mats');
+  if (!host || typeof HOUSE_MATERIALS === 'undefined') return;
+  const sel = { roof: S.roofMat, base: S.baseMat, wall: S.wallMat };
+  host.innerHTML = ['roof', 'base', 'wall'].map(kind => {
+    const grp = HOUSE_MATERIALS[kind];
+    const sw = grp.items.map(it => {
+      const bg = it.img ? `background-image:url('${it.img}');background-size:cover;background-position:center;`
+                        : `background:${it.color};`;
+      const active = (sel[kind] === it.id) ? ' active' : '';
+      return `<button class="d-hm-sw${active}" style="${bg}" onclick="dSetHouseMat('${kind}','${it.id}')" title="${it.id}"></button>`;
+    }).join('');
+    return `<div class="d-hm-group">
+      <div class="d-hm-label">${grp.label}</div>
+      <div class="d-hm-row">${sw}</div>
+    </div>`;
+  }).join('');
+}
+
+function dSetHouseMat(kind, id) {
+  if (kind === 'roof')      S.roofMat = id;
+  else if (kind === 'base') S.baseMat = id;
+  else if (kind === 'wall') S.wallMat = id;
+  _dRenderHouseMaterials();
+  if (typeof onParamChange === 'function') onParamChange(); // пересборка 3D (debounced)
 }
 
 // Рендерит per-floor контролы (высота этажа + площадь этажа) на основе дескриптора.

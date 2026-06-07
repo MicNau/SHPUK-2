@@ -528,6 +528,33 @@ function transformParametricModule(group, params, modelId) {
         break;
     }
   });
+  buildOpeningReveal(group, w, h, jambW, headerH, bottomH);
+}
+
+// Откосы (внутренние поверхности оконного/дверного проёма) — белые. Лайнер из 4
+// тонких слэбов по периметру проёма, уходящих вглубь стены (−z). Дочерние к модулю,
+// поэтому наследуют его положение/поворот. Имя материала mat_reveal → красится
+// в белый в _applyHouseMaterials (на случай общей перекраски).
+function buildOpeningReveal(group, w, h, jambW, headerH, bottomH) {
+  const ox0 = jambW, ox1 = w - jambW;
+  const oy0 = bottomH, oy1 = h - headerH;
+  if (ox1 - ox0 < 0.05 || oy1 - oy0 < 0.05) return;
+  const depth = 0.22;          // глубина откоса вглубь стены
+  const inset = 0.006;         // лёгкий заход в проём (перекрыть грань стены без z-fight)
+  const t = 0.014;             // толщина слэба
+  const zc = -0.1 - depth / 2; // от внутренней грани рамы вглубь (−z)
+  const mat = new THREE.MeshStandardMaterial({ color: 0xf2f2f0, roughness: 0.9, metalness: 0 });
+  mat.name = 'mat_reveal';
+  const add = (cx, cy, sx, sy) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, depth), mat);
+    m.position.set(cx, cy, zc);
+    m.receiveShadow = true;
+    group.add(m);
+  };
+  add((ox0 + ox1) / 2, oy1 - inset, ox1 - ox0, t);  // верхний откос
+  add((ox0 + ox1) / 2, oy0 + inset, ox1 - ox0, t);  // нижний откос
+  add(ox0 + inset, (oy0 + oy1) / 2, t, oy1 - oy0);  // левый откос
+  add(ox1 - inset, (oy0 + oy1) / 2, t, oy1 - oy0);  // правый откос
 }
 
 // ══════════════════════════════════════════════
@@ -553,9 +580,21 @@ function buildPillar(parent, modules, item, wallH, yOffset, ps) {
   parent.add(p);
 }
 
+// Переименовывает имена материалов всех мешей объекта (опц. только те, что равны
+// onlyFrom). Нужно, т.к. в GLB цоколь назван mat_wall, а труба — mat_base (перепутаны):
+// фронт красит материалы по имени, поэтому правим имена при сборке.
+function setMatName(obj, newName, onlyFrom) {
+  obj.traverse(c => {
+    if (!c.isMesh || !c.material) return;
+    const ms = Array.isArray(c.material) ? c.material : [c.material];
+    ms.forEach(m => { if (m && (!onlyFrom || m.name === onlyFrom)) m.name = newName; });
+  });
+}
+
 function buildBasePillar(parent, modules, item, baseH, ps, overhang) {
   const p = cloneModule(modules, 'base_pillar') || cloneModule(modules, 'pillar');
   if (!p) return;
+  setMatName(p, 'mat_base'); // цоколь → mat_base (в GLB назван mat_wall)
   const psExt = ps + overhang;
   p.scale.set(psExt, baseH, psExt);
   const sx = item.sx || 1, sz = item.sz || 1;
@@ -632,6 +671,7 @@ function buildBaseFromOutline(parent, modules, outline, baseH, wt, ps, overhang)
       if (wallLength <= 0.01) continue;
       const seg = cloneModule(modules, 'base_segment') || cloneModule(modules, 'wall_segment');
       if (!seg) continue;
+      setMatName(seg, 'mat_base'); // цоколь → mat_base (в GLB назван mat_wall)
       const endX = startX + item.dx * wallLength;
       const endZ = startZ + item.dz * wallLength;
       const offX = endX + item.dz * overhang;
@@ -1903,6 +1943,9 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
   if (desc.features.chimney) {
     const c = cloneModule(modules, 'chimney');
     if (c) {
+      // Труба — из того же материала, что водостоки (mat_metal). В GLB тело трубы
+      // названо mat_base, колпак — mat_concrete; переименуем ВСЁ в mat_metal.
+      setMatName(c, 'mat_metal');
       const bb = detectNativeBbox(c);
       dumpDecorBbox('chimney', bb);
       const pos = (desc.features.chimney.position) || [0.5, 0.5];
