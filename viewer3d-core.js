@@ -853,7 +853,13 @@ function _applyHouseMaterials(parent) {
   parent.traverse(o => {
     if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
     const nm = o.material.name || '';
-    if      (nm === 'mat_roof') _applyHouseTexSet(o, roofT, HOUSE_ROOF_TILE, _applyRoofUV);
+    if      (nm === 'mat_roof') {
+      _applyHouseTexSet(o, roofT, HOUSE_ROOF_TILE, _applyRoofUV);
+      // Крыша смотрит вверх → ловит максимум неба через scene.environment (IBL).
+      // При envMapIntensity=1 текстура разбеливалась; снижаем до 0.25.
+      o.material.envMapIntensity = 0.25;
+      o.material.needsUpdate = true;
+    }
     else if (nm === 'mat_wall') _applyHouseTexSet(o, wallT, HOUSE_WALL_TILE);
     else if (nm === 'mat_base') _applyHouseTexSet(o, baseT, HOUSE_BASE_TILE);
     else if (nm === 'mat_reveal') {

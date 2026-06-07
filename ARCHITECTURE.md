@@ -508,6 +508,10 @@ CREATE TABLE projects (
 
 ## Recent cleanup (tech debt)
 
+Сделано в итерации v=93 (крыша разбеливалась):
+
+- **Текстура крыши была намного светлее исходника.** Причина: крыша смотрит вверх → ловит максимум яркого HDRI-неба через `scene.environment` (IBL), а у `mat_roof` был `envMapIntensity = 1`. Цвет/sRGB/металличность ни при чём (color белый, map sRGB, metalness 0). Фикс: в `_applyHouseMaterials` для `mat_roof` ставим `envMapIntensity = 0.25` — черепица/металл совпадают с исходником. Cache-bust: `viewer3d-core.js?v=91`.
+
 Сделано в итерации v=92 (доводка материалов/света дома — 2-й фидбэк):
 
 - **Труба = материал водостоков.** В house-builder труба (`chimney`) переименована в `mat_metal` целиком (тело + колпак). В `_applyHouseMaterials` добавлена ветка `mat_metal` — единый металл (цвет `0x66666b`, metalness 0.85, roughness 0.30) на водостоки И трубу. `mat_concrete` (колпак) больше не используется.
