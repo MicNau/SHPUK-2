@@ -1058,14 +1058,87 @@ function buildScene3d() {
   const terraceRectPolys = _terraceRectsToPolygons();
   if (S.sections.includes('terrace')) {
     M.deck = _resolveDeckMat(_baseDeck, 'terrace');
-    for (const polyPts of terraceRectPolys) {
-      const wp = canvasToWorld(polyPts, houseL, houseW);
-      buildConstructionPad(houseGroup,
-        Math.min(...wp.map(p => p.x)), Math.max(...wp.map(p => p.x)),
-        Math.min(...wp.map(p => p.z)), Math.max(...wp.map(p => p.z)), 0.30);
-      try {
-        buildTerraceBox3d(houseGroup, M, polyPts, (isNoHouse ? 0.35 : bh) - 0.01, houseL, houseW, 'deckMeshes');
-      } catch (e) { console.error('[buildTerraceBox3d]', e); }
+    const deckH = (isNoHouse ? 0.35 : bh) - 0.01;
+    const E = 0.04;   // допуск (м)
+    // Направление досок блока — вдоль БЛИЖАЙШЕЙ стены дома (стабильно, не зависит от
+    // разбивки на блоки): переднее/заднее крыло → доски вдоль X, боковое → вдоль Z.
+    // Fallback (нет дома) — длинная сторона блока.
+    let _hEdges = null;
+    if (!isNoHouse && typeof HouseBuilder !== 'undefined'
+        && typeof HouseBuilder.getHouseFloorPolygon === 'function' && _houseCache.desc) {
+      const poly = HouseBuilder.getHouseFloorPolygon(_houseCache.desc,
+        { area: parseFloat(document.getElementById('v-area')?.value || 80) });
+      if (poly && poly.corners && poly.corners.length >= 2) {
+        _hEdges = [];
+        for (let k = 0; k < poly.corners.length; k++) {
+          const a = poly.corners[k], b = poly.corners[(k + 1) % poly.corners.length];
+          _hEdges.push({ ax: a.x, az: a.z, dx: b.x - a.x, dz: b.z - a.z });
+        }
+      }
+    }
+    const plankDir = (cx, cz, fallback) => {
+      if (!_hEdges) return fallback;
+      let best = Infinity, alongX = fallback;
+      for (const e of _hEdges) {
+        const lenSq = e.dx * e.dx + e.dz * e.dz;
+        if (lenSq < 1e-6) continue;
+        let t = ((cx - e.ax) * e.dx + (cz - e.az) * e.dz) / lenSq; t = Math.max(0, Math.min(1, t));
+        const px = e.ax + t * e.dx, pz = e.az + t * e.dz, d = Math.hypot(cx - px, cz - pz);
+        if (d < best) { best = d; alongX = Math.abs(e.dx) >= Math.abs(e.dz); }
+      }
+      return alongX;
+    };
+    // Мировые bbox + направление досок. e* — эффективные границы после подрезки углов.
+    const tR = terraceRectPolys.map(pp => {
+      const wp = canvasToWorld(pp, houseL, houseW);
+      const minX = Math.min(...wp.map(p => p.x)), maxX = Math.max(...wp.map(p => p.x));
+      const minZ = Math.min(...wp.map(p => p.z)), maxZ = Math.max(...wp.map(p => p.z));
+      const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+      return { minX, maxX, minZ, maxZ, cx, cz,
+               plankAlongX: plankDir(cx, cz, (maxX - minX) >= (maxZ - minZ)),
+               eMinX: minX, eMaxX: maxX, eMinZ: minZ, eMaxZ: maxZ };
+    });
+    // Миттер на углах перпендикулярных крыльев: подрезаем оба крыла до угловой ячейки
+    // и заполняем её двумя треугольниками (доски двух направлений сходятся по диагонали).
+    // Работает и для стыка встык, и для перекрытия (L/П/O-формы).
+    const cornerTris = [];
+    for (let i = 0; i < tR.length; i++) {
+      for (let j = i + 1; j < tR.length; j++) {
+        const W = tR[i].plankAlongX ? tR[i] : tR[j];   // доски вдоль X (широкое крыло)
+        const Tt = tR[i].plankAlongX ? tR[j] : tR[i];  // доски вдоль Z (узкое крыло)
+        if (W.plankAlongX === Tt.plankAlongX) continue; // нужны перпендикулярные крылья
+        const Sx0 = Tt.minX, Sx1 = Tt.maxX, Sz0 = W.minZ, Sz1 = W.maxZ;   // угловая ячейка (x-полоса T × z-полоса W)
+        // Крылья должны соприкасаться по обеим осям (связный угол; работает и для
+        // перекрытия, и для встык, и для обёртки вокруг выпуклого угла дома).
+        if (Math.min(W.maxX, Tt.maxX) < Math.max(W.minX, Tt.minX) - E) continue;
+        if (Math.min(W.maxZ, Tt.maxZ) < Math.max(W.minZ, Tt.minZ) - E) continue;
+        const exRight = W.maxX > Sx1 + E, exLeft = W.minX < Sx0 - E;
+        if (exRight === exLeft) continue;               // W торчит ровно с одной стороны (угол, не T/+)
+        const exUp = Tt.maxZ > Sz1 + E, exDown = Tt.minZ < Sz0 - E;
+        if (exUp === exDown) continue;                  // T торчит ровно с одной стороны
+        const exX = exRight ? 1 : -1, exZ = exUp ? 1 : -1;
+        const innerX = exX > 0 ? Sx1 : Sx0, innerZ = exZ > 0 ? Sz1 : Sz0;
+        const outerX = exX > 0 ? Sx0 : Sx1, outerZ = exZ > 0 ? Sz0 : Sz1;
+        if (exX > 0) W.eMinX = Math.max(W.eMinX, innerX); else W.eMaxX = Math.min(W.eMaxX, innerX);
+        if (exZ > 0) Tt.eMinZ = Math.max(Tt.eMinZ, innerZ); else Tt.eMaxZ = Math.min(Tt.eMaxZ, innerZ);
+        cornerTris.push({ p: [{ x: outerX, z: outerZ }, { x: innerX, z: innerZ }, { x: innerX, z: outerZ }], pa: true });  // W-tri
+        cornerTris.push({ p: [{ x: outerX, z: outerZ }, { x: innerX, z: innerZ }, { x: outerX, z: innerZ }], pa: false }); // T-tri
+      }
+    }
+    // Подкладки (по исходным границам) + настил крыльев (по подрезанным).
+    for (const R of tR) {
+      if (R.maxX - R.minX < 0.3 || R.maxZ - R.minZ < 0.3) continue;
+      buildConstructionPad(houseGroup, R.minX, R.maxX, R.minZ, R.maxZ, 0.30);
+      const foot = [
+        { x: R.eMinX, z: R.eMinZ }, { x: R.eMaxX, z: R.eMinZ },
+        { x: R.eMaxX, z: R.eMaxZ }, { x: R.eMinX, z: R.eMaxZ },
+      ];
+      try { _buildTerracePoly(houseGroup, M, foot, deckH, R.plankAlongX, 'deckMeshes'); }
+      catch (e) { console.error('[_buildTerracePoly]', e); }
+    }
+    for (const ct of cornerTris) {
+      try { _buildTerracePoly(houseGroup, M, ct.p, deckH, ct.pa, 'deckMeshes'); }
+      catch (e) { console.error('[_buildTerracePoly corner]', e); }
     }
   }
 
@@ -1404,25 +1477,48 @@ function _terraceRectsToPolygons() {
   return polys;
 }
 
-// Упрощённая терраса/крыльцо: один deck-бокс на прямоугольник (вместо набора досок).
-// Кубическая UV-проекция (_applyDeckUV), доски вдоль длинной стороны. Бокс от земли
-// (Y=0) до deckHeight — верх = настил, боковые грани = дощатая «юбка». Соседние rect'ы
-// просто плотно прилегают (без boolean union); world-based UV даёт непрерывный тайл
-// между блоками с одинаковой ориентацией.
-function buildTerraceBox3d(parent, M, pts, deckHeight, houseL, houseW, meshArrayName) {
-  const trackArray = meshArrayName || 'deckMeshes';
-  const worldPts = canvasToWorld(pts, houseL, houseW);
-  const minX = Math.min(...worldPts.map(p => p.x)), maxX = Math.max(...worldPts.map(p => p.x));
-  const minZ = Math.min(...worldPts.map(p => p.z)), maxZ = Math.max(...worldPts.map(p => p.z));
-  const W = maxX - minX, D = maxZ - minZ;
-  if (W < 0.3 || D < 0.3 || deckHeight < 0.03) return;
-  const geo = new THREE.BoxGeometry(W, deckHeight, D);
+// Настил террасы/крыльца по плановому полигону foot (world {x,z}). Призма от земли
+// (Y=0) до deckHeight: верх = настил (доски вдоль X или Z), боковые грани = дощатая
+// «юбка», низ закрыт. UV world-based (как _applyBoxUV) → непрерывный тайл между
+// блоками одинаковой ориентации. На углах составной террасы foot заранее обрезается
+// по диагонали (миттер) — доски двух перпендикулярных крыльев сходятся под 45°.
+// foot — выпуклый (CCW); диагональные рёбра-стыки внутренние (их «юбка» скрыта телом
+// соседнего крыла).
+function _buildTerracePoly(parent, M, foot, deckHeight, plankAlongX, meshArrayName) {
+  const n = foot.length;
+  if (n < 3 || deckHeight < 0.03) return;
+  // Нормализуем контур в CCW (в плоскости x,z) — иначе верхняя грань смотрит вниз.
+  let area2 = 0;
+  for (let k = 0; k < n; k++) { const a = foot[k], b = foot[(k + 1) % n]; area2 += a.x * b.z - b.x * a.z; }
+  if (area2 < 0) foot = foot.slice().reverse();
+  const T = DECK_TILE, yTop = deckHeight, yBot = 0;
+  const topUV = (x, z) => plankAlongX ? [x / T, z / T] : [z / T, x / T];
+  const pos = [], uv = [], idx = [];
+  for (const p of foot) { pos.push(p.x, yTop, p.z); const t = topUV(p.x, p.z); uv.push(t[0], t[1]); } // верх 0..n-1
+  for (const p of foot) { pos.push(p.x, yBot, p.z); const t = topUV(p.x, p.z); uv.push(t[0], t[1]); } // низ  n..2n-1
+  for (let i = 1; i < n - 1; i++) idx.push(0, i + 1, i);          // верх (нормаль +Y)
+  for (let i = 1; i < n - 1; i++) idx.push(n, n + i, n + i + 1);  // низ  (нормаль −Y)
+  // Юбка: на каждое ребро — свой квад (U вдоль ребра, V по высоте → доски горизонтально).
+  for (let i = 0; i < n; i++) {
+    const a = foot[i], b = foot[(i + 1) % n];
+    const alongX = Math.abs(b.x - a.x) >= Math.abs(b.z - a.z);
+    const uA = (alongX ? a.x : a.z) / T, uB = (alongX ? b.x : b.z) / T;
+    const base = pos.length / 3;
+    pos.push(a.x, yTop, a.z); uv.push(uA, yTop / T);
+    pos.push(b.x, yTop, b.z); uv.push(uB, yTop / T);
+    pos.push(b.x, yBot, b.z); uv.push(uB, yBot / T);
+    pos.push(a.x, yBot, a.z); uv.push(uA, yBot / T);
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3); // наружу (foot CCW)
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv',       new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
   const m = new THREE.Mesh(geo, M.deck);
-  m.position.set((minX + maxX) / 2, deckHeight / 2, (minZ + maxZ) / 2);
   m.castShadow = m.receiveShadow = true;
-  _applyDeckUV(m, W >= D);   // доски вдоль длинной стороны
   parent.add(m);
-  threeState[trackArray].push(m);
+  if (meshArrayName && threeState[meshArrayName]) threeState[meshArrayName].push(m);
 }
 
 // Тёмная подкладка (отмостка) под наземной конструкцией (терраса, ступени).
@@ -2452,12 +2548,12 @@ function _offsetPolyline(pts, halfW) {
 }
 
 // Монолитная лента-настил по левой/правой кромкам (как terrace box, но вдоль полилинии).
-// UV вдоль дорожки: U = длина по осевой, V = поперёк (ширина) → доски (грувы текстуры =
-// const V) идут ВДОЛЬ дорожки, поворачивая на углах вместе с лентой. Так фактура deck_diff
-// смотрится естественно (волокно вдоль длинных досок). DoubleSide — winding не важен.
+// UV: текстура повёрнута на 90° относительно «вдоль дорожки» → U = поперёк (ширина),
+// V = длина по осевой. Так доски (грувы текстуры) идут ПОПЕРЁК дорожки (перекладины),
+// поворачивая на углах вместе с лентой. DoubleSide — winding не важен.
 function _buildPathRibbon(parent, left, right, yBot, yTop, pathW, mat, meshArray) {
   const n = left.length; if (n < 2) return;
-  const T = DECK_TILE, crossV = pathW / T;
+  const T = DECK_TILE, crossU = pathW / T;
   const runs = [0];                                   // накопленная длина по осевой (середины кромок)
   for (let i = 1; i < n; i++) {
     const ax=(left[i-1].x+right[i-1].x)/2, az=(left[i-1].z+right[i-1].z)/2;
@@ -2466,11 +2562,11 @@ function _buildPathRibbon(parent, left, right, yBot, yTop, pathW, mat, meshArray
   }
   const pos = [], uv = [], idx = [];
   for (let i = 0; i < n; i++) {
-    const u = runs[i] / T;
-    pos.push(left[i].x,  yTop, left[i].z);  uv.push(u, 0);        // LT
-    pos.push(right[i].x, yTop, right[i].z); uv.push(u, crossV);   // RT
-    pos.push(left[i].x,  yBot, left[i].z);  uv.push(u, 0);        // LB
-    pos.push(right[i].x, yBot, right[i].z); uv.push(u, crossV);   // RB
+    const v = runs[i] / T;                            // длина по осевой → V (текстура повёрнута 90°)
+    pos.push(left[i].x,  yTop, left[i].z);  uv.push(0,      v);   // LT
+    pos.push(right[i].x, yTop, right[i].z); uv.push(crossU, v);   // RT
+    pos.push(left[i].x,  yBot, left[i].z);  uv.push(0,      v);   // LB
+    pos.push(right[i].x, yBot, right[i].z); uv.push(crossU, v);   // RB
   }
   const LT=i=>i*4, RT=i=>i*4+1, LB=i=>i*4+2, RB=i=>i*4+3;
   for (let i = 0; i < n - 1; i++) {
