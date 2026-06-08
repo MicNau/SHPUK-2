@@ -879,6 +879,14 @@ function _applyHouseMaterials(parent) {
       o.material.transparent = true;
       o.material.opacity = 0.5;
       o.material.needsUpdate = true;
+    } else if (nm === 'mat_curtain') {
+      // Шторы — белая матовая ткань с картой нормалей (складки).
+      o.material.color.set(0xffffff);
+      o.material.map = null;
+      o.material.normalMap = _loadNorm('curtain_norm.jpg', 1);
+      o.material.metalness = 0.0;
+      o.material.roughness = 0.9;
+      o.material.needsUpdate = true;
     } else if (nm === 'mat_door' || nm.indexOf('mat_frame') === 0) {
       // Деревянные части (рамы/двери) — матовый коричневый.
       o.material.color.set(HOUSE_WOOD_COLOR);
@@ -1051,6 +1059,10 @@ function buildScene3d() {
   if (S.sections.includes('terrace')) {
     M.deck = _resolveDeckMat(_baseDeck, 'terrace');
     for (const polyPts of terraceRectPolys) {
+      const wp = canvasToWorld(polyPts, houseL, houseW);
+      buildConstructionPad(houseGroup,
+        Math.min(...wp.map(p => p.x)), Math.max(...wp.map(p => p.x)),
+        Math.min(...wp.map(p => p.z)), Math.max(...wp.map(p => p.z)), 0.30);
       try {
         buildTerraceBox3d(houseGroup, M, polyPts, (isNoHouse ? 0.35 : bh) - 0.01, houseL, houseW, 'deckMeshes');
       } catch (e) { console.error('[buildTerraceBox3d]', e); }
@@ -1078,6 +1090,14 @@ function buildScene3d() {
   // Ступени — отдельная секция. Глубина в плане пересчитывается из bh.
   if (S.sections.includes('steps') && S.steps) {
     M.deck = _resolveDeckMat(_baseDeck, 'steps');
+    const sr = S.steps;
+    const wp = canvasToWorld([
+      { x: sr.x, y: sr.y }, { x: sr.x + sr.w, y: sr.y },
+      { x: sr.x + sr.w, y: sr.y + sr.h }, { x: sr.x, y: sr.y + sr.h },
+    ], houseL, houseW);
+    buildConstructionPad(houseGroup,
+      Math.min(...wp.map(p => p.x)), Math.max(...wp.map(p => p.x)),
+      Math.min(...wp.map(p => p.z)), Math.max(...wp.map(p => p.z)), 0.30);
     try {
       buildSteps3d(houseGroup, M, S.steps, isNoHouse ? 0.35 : bh, houseL, houseW);
     } catch (e) { console.error('[buildSteps3d]', e); }
@@ -1403,6 +1423,26 @@ function buildTerraceBox3d(parent, M, pts, deckHeight, houseL, houseW, meshArray
   _applyDeckUV(m, W >= D);   // доски вдоль длинной стороны
   parent.add(m);
   threeState[trackArray].push(m);
+}
+
+// Тёмная подкладка (отмостка) под наземной конструкцией (терраса, ступени).
+// Axis-aligned footprint в мире (minX..maxX, minZ..maxZ), расширенный на offset;
+// тонкая плита от земли (y 0..0.05) — той же высоты и цвета, что pad дома
+// (HouseBuilder строит его по контуру). Перекрытие с pad-ом дома и соседними
+// подкладками допустимо — одинаковый цвет/высота дают бесшовную тёмную зону.
+// НЕ кладётся в deckMeshes: иначе смена deck-материала перекрасила бы подкладку.
+// Материал создаётся per-build и диспозится в clearGroup(houseGroup, true).
+function buildConstructionPad(parent, minX, maxX, minZ, maxZ, offset) {
+  const padThick = 0.05;
+  const W = (maxX - minX) + 2 * offset;
+  const D = (maxZ - minZ) + 2 * offset;
+  if (W < 0.3 || D < 0.3) return;
+  const mat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.95, metalness: 0.0 });
+  mat.name = 'mat_construction_pad';
+  const m = new THREE.Mesh(new THREE.BoxGeometry(W, padThick, D), mat);
+  m.position.set((minX + maxX) / 2, padThick / 2, (minZ + maxZ) / 2);
+  m.receiveShadow = true;
+  parent.add(m);
 }
 
 // ══════════════════════════════════════════════

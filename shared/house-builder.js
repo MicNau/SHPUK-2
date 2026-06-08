@@ -2422,6 +2422,71 @@ function buildFlatRoofPoly(parent, baseY, outline, eave) {
   log(`[roof] flat (polygon): ${N} corners, ${triangles.length} triangles`, 'dim');
 }
 
+// Тонкая плита-«подкладка» (тёмная отмостка) по РЕАЛЬНОМУ контуру outline,
+// расширенному наружу на offset. Повторяет форму дома (L/T/П/+/прямоугольник),
+// а НЕ её bbox. y от 0 (земля) до thick. Триангуляция Earcut'ом.
+//
+// Грани ориентируются ЯВНО (виндинг от ориентации контура не зависит):
+//   • верх → нормаль +Y, низ → −Y;  • боковины → наружу (point-in-polygon тест,
+//     корректно и для вогнутых углов Г/П-форм).
+// Это важно: материал отмостки FrontSide, и при «вывернутой» нормали грань
+// отсекалась бы (culling) — под домом сквозь pad был бы виден газон.
+function buildPadSlab(parent, outline, offset, thick, mat) {
+  const src = (offset > 0) ? inflateOrthoOutline(outline, offset) : outline;
+  const corners = src.items.filter(i => i.type === 'pillar');
+  if (corners.length < 3) { log('[pad] <3 corners, skip', 'warn'); return; }
+  const pts = corners.map(c => new THREE.Vector2(c.x, c.z)); // .x = x, .y = z
+  const triangles = THREE.ShapeUtils.triangulateShape(pts, []);
+  const N = pts.length;
+  const yTop = thick, yBot = 0;
+  const positions = [], indices = [];
+  for (const p of pts) positions.push(p.x, yTop, p.y); // 0..N-1   — верх
+  for (const p of pts) positions.push(p.x, yBot, p.y); // N..2N-1  — низ
+
+  // Верх/низ. Для треугольника в плоскости (x,z): normal.y = −(2D-cross),
+  // т.е. нормаль вверх ⇔ виндинг CW в (x,z) ⇔ cross < 0. Нормализуем покадрово.
+  for (const t of triangles) {
+    let a = t[0], b = t[1], c = t[2];
+    const cross = (pts[b].x - pts[a].x) * (pts[c].y - pts[a].y)
+                - (pts[b].y - pts[a].y) * (pts[c].x - pts[a].x);
+    if (cross > 0) { const tmp = b; b = c; c = tmp; } // → нормаль вверх
+    indices.push(a, b, c);             // верх (+Y)
+    indices.push(a + N, c + N, b + N); // низ (−Y) — обратный порядок
+  }
+
+  // Боковины по периметру. Винайдинг (A,B,C),(A,C,D) с A=top_i,B=top_j,C=bot_j,D=bot_i
+  // даёт нормаль (ez,0,−ex); разворачиваем, если она смотрит ВНУТРЬ полигона.
+  const inside = (px, pz) => {
+    let res = false;
+    for (let i = 0, j = N - 1; i < N; j = i++) {
+      const xi = pts[i].x, zi = pts[i].y, xj = pts[j].x, zj = pts[j].y;
+      if (((zi > pz) !== (zj > pz)) &&
+          (px < (xj - xi) * (pz - zi) / (zj - zi + 1e-12) + xi)) res = !res;
+    }
+    return res;
+  };
+  for (let i = 0; i < N; i++) {
+    const j = (i + 1) % N;
+    const ex = pts[j].x - pts[i].x, ez = pts[j].y - pts[i].y;
+    const len = Math.hypot(ex, ez) || 1;
+    const nx = ez / len, nz = -ex / len; // нормаль варианта (A,B,C)
+    const mx = (pts[i].x + pts[j].x) / 2, mz = (pts[i].y + pts[j].y) / 2;
+    const outward = !inside(mx + nx * 0.02, mz + nz * 0.02);
+    const A = i, B = j, C = j + N, D = i + N;
+    if (outward) { indices.push(A, B, C, A, C, D); }
+    else         { indices.push(A, C, B, A, D, C); }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  log(`[pad] house outline: ${N} corners, +${offset}m`, 'dim');
+}
+
 // Универсальный helper: брус ската (наклонный параллелепипед) с верхним материалом
 // `mat_roof` и боковыми/нижним материалом `mat_soffit`. topCorners[4] — углы ВЕРХНЕЙ
 // плоскости ската (= плоскость кровли) в CCW (если смотреть снаружи), normal — outward unit normal.
@@ -3346,22 +3411,13 @@ function buildHouseFromDescriptor(houseGroup, desc, modules, params, options = {
     buildGableWindows(houseGroup, desc, lastOutline, yOffset, angleDeg, sharedWallMat, modules);
   }
 
-  // PAD ПОД ДОМОМ — строится по реальному bbox outline (а не по houseL/houseW в viewer3d-core,
-  // которые могут не совпадать с формулами из дескриптора).
-  if (firstOutline && firstOutline.bbox) {
-    const padOffset = 0.30, padThick = 0.05;
-    const bb = firstOutline.bbox;
-    const padW = (bb.maxX - bb.minX) + 2 * padOffset;
-    const padD = (bb.maxZ - bb.minZ) + 2 * padOffset;
-    const padCx = (bb.minX + bb.maxX) / 2;
-    const padCz = (bb.minZ + bb.maxZ) / 2;
-    const padGeo = new THREE.BoxGeometry(padW, padThick, padD);
+  // PAD ПОД ДОМОМ — повторяет РЕАЛЬНЫЙ контур (outline), расширенный наружу на
+  // padOffset: для Г/П/Т/+-форм тёмная отмостка идёт точно по периметру дома,
+  // а не по bbox (раньше был прямоугольник BoxGeometry с «навесом» в пустых углах).
+  if (firstOutline && firstOutline.items) {
     const padMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.95, metalness: 0.0 });
     padMat.name = 'mat_house_pad';
-    const padMesh = new THREE.Mesh(padGeo, padMat);
-    padMesh.position.set(padCx, padThick / 2, padCz);
-    padMesh.receiveShadow = true;
-    houseGroup.add(padMesh);
+    buildPadSlab(houseGroup, firstOutline, 0.30, 0.05, padMat);
   }
 
   // Крыльцо привязывается к двери 1-го этажа.

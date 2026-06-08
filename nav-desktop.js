@@ -44,13 +44,9 @@ function dGoTo(s) {
   const el = document.getElementById('d-screen-' + s);
   if (el) el.classList.add('active');
 
-  const labels = {
-    1: 'Шаг 1: Выберите тип дома',
-    2: 'Шаг 2: Параметры дома',
-    3: 'Шаг 3: Конфигуратор',
-  };
-  document.getElementById('d-step-label').textContent = labels[s] || '';
-  document.getElementById('d-btn-summary').style.display = s === 3 ? '' : 'none';
+  // Хедер убран; «Итог» — плавающая кнопка, видна только на шаге 3.
+  const summaryBtn = document.getElementById('d-btn-summary');
+  if (summaryBtn) summaryBtn.style.display = s === 3 ? '' : 'none';
 
   if (s === 1) _dInitHouseGrid();
   else if (s === 2) _dInitParamsView();
@@ -517,6 +513,10 @@ function _dRenderSidebar() {
             onclick="dDeleteItem('${item.id}')" ${isLocked ? 'disabled' : ''}>×</button>` : ''}
       </div>`;
   }).join('');
+
+  // Правую панель материалов показываем только когда выбран элемент проекта.
+  const panel = document.getElementById('d-panel');
+  if (panel) panel.classList.toggle('hidden', !dActiveItem);
 }
 
 // ── Delete (×) button — сбросить настройки конкретной позиции ──

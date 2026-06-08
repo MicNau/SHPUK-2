@@ -10,34 +10,24 @@
   --r: 0;
   --sidebar-w: 300px;
   --panel-w: 340px;
-  --topbar-h: 56px;
 }
 body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; overflow:hidden; }
 
 /* ═══════════════════════════════════════════
-   TOP BAR
+   FLOATING "ИТОГ" BUTTON (правый нижний угол; хедер убран)
    ═══════════════════════════════════════════ */
-.d-topbar {
-  height: var(--topbar-h); background: #1a1a1a; color: #fff;
-  display: flex; align-items: center; padding: 0 24px; gap: 16px;
-  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+.d-fab-summary {
+  position: fixed; right: 24px; bottom: 24px; z-index: 150;
+  height: 48px; padding: 0 24px; background: #1a1a1a; color: #fff;
+  border: none; font-size: 15px; font-weight: 700; cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,0,0,.25); transition: background .15s;
 }
-.d-topbar-logo { font-size: 18px; font-weight: 700; letter-spacing: .06em; }
-.d-topbar-step { font-size: 13px; font-weight: 300; color: rgba(255,255,255,.6); }
-.d-topbar-spacer { flex: 1; }
-.d-topbar-btn {
-  height: 36px; padding: 0 18px; background: rgba(255,255,255,.12);
-  border: none; border-radius: 8px; color: #fff; font-size: 13px;
-  font-weight: 600; cursor: pointer; transition: background .15s;
-}
-.d-topbar-btn:hover { background: rgba(255,255,255,.22); }
-.d-topbar-btn.primary { background: #fff; color: #000; }
-.d-topbar-btn.primary:hover { background: #e0e0e0; }
+.d-fab-summary:hover { background: #333; }
 
 /* ═══════════════════════════════════════════
    SCREENS SYSTEM
    ═══════════════════════════════════════════ */
-.d-screen { display: none; position: fixed; top: var(--topbar-h); left: 0; right: 0; bottom: 0; }
+.d-screen { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; }
 .d-screen.active { display: flex; animation: dIn .25s ease; }
 @keyframes dIn { from{opacity:0} to{opacity:1} }
 
@@ -161,9 +151,11 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
 .d-params-left {
   width: var(--sidebar-w); padding: 28px 24px; border-right: 1px solid #e0e0e0;
   display: flex; flex-direction: column; gap: 0;
-  overflow-y: auto;
+  overflow: hidden;
 }
-.d-params-title { font-size: 24px; font-weight: 700; margin-bottom: 24px; }
+.d-params-title { font-size: 24px; font-weight: 700; margin-bottom: 24px; flex: none; }
+/* Заголовок и кнопки «Назад/Дальше» приколочены; скроллится только этот блок. */
+.d-params-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .d-param-group { margin-bottom: 20px; }
 .d-param-label { font-size: 14px; font-weight: 300; color: #666; margin-bottom: 6px; }
 .d-param-input {
@@ -200,7 +192,7 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
 .d-hm-sw.active { border-color: #000; box-shadow: 0 0 0 2px #000 inset; }
 
 .d-params-actions {
-  display: flex; gap: 12px; margin-top: auto; padding-top: 24px;
+  display: flex; gap: 12px; flex: none; padding-top: 24px;
 }
 .d-params-actions .d-btn {
   flex: 1; height: 48px; border: none; border-radius: var(--r);
