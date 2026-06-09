@@ -1163,15 +1163,8 @@ function buildScene3d() {
   // Ступени — отдельная секция. Глубина в плане пересчитывается из bh.
   if (S.sections.includes('steps') && S.steps) {
     M.deck = _resolveDeckMat(_baseDeck, 'steps');
-    const sr = S.steps;
-    const wp = canvasToWorld([
-      { x: sr.x, y: sr.y }, { x: sr.x + sr.w, y: sr.y },
-      { x: sr.x + sr.w, y: sr.y + sr.h }, { x: sr.x, y: sr.y + sr.h },
-    ], houseL, houseW);
-    buildConstructionPad(houseGroup,
-      Math.min(...wp.map(p => p.x)), Math.max(...wp.map(p => p.x)),
-      Math.min(...wp.map(p => p.z)), Math.max(...wp.map(p => p.z)), 0.30);
     try {
+      // Подкладку строит сам buildSteps3d по реальному footprint лестницы.
       buildSteps3d(houseGroup, M, S.steps, isNoHouse ? 0.35 : bh, houseL, houseW);
     } catch (e) { console.error('[buildSteps3d]', e); }
   }
@@ -2130,6 +2123,15 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   }
 
   parent.add(stairGroup);
+
+  // Подкладка (отмостка) под ступенями — по РЕАЛЬНОМУ footprint лестницы (bbox stairGroup),
+  // а не по drawn-rect S.steps: его глубину buildSteps3d игнорирует (пересчитывает на
+  // n × stepDepth), из-за чего pad по drawn-rect торчал за лестницу.
+  stairGroup.updateMatrixWorld(true);
+  const _sb = new THREE.Box3().setFromObject(stairGroup);
+  if (isFinite(_sb.min.x) && _sb.max.x > _sb.min.x) {
+    buildConstructionPad(parent, _sb.min.x, _sb.max.x, _sb.min.z, _sb.max.z, 0.30);
+  }
 }
 
 function buildPorch3d(parent,M,porch,houseL,houseW,bh){
