@@ -29,7 +29,7 @@ const D_CANVAS_INIT = {
   pool_terrace: () => initSnapCanvas('pool_terrace'),
   paths:        () => initPathsCanvas(),
   pier:         () => initSnapCanvas('pier'),
-  fence:        () => initSnapCanvas('fence'),
+  fence:        () => { initSnapCanvas('fence'); _dSyncFenceHeight(); },
   beds:         () => initBedsCanvas(),
 };
 
@@ -223,6 +223,7 @@ function _dResetAllConfigurations() {
   S.beds = [];
   S.activeBed = null;
   S.bedH = 0.20;
+  S.fenceH = 1.5;
   S.mats = {};
   S.elementMat = {};
   S.estimate = {};
@@ -442,6 +443,19 @@ function dSetBedHeight(mm) {
     btn.classList.toggle('active', parseInt(btn.dataset.mm, 10) === mm);
   });
   if (typeof onParamChange === 'function') onParamChange();
+}
+
+function dSetFenceHeight(m) {
+  S.fenceH = m;
+  _dSyncFenceHeight();
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
+// Подсветить активную кнопку высоты забора из S.fenceH (при открытии редактора/сбросе).
+function _dSyncFenceHeight() {
+  document.querySelectorAll('#fence-h-seg .bed-h-btn').forEach(btn => {
+    btn.classList.toggle('active', parseFloat(btn.dataset.m) === S.fenceH);
+  });
 }
 
 function _dSyncRanges() {
@@ -763,13 +777,25 @@ function _dIsLight(hex) {
 }
 
 // ── Catalog filters ──
+// Набор цветов для текущего элемента проекта (свой на тип, имена/цвета из COLORS.md).
+// id = название цвета (стабилен между типами; tooltip = название из каталога).
+function _elementColors(elId, subMode) {
+  let key = elId;
+  if (elId === 'terrace' && subMode === 'railing') key = 'railing';
+  else if (elId === 'paths' || elId === 'pool_terrace' || elId === 'pier') key = 'terrace';
+  const map = (typeof ELEMENT_COLOR_NAMES !== 'undefined') ? ELEMENT_COLOR_NAMES : {};
+  const names = map[key] || map.terrace || [];
+  const hexMap = (typeof CATALOG_COLOR_HEX !== 'undefined') ? CATALOG_COLOR_HEX : {};
+  return names.map(n => ({ id: n, hex: hexMap[n] || '#999999', label: n }));
+}
+
 function _dRenderColorGrid() {
   const grid = document.getElementById('d-color-grid');
   if (!grid) return;
-  grid.innerHTML = CATALOG_COLORS.map(c =>
+  grid.innerHTML = _elementColors(dActiveItem, S.matSubMode).map(c =>
     `<div class="d-color-dot ${S.catColors.has(c.id) ? 'selected' : ''}"
           title="${c.label}" style="background:${c.hex};"
-          onclick="dToggleColor('${c.id}')"></div>`
+          onclick="dToggleColor('${c.id.replace(/'/g, "\\'")}')"></div>`
   ).join('');
 }
 

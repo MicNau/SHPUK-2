@@ -2,7 +2,7 @@
 
 ## Статус
 - **Фронтенд** разбит на файлы, PBR-визуализация работает; десктоп-UI создан и отлажен (sidebar-кнопки, snap-сетка 0.5 м, multi-line, collision avoidance). UI без скруглений; кнопки действий редакторов — в правом нижнем углу.
-- **Конструкции:** терраса/крыльцо (multi-rect), ступени, дорожки (монолитная лента), забор (стандартные секции 2 м), **грядки** (GLB-плантер 3×1, дискретная высота). Растительность сейчас **отключена** (легко вернуть — см. ниже).
+- **Конструкции:** терраса/крыльцо (multi-rect), ступени, дорожки (монолитная лента), забор (стандартные секции 2 м, высота полотна 1.5/1.9 м — `S.fenceH`), **грядки** (GLB-плантер 3×1, дискретная высота). Растительность сейчас **отключена** (легко вернуть — см. ниже).
 - **Материалы:** каждый деко-элемент (терраса/ступени/дорожки/грядки/бассейн/причал) красится **независимо** (`S.elementMat`). PBR-текстуры товара ложатся на deck-материал с кубическим UV.
 - **Материалы дома:** на шаге «Параметры дома» — выбор квадратными образцами (крыша: черепица/металл зелёный/металл красный; фундамент: бетон/камень; стены: штукатурка/кирпич/сайдинг). Накладываются по имени материала меша (`_applyHouseMaterials`): крыша — per-slope UV (полосы вниз по скату), цоколь/труба исправлены (труба = металл водостоков), откосы окон белые, рамы/двери коричневые, стекло 50%, шторы (`mat_curtain`) — белые с картой нормалей `assets/curtain_norm.jpg`. Текстуры — варианты `roof/wall/base_*_0N` в `assets/`.
 - **Каталог:** подключён боевой REST-API `sollersdev.ru` через клиент `ResourceManager.js`. Реальные разделы/товары/цены/текстуры; материал привязан к разделу каталога по элементу (`CONSTRUCTION_TO_SECTION`). Локально работает через dev-прокси `devserver.py` (обход отсутствия CORS + ретраи к нестабильному апстриму). **Смета** считается по геометрии × цена из каталога.
@@ -34,9 +34,10 @@
   styles.css, nav.js, ui.js, catalog.js  # не подключены ни одним HTML
 
 /frontend — общие файлы
-  state.js                # S (+ elementMat, estimate, catSection, beds, bedH), SECS,
+  state.js                # S (+ elementMat, estimate, catSection, beds, bedH, fenceH), SECS,
                           # CATALOG_COLORS, PRICE_TIERS, STUB_RESULTS,
-                          # CATALOG_SECTIONS, CONSTRUCTION_TO_SECTION
+                          # CATALOG_SECTIONS, CONSTRUCTION_TO_SECTION,
+                          # CATALOG_COLOR_HEX (имя→hex) + ELEMENT_COLOR_NAMES (набор цветов на тип, по COLORS.md)
   ResourceManager.js      # клиент каталожного API sollersdev.ru (ResourceManager, Filter,
                           # FilterType, Presets, ProductResource). Домен — глобал RESOURCE_API_DOMAIN.
   canvas.js               # pan/zoom движок, snap-canvas, крыльцо (drag+resize), грядки (beds)
@@ -102,7 +103,9 @@
   /migrations
 
 devserver.py              # dev-сервер: статика + прокси /api,/static → sollersdev.ru
-                          # (обход CORS, ретраи к нестабильному апстриму)
+                          # (обход CORS, ретраи к нестабильному апстриму).
+                          # Статика отдаётся с Cache-Control: no-store (cache-bust ?v=N только
+                          # на скриптах; иначе браузер кэширует index.html и тянет старые ссылки).
 run-server.bat            # запуск devserver.py двойным кликом (Windows)
 
 ARCHITECTURE.md
@@ -443,7 +446,8 @@ CREATE TABLE projects (
 3. **d-screen-3** — рабочая область (3 колонки):
    - **Left sidebar** (300px) — кнопочное меню позиций (single-selection). Клик → выбор для каталога или открытие canvas-редактора. Карандаш (✏) для повторного редактирования.
    - **Center** — 3D-вид или canvas-редактор (overlay поверх 3D)
-   - **Right panel** (340px) — материалы: фильтры цвета/цены → результаты (auto-show) → образцы
+   - **Right panel** (340px) — материалы: фильтры цвета/цены → результаты (auto-show) → образцы.
+     Палитра цвета — **своя на тип элемента** (`_elementColors(dActiveItem, S.matSubMode)` → `ELEMENT_COLOR_NAMES`/`CATALOG_COLOR_HEX`, по COLORS.md; терраса+railing — отдельные наборы). У каждого квадрата `title` = название цвета из каталога (tooltip при наведении).
 
 ### Sidebar (nav-desktop.js):
 - **`dActiveItem`** — текущая выбранная позиция (single-selection).

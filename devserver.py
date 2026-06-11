@@ -35,6 +35,14 @@ class Handler(SimpleHTTPRequestHandler):
     def _is_proxy(self):
         return any(self.path.startswith(p) for p in PROXY_PREFIXES)
 
+    def end_headers(self):
+        # Статика (особенно index.html) — no-store, чтобы дев всегда грузил свежую версию.
+        # Cache-bust ?v=N стоит только на скриптах; сам HTML иначе кэшируется браузером и
+        # подхватывает старые ссылки. Прокси-ответы свой Cache-Control ставят сами.
+        if not self._is_proxy():
+            self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")

@@ -2636,8 +2636,9 @@ function buildFence3d(parent,M,pts,houseL,houseW){
   const meshFn=(geo,mat)=>{const m=new THREE.Mesh(geo,mat);m.castShadow=m.receiveShadow=true;return m;};
   const fenceMat=new THREE.MeshStandardMaterial({color:0x8B7355,roughness:.80,metalness:.05});
 
-  const postH   = FENCE_GROUND_GAP + FENCE_PANEL_H + FENCE_POST_CAP;
-  const panelCY = FENCE_GROUND_GAP + FENCE_PANEL_H/2;
+  const panelH  = (typeof S !== 'undefined' && S.fenceH) ? S.fenceH : FENCE_PANEL_H; // 1.5 | 1.9 м
+  const postH   = FENCE_GROUND_GAP + panelH + FENCE_POST_CAP;
+  const panelCY = FENCE_GROUND_GAP + panelH/2;
 
   // Позиции столбов — дедуплицируются (углы/стыки секций общие у соседних пролётов).
   const postMap = new Map();
@@ -2670,7 +2671,7 @@ function buildFence3d(parent,M,pts,houseL,houseW){
         const cd = dist + w/2;
         const cx = a.x + ux*cd, cz = a.z + uz*cd;
         const panelLen = Math.max(0.05, w - FENCE_POST_W); // зазор под столбы
-        const panel=meshFn(box(FENCE_PANEL_T,FENCE_PANEL_H,panelLen),fenceMat);
+        const panel=meshFn(box(FENCE_PANEL_T,panelH,panelLen),fenceMat);
         panel.position.set(cx, panelCY, cz);
         panel.rotation.y=angle;
         fenceGroup.add(panel); threeState.fenceMeshes.push(panel);
