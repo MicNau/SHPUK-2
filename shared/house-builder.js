@@ -3057,20 +3057,50 @@ function placeVelux(parent, modules, modulesDef, frame, posAlong, posUp, w, h) {
   setupShadows(vel);
   parent.add(vel);
 
-  // Плоская glass-плита параллельно скату, чуть выше рамы
+  // Реальный верх рамы вдоль нормали ската (самокалибровка по вершинам GLB) —
+  // чтобы посадить стекло В раму, а не «висеть» над ней.
+  vel.updateMatrixWorld(true);
+  let frameTopN = -Infinity;
+  const _vp = new THREE.Vector3();
+  vel.traverse(o => {
+    if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
+    const pa = o.geometry.attributes.position;
+    for (let i = 0; i < pa.count; i++) {
+      _vp.fromBufferAttribute(pa, i).applyMatrix4(o.matrixWorld);
+      const d = (_vp.x - center.x) * zAxis.x + (_vp.y - center.y) * zAxis.y + (_vp.z - center.z) * zAxis.z;
+      if (d > frameTopN) frameTopN = d;
+    }
+  });
+  if (!isFinite(frameTopN)) frameTopN = liftFrame + 0.012;
+  const glassN   = frameTopN - 0.006;  // стекло чуть ниже верхнего канта рамы (садится в раму)
+  const curtainN = frameTopN - 0.018;  // штора под стеклом (видна сквозь стекло)
+
+  // Плоская glass-плита параллельно скату, посажена в раму (но выше плоскости крыши).
   const fp = def.frame_profile || 0.04;
   const glassW = Math.max(0.05, w - 2 * fp);
   const glassH = Math.max(0.05, h - 2 * fp);
   const glassGeo = new THREE.PlaneGeometry(glassW, glassH);
   const glassMat = new THREE.MeshPhysicalMaterial({
-    color: 0x4a6878, opacity: 0.38, metalness: 0.82, roughness: 0.1,
+    color: 0x9fb4be, opacity: 0.32, metalness: 0.0, roughness: 0.08,
     transparent: true, side: THREE.DoubleSide,
   });
   glassMat.name = 'mat_glass';
   const glassMesh = new THREE.Mesh(glassGeo, glassMat);
-  glassMesh.position.copy(center).addScaledVector(zAxis, liftFrame + 0.025);
+  glassMesh.position.copy(center).addScaledVector(zAxis, glassN);
   glassMesh.quaternion.setFromRotationMatrix(basis);
   parent.add(glassMesh);
+
+  // Штора под стеклом — плоский полигон с материалом штор (mat_curtain → в
+  // _applyHouseMaterials красится в белый + карта нормалей). Выше плоскости крыши.
+  const curtainMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff, roughness: 0.9, metalness: 0.0, side: THREE.DoubleSide,
+  });
+  curtainMat.name = 'mat_curtain';
+  const curtainMesh = new THREE.Mesh(new THREE.PlaneGeometry(glassW, glassH), curtainMat);
+  curtainMesh.position.copy(center).addScaledVector(zAxis, curtainN);
+  curtainMesh.quaternion.setFromRotationMatrix(basis);
+  setupShadows(curtainMesh);
+  parent.add(curtainMesh);
 
   log(`[roof-win] ✓ velux at (along=${posAlong.toFixed(2)}, up=${posUp.toFixed(2)}) ${w}×${h}`, 'dim');
 }
