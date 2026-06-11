@@ -2550,40 +2550,37 @@ function _offsetPolyline(pts, halfW) {
 }
 
 // Монолитная лента-настил по левой/правой кромкам (как terrace box, но вдоль полилинии).
-// UV: текстура повёрнута на 90° относительно «вдоль дорожки» → U = поперёк (ширина),
-// V = длина по осевой. Так доски (грувы текстуры) идут ПОПЕРЁК дорожки (перекладины),
-// поворачивая на углах вместе с лентой. DoubleSide — winding не важен.
+// Доски (перекладины) идут ПОПЕРЁК дорожки, СТРОГО ⟂ локальной осевой каждого сегмента.
+// Ключ: каждый сегмент строится своими вершинами, а UV-координата V — это ПРОЕКЦИЯ точки
+// на ось ИМЕННО этого сегмента (а не накопленная длина по миттер-трапеции). По центру V
+// совпадает с накопленной длиной → планки выровнены на стыке, а к кромкам угла образуется
+// чистый миттер-шов (без «ёлочки»/скоса). DoubleSide — winding для видимости не важен.
 function _buildPathRibbon(parent, left, right, yBot, yTop, pathW, mat, meshArray) {
   const n = left.length; if (n < 2) return;
   const T = DECK_TILE, crossU = pathW / T;
-  const runs = [0];                                   // накопленная длина по осевой (середины кромок)
-  for (let i = 1; i < n; i++) {
-    const ax=(left[i-1].x+right[i-1].x)/2, az=(left[i-1].z+right[i-1].z)/2;
-    const bx=(left[i].x+right[i].x)/2,     bz=(left[i].z+right[i].z)/2;
-    runs.push(runs[i-1] + Math.hypot(bx-ax, bz-az));
-  }
+  const ctr = [], runs = [0];                         // осевая + накопленная длина
+  for (let i = 0; i < n; i++) ctr.push({ x: (left[i].x + right[i].x) / 2, z: (left[i].z + right[i].z) / 2 });
+  for (let i = 1; i < n; i++) runs.push(runs[i - 1] + Math.hypot(ctr[i].x - ctr[i - 1].x, ctr[i].z - ctr[i - 1].z));
   const pos = [], uv = [], idx = [];
-  for (let i = 0; i < n; i++) {
-    const v = runs[i] / T;                            // длина по осевой → V (текстура повёрнута 90°)
-    pos.push(left[i].x,  yTop, left[i].z);  uv.push(0,      v);   // LT
-    pos.push(right[i].x, yTop, right[i].z); uv.push(crossU, v);   // RT
-    pos.push(left[i].x,  yBot, left[i].z);  uv.push(0,      v);   // LB
-    pos.push(right[i].x, yBot, right[i].z); uv.push(crossU, v);   // RB
-  }
-  const LT=i=>i*4, RT=i=>i*4+1, LB=i=>i*4+2, RB=i=>i*4+3;
   for (let i = 0; i < n - 1; i++) {
-    idx.push(LT(i),RT(i),LT(i+1),  RT(i),RT(i+1),LT(i+1));     // верх
-    idx.push(LB(i),LB(i+1),RB(i),  RB(i),LB(i+1),RB(i+1));     // низ
-    idx.push(LT(i),LT(i+1),LB(i),  LB(i),LT(i+1),LB(i+1));     // левая кромка
-    idx.push(RT(i),RB(i),RT(i+1),  RT(i+1),RB(i),RB(i+1));     // правая кромка
+    let dx = ctr[i + 1].x - ctr[i].x, dz = ctr[i + 1].z - ctr[i].z;
+    const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;          // направление сегмента
+    const vOf = p => (runs[i] + (p.x - ctr[i].x) * dx + (p.z - ctr[i].z) * dz) / T;  // проекция на ось сегмента
+    const pts = [left[i], right[i], left[i + 1], right[i + 1]];   // 0=LT,1=RT,2=LT2,3=RT2
+    const us  = [0, crossU, 0, crossU];
+    const b = pos.length / 3;
+    for (let j = 0; j < 4; j++) { pos.push(pts[j].x, yTop, pts[j].z); uv.push(us[j], vOf(pts[j])); } // верх b+0..3
+    for (let j = 0; j < 4; j++) { pos.push(pts[j].x, yBot, pts[j].z); uv.push(us[j], vOf(pts[j])); } // низ  b+4..7
+    const LT = b, RT = b + 1, LT2 = b + 2, RT2 = b + 3, LB = b + 4, RB = b + 5, LB2 = b + 6, RB2 = b + 7;
+    idx.push(LT, RT, LT2,  RT, RT2, LT2);   // верх
+    idx.push(LB, LB2, RB,  RB, LB2, RB2);   // низ
+    idx.push(LT, LT2, LB,  LB, LT2, LB2);   // левая кромка
+    idx.push(RT, RB, RT2,  RT2, RB, RB2);   // правая кромка
+    if (i === 0)     idx.push(LT, LB, RT,  RT, LB, RB);          // торец начала
+    if (i === n - 2) idx.push(LT2, RT2, LB2,  RT2, RB2, LB2);    // торец конца
   }
-  idx.push(LT(0),LB(0),RT(0),  RT(0),LB(0),RB(0));             // торец начала
-  const e = n - 1; idx.push(LT(e),RT(e),LB(e),  RT(e),RB(e),LB(e));  // торец конца
-  // Намотка треугольников была инвертирована (верх ленты давал нормаль −Y, низ +Y):
-  // для diffuse при DoubleSide незаметно, но normalMap из товара даёт «вывернутые»
-  // нормали. Разворачиваем каждый треугольник → computeVertexNormals даёт наружные
-  // нормали (верх +Y, низ −Y, кромки наружу), и normalMap кладётся корректно.
-  for (let t = 0; t < idx.length; t += 3) { const s = idx[t+1]; idx[t+1] = idx[t+2]; idx[t+2] = s; }
+  // Разворот треугольников → наружные нормали (верх +Y), корректный normalMap (как было).
+  for (let t = 0; t < idx.length; t += 3) { const s = idx[t + 1]; idx[t + 1] = idx[t + 2]; idx[t + 2] = s; }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('uv',       new THREE.Float32BufferAttribute(uv, 2));
