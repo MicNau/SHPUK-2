@@ -3227,22 +3227,33 @@ function placeDormer(parent, modules, modulesDef, frame, dormerSpec, baseY, mate
     log(`[roof-win] dormer: GLB модуль ${winModel} не загружен`, 'warn');
   }
 
-  // Custom glass-плита в плоскости фронтального фасада dormer'а, ПЕРЕД стеной
+  // Custom glass-плита в плоскости фронтального фасада dormer'а, ПЕРЕД стеной + штора за ней.
   if (winDef) {
     const fp = winDef.frame_profile || 0.05;
     const glassW = Math.max(0.05, winW - 2 * fp);
     const glassH = Math.max(0.05, winH - 2 * fp);
-    const glassGeo = new THREE.PlaneGeometry(glassW, glassH);
     const glassMat = new THREE.MeshPhysicalMaterial({
-      color: 0x4a6878, opacity: 0.38, metalness: 0.82, roughness: 0.1,
+      color: 0x9fb4be, opacity: 0.32, metalness: 0.0, roughness: 0.08,
       transparent: true, side: THREE.DoubleSide,
     });
     glassMat.name = 'mat_glass';
-    const glassMesh = new THREE.Mesh(glassGeo, glassMat);
+    const glassMesh = new THREE.Mesh(new THREE.PlaneGeometry(glassW, glassH), glassMat);
     // Чётко перед стеной (5 см), внутри рамы по глубине
     glassMesh.position.copy(localToWorld(0, h / 2, d / 2 + 0.05));
     glassMesh.quaternion.copy(dormerQuat);
     parent.add(glassMesh);
+
+    // Штора между стеклом и стеной dormer'а (видна сквозь стекло вместо кирпича).
+    // mat_curtain → в _applyHouseMaterials красится в белый + карта нормалей.
+    const curtainMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff, roughness: 0.9, metalness: 0.0, side: THREE.DoubleSide,
+    });
+    curtainMat.name = 'mat_curtain';
+    const curtainMesh = new THREE.Mesh(new THREE.PlaneGeometry(glassW, glassH), curtainMat);
+    curtainMesh.position.copy(localToWorld(0, h / 2, d / 2 + 0.02));
+    curtainMesh.quaternion.copy(dormerQuat);
+    setupShadows(curtainMesh);
+    parent.add(curtainMesh);
   }
   log(`[roof-win] ✓ dormer at (along=${posAlong.toFixed(2)}, up=${posUp.toFixed(2)}) ${w}×${h}×${d}`, 'dim');
 }
