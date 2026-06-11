@@ -3109,19 +3109,20 @@ function placeVelux(parent, modules, modulesDef, frame, posAlong, posUp, w, h) {
 // Используется ПРАВОСТОРОННИЙ базис (right-handed): xAxis × yAxis = zAxis, det=+1 — это даёт
 // валидную ротацию. Сечение xAxis = up × normalHoriz (направлен «вправо» при взгляде наружу со ската).
 function placeDormer(parent, modules, modulesDef, frame, dormerSpec, baseY, materialsMap) {
-  const w = dormerSpec.w, h = dormerSpec.h;
-  if (!w || !h || !dormerSpec.depth) { log('[roof-win] dormer: нужны w, h, depth', 'err'); return; }
+  if (!dormerSpec.w || !dormerSpec.h || !dormerSpec.depth) { log('[roof-win] dormer: нужны w, h, depth', 'err'); return; }
   const posAlong = dormerSpec.position_along || 0.5;
   const posUp    = dormerSpec.position_up    || 0.3;
-  // Вынос (глубина) dormer'а ОГРАНИЧЕН горизонтальным пробегом ската на его позиции:
-  // dormer центрирован в basePt и уходит ±d/2 по горизонтали, поэтому чтобы не торчать за
-  // карниз (front) и не пробивать конёк (back), d ≤ 2·min(posUp, 1−posUp)·горизпробег.
-  // Так вынос МАСШТАБИРУЕТСЯ с домом (на маленьком доме dormer мельче); на большом доме,
-  // где места хватает, клампа нет и используется depth из дескриптора.
+  // Скат может быть короче, чем нужно для dormer'а из дескриптора. Масштабируем ВЕСЬ
+  // dormer (w, h, d и окно) ОДНИМ коэффициентом, чтобы одновременно:
+  //   • не торчал за карниз/конёк — d центрирован в basePt и уходит ±d/2 по горизонтали,
+  //     поэтому d ≤ 2·min(posUp,1−posUp)·горизпробег (fit);
+  //   • врезался задней частью ПОД крышу — это держится только при d·tan(угол) ≥ h, а
+  //     масштабирование сохраняет соотношение d/h, значит врезка сохраняется на любом масштабе.
+  // На большом доме места хватает → scale=1, dormer как в дескрипторе.
   const horizRun = frame.lengthUp * Math.hypot(frame.axisUp.x, frame.axisUp.z); // гориз. проекция ската
-  // Запас 0.45 м: на стекло/штору (выступают ~5 см за коробку) + карнизный свес + защита.
-  const maxDepth = Math.max(0.6, 2 * Math.min(posUp, 1 - posUp) * horizRun - 0.45);
-  const d = Math.min(dormerSpec.depth, maxDepth);
+  const dMaxFit = 2 * Math.min(posUp * horizRun - 0.35, (1 - posUp) * horizRun - 0.25); // запас на карниз/стекло
+  const scale = Math.min(1, Math.max(0.2, dMaxFit / dormerSpec.depth));
+  const w = dormerSpec.w * scale, h = dormerSpec.h * scale, d = dormerSpec.depth * scale;
   const basePt = slopePointAt(frame, posAlong, posUp);
 
   // Скат наклонный, dormer вертикальный: front bottom висит над скатом на (d/2)*tan(angle).
@@ -3203,10 +3204,10 @@ function placeDormer(parent, modules, modulesDef, frame, dormerSpec, baseY, mate
   // Раму ВЫДВИГАЕМ ВПЕРЁД (5 см) — фронт-фасад dormer'а сплошной, рама должна быть снаружи.
   // Дополнительно строим custom glass-плиту в плоскости фронта (GLB-стекло горизонтальное и
   // после поворота уходит вглубь стены — не видно).
-  const winSpec = dormerSpec.window || { type: 'single', w: w * 0.6, h: h * 0.7 };
+  const winSpec = dormerSpec.window || { type: 'single' };
   const winType = winSpec.type || 'single';
-  const winW = winSpec.w || w * 0.6;
-  const winH = winSpec.h || h * 0.7;
+  const winW = winSpec.w ? winSpec.w * scale : w * 0.6;   // окно масштабируется вместе с dormer'ом
+  const winH = winSpec.h ? winSpec.h * scale : h * 0.7;
   const winModel = 'window_' + winType;
   const winDef = modulesDef && modulesDef['window_' + winType];
   const frameOffset = 0.10; // рама полностью ПЕРЕД стеной dormer'а (frame depth = 0.10)
