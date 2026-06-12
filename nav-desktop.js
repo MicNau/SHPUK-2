@@ -412,15 +412,33 @@ function dOnAreaTotal() {
   if (typeof onParamChange === 'function') onParamChange();
 }
 
-// Изменение per-floor параметра. Не синхронизируем «обратно» глобальный area —
-// пользователь сознательно отрегулировал один этаж индивидуально.
+// Изменение per-floor параметра. Синхронизируем глобальную «Общая площадь дома» с
+// площадью 1-го этажа (контур дома считается от неё) — иначе размеры меняются, а поле нет.
 function dOnFloorParam(fi) {
   ['v-floor', 'v-area'].forEach(prefix => {
     const inp = document.getElementById(`${prefix}-${fi}`);
     const rng = document.getElementById(`r${prefix.slice(1)}-${fi}`);
     if (inp && rng) rng.value = inp.value;
   });
+  _dSyncGlobalAreaFromFloors();
   if (typeof onParamChange === 'function') onParamChange();
+}
+
+// «Общая площадь дома» = площадь 1-го этажа / area_factor[0] (база, по которой
+// getHouseFloorPolygon строит контур). Держим поле в синхроне при ручной правке этажа.
+function _dSyncGlobalAreaFromFloors() {
+  const desc = (typeof _houseCache !== 'undefined' && _houseCache.desc) ? _houseCache.desc : null;
+  if (!desc || !desc.floors || !desc.floors[0]) return;
+  const factor0 = (desc.floors[0].area_factor !== undefined) ? desc.floors[0].area_factor : 1.0;
+  const a0 = parseFloat(document.getElementById('v-area-0')?.value);
+  const aEl = document.getElementById('v-area'), rEl = document.getElementById('r-area');
+  if (isNaN(a0) || !factor0 || !aEl) return;
+  let base = Math.round(a0 / factor0);
+  const mn = parseFloat(aEl.min), mx = parseFloat(aEl.max);
+  if (!isNaN(mn)) base = Math.max(base, mn);
+  if (!isNaN(mx)) base = Math.min(base, mx);
+  aEl.value = base;
+  if (rEl) rEl.value = base;
 }
 
 function dOnParam() {
