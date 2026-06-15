@@ -1196,11 +1196,33 @@ function buildScene3d() {
 
   const terraceRailingOn = document.querySelector('.tg[data-id="terrace-railing"]')?.classList.contains('on');
   if (terraceRailingOn && S.sections.includes('terrace')) {
-    for (let ri = 0; ri < terraceRectPolys.length; ri++) {
-      const otherRects = allRectsWorld.filter((_, j) => j !== ri);
-      try {
-        buildRailing3d(houseGroup, M, terraceRectPolys[ri], isNoHouse ? 0.35 : bh, houseL, houseW, otherRects);
-      } catch (e) { console.error('[buildRailing3d]', e); }
+    if (_railingCache && _railingCache.rails) {
+      // Единый контур объединения блоков → перила без разрывов на стыках.
+      const canopyOn = !!document.querySelector('.tg[data-id="terrace-roof"]')?.classList.contains('on');
+      let canopyPlaneH = null;
+      if (canopyOn) {
+        const caps = terraceRectPolys.map(pp => _terraceCanopyParams(canvasToWorld(pp, houseL, houseW), houseL, houseW));
+        canopyPlaneH = (x, z) => {           // высота навеса того блока, что накрывает точку (макс при перекрытии)
+          let best = null;
+          for (const cp of caps) {
+            if (x >= cp.minX - 0.06 && x <= cp.maxX + 0.06 && z >= cp.minZ - 0.06 && z <= cp.maxZ + 0.06) {
+              const h = cp.planeH(x, z); if (best === null || h > best) best = h;
+            }
+          }
+          return best;
+        };
+      }
+      _railPostReg = [];   // общий реестр столбов на весь проход (дедуп на стыках петель)
+      const loops = _terraceUnionLoops(allRectsWorld);
+      for (const loop of loops) {
+        try {
+          buildRailing3d(houseGroup, loop, isNoHouse ? 0.35 : bh, houseL, houseW, canopyPlaneH);
+        } catch (e) { console.error('[buildRailing3d]', e); }
+      }
+      _railPostReg = null;
+    } else {
+      // GLB ограждения ещё не загружен — грузим и перестраиваем сцену (как грядки).
+      ensureRailingLoaded().then(c => { if (c && threeState) buildScene3d(); });
     }
   }
 
@@ -1573,6 +1595,48 @@ function ensurePlanterLoaded() {
     );
   });
   return _planterLoadPromise;
+}
+
+// ── Ограждение террасы: GLB-модуль mod_railing (post / rails / balu_short / balu_floor) ──
+// Геометрии запекаются в родном базисе модуля: post центрирован на x=0 (h 0..1.2),
+// rails x[0..1]; Y=высота, Z=поперёк. Секция = 1.0 м между осями.
+// Балясины — единичные, центрированы в x=0 (сечение 50×50): baluShort (y 0.145..1.055) и
+// baluFloor (y 0..1.055, узор «2/5/8 от пола»). Перила (rails) тянем масштабом по длине
+// пролёта, балясины — НЕ тянем (иначе плющится сечение): тиражируем нужным числом по шагу ~0.1 м.
+let _railingCache = null;       // { post, rails, baluShort, baluFloor }
+let _railingLoadPromise = null;
+const RAIL_BALU_PITCH = 0.1;    // нативный шаг балясин (центр-центр), м
+const RAIL_BALU_INSET = 0.1;    // отступ крайней балясины от оси столба, м
+const RAIL_SECTION_W  = 1.0;    // целевая ширина секции (одинакова на всех сегментах), м
+const RAIL_POST_MERGE = 0.28;   // столбы ближе этого расстояния считаем одним (дедуп на стыках rect-ов)
+let _railPostReg = null;        // общий реестр поставленных столбов [{x,z,tall,mesh}] на проход buildScene3d
+
+function ensureRailingLoaded() {
+  if (_railingCache) return Promise.resolve(_railingCache);
+  if (_railingLoadPromise) return _railingLoadPromise;
+  _railingLoadPromise = new Promise(resolve => {
+    if (typeof THREE === 'undefined' || !THREE.GLTFLoader) { resolve(null); return; }
+    new THREE.GLTFLoader().load(
+      'assets/houses/modules/site/mod_railing.glb?v=2',
+      gltf => {
+        const c = { post: null, rails: null, baluShort: null, baluFloor: null };
+        gltf.scene.traverse(o => {
+          if (!o.isMesh || !o.geometry) return;
+          o.updateWorldMatrix(true, false);
+          const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld);
+          const n = (o.name || '').toLowerCase();
+          if (n.includes('post')) c.post = g;
+          else if (n.includes('balu_floor')) c.baluFloor = g;
+          else if (n.includes('balu_short')) c.baluShort = g;
+          else if (n.includes('rail')) c.rails = g;
+        });
+        _railingCache = c; resolve(c);
+      },
+      undefined,
+      err => { console.warn('[railing] не удалось загрузить GLB:', err); resolve(null); }
+    );
+  });
+  return _railingLoadPromise;
 }
 
 // Матрица, отображающая родной базис планки в мировой прямоугольник грядки.
@@ -2889,73 +2953,190 @@ function _terraceColumnPoints(insetPts, houseL, houseW, otherRects) {
   }));
 }
 
-function buildRailing3d(parent,M,pts,deckHeight,houseL,houseW,otherRects){
-  if(pts.length<3)return;
-  const worldPts=canvasToWorld(pts,houseL,houseW);
-  // Поручень + балясины в цвете колонн навеса (одинаковый материал — единый вид).
-  const railH=0.95, handT=0.05, balW=0.04, balStep=0.15;
-  const railGroup=new THREE.Group();
-  const box=(sx,sy,sz)=>new THREE.BoxGeometry(sx,sy,sz);
-  const meshFn=(geo,mat)=>{const m=new THREE.Mesh(geo,mat);m.castShadow=m.receiveShadow=true;return m;};
-  const railWoodMat = new THREE.MeshStandardMaterial({ color: PORCH_COLUMN_COLOR, roughness: 0.72, metalness: 0.04 });
-  const handMat = railWoodMat;
-  const baluMat = railWoodMat;
-
-  function drawRailSeg(a_x,a_z,b_x,b_z, colPts){
-    const sdx=b_x-a_x, sdz=b_z-a_z;
-    const sLen=Math.sqrt(sdx*sdx+sdz*sdz);
-    if(sLen < 0.15) return;   // не рисуем мелкие «обрубки»-сегменты
-    const angle = Math.atan2(sdx, sdz);
-    const ux = sdx / sLen, uz = sdz / sLen;
-    // Поручень ровно от конца до конца. Концы сегмента совпадают с центрами колонн
-    // (там, где они есть) → поручень и так заходит в ствол; удлинять не нужно
-    // (иначе торчит за тонкий GLB-ствол / в пустоту на свободных концах).
-    const hand = meshFn(box(handT, handT, sLen), handMat);
-    hand.position.set((a_x + b_x)/2, deckHeight + railH, (a_z + b_z)/2);
-    hand.rotation.y = angle;
-    railGroup.add(hand);
-    threeState.railingMeshes.push(hand);
-    // Балясины: пролётами МЕЖДУ колоннами, равным шагом, с прижимом к колоннам —
-    // крайняя балясина каждого пролёта стоит у самой кромки столба (раньше зона
-    // «запрета» + дискретный шаг оставляли заметный зазор у колонн).
-    const colClear = balW / 2 + 0.035;   // ~0.055: балясина подходит к тонкому стволу колонны
-                                          // (база/капитель шире 0.14, но короткие — лёгкое перекрытие незаметно)
-    // t-координаты ВНУТРЕННИХ колонн на этом сегменте (проекция на ось сегмента).
-    const stops = [0, sLen];
-    if (colPts) for (const c of colPts) {
-      const tc = (c.x - a_x) * ux + (c.z - a_z) * uz;
-      const perp = Math.hypot((a_x + ux * tc) - c.x, (a_z + uz * tc) - c.z);
-      if (tc > 0.02 && tc < sLen - 0.02 && perp < 0.20) stops.push(tc);
+// Единый контур ОБЪЕДИНЕНИЯ террасных блоков (axis-aligned rect'ы) → массив орто-полигонов
+// (петель) в мире. Так перила/балясины строятся по внешнему периметру всей террасы без
+// разрывов на стыках блоков (раньше каждый блок строился отдельно → дырки на границах).
+// Метод: сетка по координатам граней rect-ов → занятые ячейки → граничные рёбра (интерьер
+// слева) → трассировка в петли → схлопывание коллинеарных вершин.
+function _terraceUnionLoops(rects) {
+  if (!rects || !rects.length) return [];
+  const xs = [...new Set(rects.flatMap(r => [r.minX, r.maxX]))].sort((a, b) => a - b);
+  const zs = [...new Set(rects.flatMap(r => [r.minZ, r.maxZ]))].sort((a, b) => a - b);
+  const filled = (i, j) => {
+    const cx = (xs[i] + xs[i + 1]) / 2, cz = (zs[j] + zs[j + 1]) / 2;
+    return rects.some(r => cx > r.minX && cx < r.maxX && cz > r.minZ && cz < r.maxZ);
+  };
+  const P = (i, j) => xs[i] + ',' + zs[j];
+  const pt = (i, j) => ({ x: xs[i], z: zs[j] });
+  const edges = new Map();   // ключ start "x,z" → {to:[i,j], from:[i,j]}
+  const addEdge = (ai, aj, bi, bj) => edges.set(P(ai, aj), { a: [ai, aj], b: [bi, bj] });
+  for (let i = 0; i < xs.length - 1; i++) for (let j = 0; j < zs.length - 1; j++) {
+    if (!filled(i, j)) continue;
+    if (j === 0 || !filled(i, j - 1)) addEdge(i, j, i + 1, j);             // низ: +x
+    if (j === zs.length - 2 || !filled(i, j + 1)) addEdge(i + 1, j + 1, i, j + 1); // верх: -x
+    if (i === 0 || !filled(i - 1, j)) addEdge(i, j + 1, i, j);             // лево: -z
+    if (i === xs.length - 2 || !filled(i + 1, j)) addEdge(i + 1, j, i + 1, j + 1); // право: +z
+  }
+  const loops = [];
+  while (edges.size) {
+    const startKey = edges.keys().next().value;
+    let e = edges.get(startKey);
+    const loop = [];
+    while (e) {
+      edges.delete(P(e.a[0], e.a[1]));
+      loop.push(pt(e.a[0], e.a[1]));
+      e = edges.get(P(e.b[0], e.b[1]));
+      if (e && loop.length && pt(e.a[0], e.a[1]).x === loop[0].x && pt(e.a[0], e.a[1]).z === loop[0].z) break;
     }
-    stops.sort((p, q) => p - q);
-    // Прижим у концов сегмента: конец у колонны → colClear, свободный конец → balW.
-    const endPad = (ex, ez) =>
-      (colPts && colPts.some(c => Math.hypot(c.x - ex, c.z - ez) < 0.18)) ? colClear : balW;
-    const padStart = endPad(a_x, a_z), padEnd = endPad(b_x, b_z);
-    for (let k = 0; k < stops.length - 1; k++) {
-      const from = stops[k]     + (k === 0 ? padStart : colClear);
-      const to   = stops[k + 1] - (k === stops.length - 2 ? padEnd : colClear);
-      if (to <= from + 0.02) continue;                 // колонны вплотную — пролёта нет
-      const span = to - from;
-      const nb = Math.max(1, Math.round(span / balStep));
-      for (let i = 0; i <= nb; i++) {
-        const t = from + span * i / nb;
-        const balu = meshFn(box(balW, railH, balW), baluMat);
-        balu.position.set(a_x + ux * t, deckHeight + railH / 2, a_z + uz * t);
-        railGroup.add(balu);
-        threeState.railingMeshes.push(balu);
+    // схлопнуть коллинеарные точки (оставляем только вершины-углы)
+    const clean = [];
+    for (let k = 0; k < loop.length; k++) {
+      const p0 = loop[(k - 1 + loop.length) % loop.length], p1 = loop[k], p2 = loop[(k + 1) % loop.length];
+      const cross = (p1.x - p0.x) * (p2.z - p1.z) - (p1.z - p0.z) * (p2.x - p1.x);
+      if (Math.abs(cross) > 1e-9) clean.push(p1);   // поворот — это угол
+    }
+    loops.push(clean.length >= 3 ? clean : loop);
+  }
+  return loops;
+}
+
+// Инсет орто-полигона внутрь на d (к геометрическому интерьеру; работает для L/П-форм).
+function _insetOrthoPolygon(poly, d) {
+  const n = poly.length;
+  let area = 0;
+  for (let i = 0; i < n; i++) { const a = poly[i], b = poly[(i + 1) % n]; area += a.x * b.z - b.x * a.z; }
+  const ccw = area > 0;
+  const inwardN = (ax, az, bx, bz) => {
+    let dx = bx - ax, dz = bz - az; const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;
+    return ccw ? { nx: -dz, nz: dx } : { nx: dz, nz: -dx };   // интерьер слева (CCW)
+  };
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const prev = poly[(i - 1 + n) % n], cur = poly[i], next = poly[(i + 1) % n];
+    const n1 = inwardN(prev.x, prev.z, cur.x, cur.z);
+    const n2 = inwardN(cur.x, cur.z, next.x, next.z);
+    out.push({ x: cur.x + (n1.nx + n2.nx) * d, z: cur.z + (n1.nz + n2.nz) * d });
+  }
+  return out;
+}
+
+// Ограждение террасы из GLB-секций (mod_railing): по ЕДИНОМУ контуру террасы столбы (post)
+// секциями фикс. ширины (~1 м, одинаковы везде) + узкий добор; перила (rails) тянутся масштабом,
+// балясины (нативное сечение, число по шагу ~0.1 м) — в каждой секции. При навесе ВЫСОКИЕ столбы
+// (до низа навеса, высота из canopyPlaneH) на углах сегмента и каждые ~2 м — они же опоры навеса.
+// worldOutline — орто-полигон периметра всей террасы (не инсетнутый); canopyPlaneH(x,z)->h|null.
+function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopyPlaneH){
+  if (!_railingCache || !_railingCache.rails || !_railingCache.post) return;  // GLB ещё не загружен
+  if (!worldOutline || worldOutline.length < 3) return;
+  const up = new THREE.Vector3(0, 1, 0);
+  const railMat = new THREE.MeshStandardMaterial({ color: PORCH_COLUMN_COLOR, roughness: 0.72, metalness: 0.04 });
+  railMat.name = 'mat_railing';
+
+  const insetPts = _insetOrthoPolygon(worldOutline, RAIL_INSET);
+  const segs = terracePerimeterSegments(insetPts, houseL, houseW, []);
+  const canopyOn = !!canopyPlaneH;
+
+  function placeGeo(geo, m4) {
+    const g = geo.clone(); g.applyMatrix4(m4);
+    const mesh = new THREE.Mesh(g, railMat);
+    mesh.castShadow = mesh.receiveShadow = true;
+    parent.add(mesh); threeState.railingMeshes.push(mesh);
+  }
+  // Базис модуля: local +X → вдоль сегмента, +Y → вверх, +Z → поперёк; старт в (px,pz) на настиле.
+  function mat(px, pz, ux, uz, sx) {
+    const m = new THREE.Matrix4().makeBasis(
+      new THREE.Vector3(ux, 0, uz), up, new THREE.Vector3(-uz, 0, ux));
+    m.setPosition(px, deckHeight, pz);
+    if (sx !== 1) m.multiply(new THREE.Matrix4().makeScale(sx, 1, 1));
+    return m;
+  }
+
+  // Высокий столб-опора до низа навеса (box). Возвращает меш или null (если навеса нет/низко).
+  function makeTallPost(px, pz) {
+    const h = canopyPlaneH ? canopyPlaneH(px, pz) : null;
+    if (h === null || !isFinite(h) || h <= 1.2) return null;
+    const colT = 0.10;
+    const b = new THREE.Mesh(new THREE.BoxGeometry(colT, h, colT), railMat);
+    b.position.set(px, deckHeight + h / 2, pz);
+    b.castShadow = b.receiveShadow = true;
+    parent.add(b); threeState.railingMeshes.push(b);
+    return b;
+  }
+  function removeMesh(m) {
+    if (!m) return;
+    if (m.parent) m.parent.remove(m);
+    const a = threeState.railingMeshes, k = a.indexOf(m); if (k >= 0) a.splice(k, 1);
+    if (m.geometry) m.geometry.dispose();
+  }
+  // Ставит столб с дедупом по общему реестру (стыки rect-ов): если рядом уже есть столб —
+  // не дублируем; короткий апгрейдим до высокого, если новый должен быть высоким.
+  function placePostAt(px, pz, wantTall, ux, uz) {
+    if (_railPostReg) {
+      for (const e of _railPostReg) {
+        if (Math.hypot(e.x - px, e.z - pz) < RAIL_POST_MERGE) {
+          if (!e.tall && wantTall) {            // апгрейд короткого до высокого
+            const t = makeTallPost(px, pz);
+            if (t) { removeMesh(e.mesh); e.mesh = t; e.tall = true; }
+          }
+          return;                               // существующий столб покрывает точку
+        }
+      }
+    }
+    let mesh = wantTall ? makeTallPost(px, pz) : null;
+    const tall = !!mesh;
+    if (!mesh) { placeGeo(_railingCache.post, mat(px, pz, ux, uz, 1)); mesh = threeState.railingMeshes[threeState.railingMeshes.length - 1]; }
+    if (_railPostReg) _railPostReg.push({ x: px, z: pz, tall, mesh });
+  }
+
+  for (const s of segs) {
+    const dx = s.bx - s.ax, dz = s.bz - s.az;
+    const L = Math.hypot(dx, dz);
+    if (L < 0.20) continue;
+    const ux = dx / L, uz = dz / L;
+    // Секции фиксированной ширины ~1 м (одинаковы на всех сегментах) + один узкий «добор»
+    // в конце (с коротким столбом), если длина не делится на W нацело. Концы — точно на углах.
+    const W = RAIL_SECTION_W;
+    const nFull = Math.max(1, Math.floor(L / W + 1e-6));
+    const rem = L - nFull * W;
+    const pos = [];
+    for (let i = 0; i <= nFull; i++) pos.push(i * W);
+    let hasLeftover = false;
+    if (rem > 0.15) { pos.push(L); hasLeftover = true; }   // узкая добор-секция
+    else pos[pos.length - 1] = L;                          // мелкий остаток — растворяем в последней
+    const lastIdx = pos.length - 1;
+    // Высокие столбы (при навесе): на углах + каждые 2 м ПО РАССТОЯНИЮ (чётные метры).
+    // Узкий добор не делаем высоким — его внутренний столб короткий (по просьбе: можно узкую секцию).
+    const isTall = i => {
+      if (!canopyOn) return false;
+      if (i === 0 || i === lastIdx) return true;            // углы сегмента
+      if (hasLeftover && i === lastIdx - 1) return false;   // вход в узкий добор — короткий
+      const k = Math.round(pos[i] / W);
+      return Math.abs(pos[i] - k * W) < 0.05 && k % 2 === 0;
+    };
+
+    for (let i = 0; i < pos.length; i++) {
+      placePostAt(s.ax + ux * pos[i], s.az + uz * pos[i], isTall(i), ux, uz);
+    }
+    for (let k = 0; k < pos.length - 1; k++) {
+      const t0 = pos[k], gap = pos[k + 1] - pos[k];
+      if (gap < 0.15) continue;
+      // Перила (верх/низ) тянем по длине секции.
+      placeGeo(_railingCache.rails, mat(s.ax + ux * t0, s.az + uz * t0, ux, uz, gap));
+      // Балясины: НЕ тянем — ставим нативного сечения, число подгоняем по шагу ~0.1 м,
+      // узор «2/5/8 от пола» (0-base j%3===1) перезапускается в каждом пролёте.
+      const bg = _railingCache;
+      if (bg.baluShort && bg.baluFloor) {
+        const usable = gap - 2 * RAIL_BALU_INSET;
+        const n = usable <= 0 ? 1 : Math.max(1, Math.round(usable / RAIL_BALU_PITCH) + 1);
+        for (let j = 0; j < n; j++) {
+          const local = n === 1 ? gap / 2 : RAIL_BALU_INSET + usable * j / (n - 1);
+          const t = t0 + local;
+          const geo = (j % 3 === 1) ? bg.baluFloor : bg.baluShort;
+          placeGeo(geo, mat(s.ax + ux * t, s.az + uz * t, ux, uz, 1));
+        }
       }
     }
   }
-
-  // Периметр считаем по rect, сжатому внутрь на RAIL_INSET — перила не свисают за край.
-  const insetPts = _insetWorldRect(worldPts, RAIL_INSET);
-  const segs = terracePerimeterSegments(insetPts, houseL, houseW, otherRects || []);
-  // Если навес включён — балясины обходят его колонны (те же точки, что у навеса).
-  const canopyOn = !!document.querySelector('.tg[data-id="terrace-roof"]')?.classList.contains('on');
-  const colPts = canopyOn ? _terraceColumnPoints(insetPts, houseL, houseW, otherRects || []) : [];
-  for (const s of segs) drawRailSeg(s.ax, s.az, s.bx, s.bz, colPts);
-  parent.add(railGroup);
 }
 
 // Навес над террасой — вальмовая (hip) крыша над bbox полигона + колонны
@@ -3139,11 +3320,15 @@ function buildTerraceCanopies(parent, M, rectPolys, deckHeight, houseL, houseW) 
       colPts.push({ x: c.x, z: c.z, h });
     }
   }
+  // Если включено ограждение террасы — опоры навеса даёт само ограждение (высокие
+  // столбы каждые ~2.5 м), отдельные колонны навеса не строим (иначе задвоение).
+  const railingOn = !!document.querySelector('.tg[data-id="terrace-railing"]')?.classList.contains('on')
+                    && S.sections.includes('terrace');
   const useGlbCol = (typeof HouseBuilder !== 'undefined'
                      && HouseBuilder.placeScaledGlb
                      && _houseCache.modules
                      && _houseCache.modules.porch_column);
-  for (const p of colPts) {
+  if (!railingOn) for (const p of colPts) {
     if (useGlbCol) {
       HouseBuilder.placeScaledGlb(
         parent, _houseCache.modules, 'porch_column',
