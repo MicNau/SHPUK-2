@@ -1194,29 +1194,37 @@ function buildScene3d() {
     };
   });
 
+  // Навес строим ДО перил: высоту высоких столбов перила берут рейкастом по готовым плитам навеса.
+  const terraceCanopyOn = document.querySelector('.tg[data-id="terrace-roof"]')?.classList.contains('on');
+  if (terraceCanopyOn && S.sections.includes('terrace')) {
+    try {
+      buildTerraceCanopies(houseGroup, M, terraceRectPolys, isNoHouse ? 0.35 : bh, houseL, houseW);
+    } catch (e) { console.error('[buildTerraceCanopies]', e); }
+  }
+
   const terraceRailingOn = document.querySelector('.tg[data-id="terrace-railing"]')?.classList.contains('on');
   if (terraceRailingOn && S.sections.includes('terrace')) {
     if (_railingCache && _railingCache.rails) {
-      // Единый контур объединения блоков → перила без разрывов на стыках.
-      const canopyOn = !!document.querySelector('.tg[data-id="terrace-roof"]')?.classList.contains('on');
-      let canopyPlaneH = null;
-      if (canopyOn) {
-        const caps = terraceRectPolys.map(pp => _terraceCanopyParams(canvasToWorld(pp, houseL, houseW), houseL, houseW));
-        canopyPlaneH = (x, z) => {           // высота навеса того блока, что накрывает точку (макс при перекрытии)
-          let best = null;
-          for (const cp of caps) {
-            if (x >= cp.minX - 0.06 && x <= cp.maxX + 0.06 && z >= cp.minZ - 0.06 && z <= cp.maxZ + 0.06) {
-              const h = cp.planeH(x, z); if (best === null || h > best) best = h;
-            }
-          }
-          return best;
+      // Высоту высоких столбов берём по РЕАЛЬНЫМ плитам навеса (рейкаст), а не аналитикой —
+      // на стыках блоков плита обрезана по диагонали, и аналитика (max по bbox) промахивалась.
+      let canopyUndersideY = null;
+      if (terraceCanopyOn && threeState.canopyMeshes.length) {
+        houseGroup.updateMatrixWorld(true);          // плиты навеса только что добавлены
+        const _rc = new THREE.Raycaster();
+        const _down = new THREE.Vector3(0, -1, 0);
+        const deckY = isNoHouse ? 0.35 : bh;
+        canopyUndersideY = (x, z) => {               // мировой Y НИЗА плиты навеса над точкой (или null)
+          _rc.set(new THREE.Vector3(x, deckY + 10, z), _down);
+          const hits = _rc.intersectObjects(threeState.canopyMeshes, true);
+          return hits.length ? hits[hits.length - 1].point.y : null;   // нижнее пересечение = низ плиты
         };
       }
+      // Единый контур объединения блоков → перила без разрывов на стыках.
       _railPostReg = [];   // общий реестр столбов на весь проход (дедуп на стыках петель)
       const loops = _terraceUnionLoops(allRectsWorld);
       for (const loop of loops) {
         try {
-          buildRailing3d(houseGroup, loop, isNoHouse ? 0.35 : bh, houseL, houseW, canopyPlaneH);
+          buildRailing3d(houseGroup, loop, isNoHouse ? 0.35 : bh, houseL, houseW, canopyUndersideY);
         } catch (e) { console.error('[buildRailing3d]', e); }
       }
       _railPostReg = null;
@@ -1224,13 +1232,6 @@ function buildScene3d() {
       // GLB ограждения ещё не загружен — грузим и перестраиваем сцену (как грядки).
       ensureRailingLoaded().then(c => { if (c && threeState) buildScene3d(); });
     }
-  }
-
-  const terraceCanopyOn = document.querySelector('.tg[data-id="terrace-roof"]')?.classList.contains('on');
-  if (terraceCanopyOn && S.sections.includes('terrace')) {
-    try {
-      buildTerraceCanopies(houseGroup, M, terraceRectPolys, isNoHouse ? 0.35 : bh, houseL, houseW);
-    } catch (e) { console.error('[buildTerraceCanopies]', e); }
   }
 
   // Собираем зоны, занятые конструкциями (для проверки растительности)
@@ -3023,9 +3024,11 @@ function _insetOrthoPolygon(poly, d) {
 // Ограждение террасы из GLB-секций (mod_railing): по ЕДИНОМУ контуру террасы столбы (post)
 // секциями фикс. ширины (~1 м, одинаковы везде) + узкий добор; перила (rails) тянутся масштабом,
 // балясины (нативное сечение, число по шагу ~0.1 м) — в каждой секции. При навесе ВЫСОКИЕ столбы
-// (до низа навеса, высота из canopyPlaneH) на углах сегмента и каждые ~2 м — они же опоры навеса.
-// worldOutline — орто-полигон периметра всей террасы (не инсетнутый); canopyPlaneH(x,z)->h|null.
-function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopyPlaneH){
+// (до низа навеса) на углах сегмента и каждые ~2 м — они же опоры навеса. Высота высокого столба —
+// из РЕАЛЬНОЙ плиты навеса рейкастом (`canopyUndersideY`), а не аналитики: на стыках блоков плита
+// обрезана по диагонали, аналитика (max по bbox) промахивалась и столб протыкал навес.
+// worldOutline — орто-полигон периметра всей террасы (не инсетнутый); canopyUndersideY(x,z)->Y|null.
+function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopyUndersideY){
   if (!_railingCache || !_railingCache.rails || !_railingCache.post) return;  // GLB ещё не загружен
   if (!worldOutline || worldOutline.length < 3) return;
   const up = new THREE.Vector3(0, 1, 0);
@@ -3034,7 +3037,7 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopy
 
   const insetPts = _insetOrthoPolygon(worldOutline, RAIL_INSET);
   const segs = terracePerimeterSegments(insetPts, houseL, houseW, []);
-  const canopyOn = !!canopyPlaneH;
+  const canopyOn = !!canopyUndersideY;
 
   function placeGeo(geo, m4) {
     const g = geo.clone(); g.applyMatrix4(m4);
@@ -3051,10 +3054,16 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopy
     return m;
   }
 
-  // Высокий столб-опора до низа навеса (box). Возвращает меш или null (если навеса нет/низко).
-  function makeTallPost(px, pz) {
-    const h = canopyPlaneH ? canopyPlaneH(px, pz) : null;
-    if (h === null || !isFinite(h) || h <= 1.2) return null;
+  // Высокий столб-опора до низа навеса (box). Высоту берём по РЕАЛЬНОЙ плите навеса над точкой
+  // (рейкаст), сэмплируя чуть внутрь по нормали сегмента (nx,nz) — иначе на кромке луч скользит
+  // мимо края плиты. Нет навеса над точкой → null (ставится обычный столб, без протыкания).
+  function makeTallPost(px, pz, nx, nz) {
+    if (!canopyUndersideY) return null;
+    let yU = canopyUndersideY(px + nx * 0.25, pz + nz * 0.25);
+    if (yU === null) yU = canopyUndersideY(px, pz);
+    if (yU === null) return null;
+    const h = yU - deckHeight;
+    if (!isFinite(h) || h <= 1.2) return null;
     const colT = 0.10;
     const b = new THREE.Mesh(new THREE.BoxGeometry(colT, h, colT), railMat);
     b.position.set(px, deckHeight + h / 2, pz);
@@ -3070,19 +3079,19 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopy
   }
   // Ставит столб с дедупом по общему реестру (стыки rect-ов): если рядом уже есть столб —
   // не дублируем; короткий апгрейдим до высокого, если новый должен быть высоким.
-  function placePostAt(px, pz, wantTall, ux, uz) {
+  function placePostAt(px, pz, wantTall, ux, uz, nx, nz) {
     if (_railPostReg) {
       for (const e of _railPostReg) {
         if (Math.hypot(e.x - px, e.z - pz) < RAIL_POST_MERGE) {
           if (!e.tall && wantTall) {            // апгрейд короткого до высокого
-            const t = makeTallPost(px, pz);
+            const t = makeTallPost(px, pz, nx, nz);
             if (t) { removeMesh(e.mesh); e.mesh = t; e.tall = true; }
           }
           return;                               // существующий столб покрывает точку
         }
       }
     }
-    let mesh = wantTall ? makeTallPost(px, pz) : null;
+    let mesh = wantTall ? makeTallPost(px, pz, nx, nz) : null;
     const tall = !!mesh;
     if (!mesh) { placeGeo(_railingCache.post, mat(px, pz, ux, uz, 1)); mesh = threeState.railingMeshes[threeState.railingMeshes.length - 1]; }
     if (_railPostReg) _railPostReg.push({ x: px, z: pz, tall, mesh });
@@ -3114,8 +3123,9 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopy
       return Math.abs(pos[i] - k * W) < 0.05 && k % 2 === 0;
     };
 
+    const nx = -uz, nz = ux;   // внутренняя нормаль сегмента (для сэмпла навеса чуть внутрь)
     for (let i = 0; i < pos.length; i++) {
-      placePostAt(s.ax + ux * pos[i], s.az + uz * pos[i], isTall(i), ux, uz);
+      placePostAt(s.ax + ux * pos[i], s.az + uz * pos[i], isTall(i), ux, uz, nx, nz);
     }
     for (let k = 0; k < pos.length - 1; k++) {
       const t0 = pos[k], gap = pos[k + 1] - pos[k];
