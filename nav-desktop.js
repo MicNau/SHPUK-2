@@ -874,7 +874,13 @@ async function _ensureCatalogSection(sectionId) {
   if (!rm || typeof Filter === 'undefined') return null;
   _catalogLoading[sectionId] = true;
   try {
-    const res = await rm.getResources(new Filter(FilterType.SECTION_ID, sectionId), new Filter(FilterType.LIMIT, 16));
+    // Текстурированные товары (с texture_urls для превью/3D) бэкенд отдаёт только под тегом
+    // раздела (SECTION_TAGS). Без тега вернулись бы товары без текстур → превью не приходят.
+    const filters = [new Filter(FilterType.SECTION_ID, sectionId)];
+    const tag = (typeof SECTION_TAGS !== 'undefined') ? SECTION_TAGS[sectionId] : null;
+    if (tag) filters.push(new Filter(FilterType.TAGS, [tag]));
+    filters.push(new Filter(FilterType.LIMIT, 50));
+    const res = await rm.getResources(...filters);
     // res === null → ошибка запроса → null (повторяемо); иначе массив (возможно пустой).
     _catalogCache[sectionId] = res ? (res.products || []) : null;
   } catch (e) {
