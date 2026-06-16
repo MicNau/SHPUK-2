@@ -2125,64 +2125,84 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
     }
   }
 
-  // Перила лестницы (toggle steps-railing).
+  // Перила лестницы (toggle steps-railing) — из того же GLB-модуля, что и ограждение
+  // террасы (post / rails / balu_floor). Поручень+нижнее перило идут под РЕЙК (наклон по
+  // разнице уровней верх→низ), балясины — вертикальные, нативного сечения, по проступям.
   const hasRailing = !!document.querySelector('.tg[data-id="steps-railing"]')?.classList.contains('on');
   if (hasRailing) {
-    const railH = 0.95, handT = 0.05, balW = 0.04, balStep = 0.18;
-    // Перила сдвинуты от краёв ступеней внутрь — не конфликтуют с углом террасы
-    // и стоят на проступи, а не на свесе. latOff = полуширина минус inset.
-    // STAIR_RAIL_INSET — модульная константа: тем же значением сужается проём перил
-    // террасы под лестницу, чтобы колонна навеса на углу проёма встала соосно перилам
-    // лестницы (см. terracePerimeterSegments).
-    const latOff = Math.max(0.10, stairWidth / 2 - STAIR_RAIL_INSET);
-    // Поручень + балясины в цвете колонн (как у перил террасы) — единый вид.
-    const stairRailMat = new THREE.MeshStandardMaterial({ color: PORCH_COLUMN_COLOR, roughness: 0.72, metalness: 0.04 });
-    const handMat = stairRailMat;
-    const baluMat = stairRailMat;
+    const RC = _railingCache;
+    if (!(RC && RC.rails && RC.post && RC.baluFloor)) {
+      // GLB ещё не загружен — подгружаем и перестраиваем сцену (как для перил террасы).
+      ensureRailingLoaded().then(c => { if (c && threeState) buildScene3d(); });
+    } else {
+      // latOff: перила сдвинуты от краёв ступеней внутрь (на STAIR_RAIL_INSET) — соосны
+      // колонне навеса на углу проёма террасы (см. terracePerimeterSegments).
+      const latOff = Math.max(0.10, stairWidth / 2 - STAIR_RAIL_INSET);
+      const stairRailMat = new THREE.MeshStandardMaterial({ color: PORCH_COLUMN_COLOR, roughness: 0.72, metalness: 0.04 });
+      stairRailMat.name = 'mat_railing';
+      const up = new THREE.Vector3(0, 1, 0);
+      const placeGeo = (geo, m4) => {
+        const g = geo.clone(); g.applyMatrix4(m4);
+        const mm = mesh(g, stairRailMat); stairGroup.add(mm); threeState.railingMeshes.push(mm);
+      };
 
-    for (const lateralSign of [-1, +1]) {
-      // Концы поручня в плане: над верхней кромкой и над нижней.
-      let topPx, topPz, botPx, botPz;
-      if (bestSide.axisAlong === 'X') {
-        topPx = cxW + lateralSign * latOff; topPz = topZ;
-        botPx = topPx;                       botPz = topZ + dirZ * stairDepth;
-      } else {
-        topPx = topX;                        topPz = czW + lateralSign * latOff;
-        botPx = topX + dirX * stairDepth;    botPz = topPz;
-      }
-      const topY = bh + railH;            // над верхом террасы (стыкуется с поручнем террасы)
-      const botY = realRise + railH;      // над последней видимой проступью (Y=realRise) + высота поручня
-      // Поручень — наклонный брус. Верхний конец продлеваем НАЗАД по скату вглубь террасы
-      // (на RAIL_INSET + полколонны), чтобы он входил в ствол колонны на углу проёма, а не
-      // висел в воздухе (ньюэлы убраны в v=66; колонна соосна перилам лестницы — v=67).
-      const run = Math.hypot(botPx - topPx, botPz - topPz) || 1e-6;            // горизонт. ход (= stairDepth)
-      const slope0 = Math.hypot(botPx - topPx, botY - topY, botPz - topPz) || 1e-6;
-      const topExt = (RAIL_INSET + CANOPY_COL_HALF) * slope0 / run;            // длина продления вдоль ската
-      const ux = (topPx - botPx) / slope0, uy = (topY - botY) / slope0, uz = (topPz - botPz) / slope0;
-      const hTopX = topPx + ux * topExt, hTopY = topY + uy * topExt, hTopZ = topPz + uz * topExt;
-      const len = Math.hypot(botPx - hTopX, botY - hTopY, botPz - hTopZ);
-      const hand = mesh(box(handT, handT, len), handMat);
-      hand.position.set((hTopX + botPx)/2, (hTopY + botY)/2, (hTopZ + botPz)/2);
-      hand.lookAt(botPx, botY, botPz);
-      stairGroup.add(hand);
-      threeState.railingMeshes.push(hand);
+      for (const lateralSign of [-1, +1]) {
+        // Концы перил в плане (верх — у кромки террасы, низ — у последней проступи).
+        let topPx, topPz, botPx, botPz;
+        if (bestSide.axisAlong === 'X') {
+          topPx = cxW + lateralSign * latOff; topPz = topZ;
+          botPx = topPx;                       botPz = topZ + dirZ * stairDepth;
+        } else {
+          topPx = topX;                        topPz = czW + lateralSign * latOff;
+          botPx = topX + dirX * stairDepth;    botPz = topPz;
+        }
+        // Базовая линия ската (через верх террасы → верх последней видимой проступи).
+        const P0 = new THREE.Vector3(topPx, bh,       topPz);
+        const P1 = new THREE.Vector3(botPx, realRise, botPz);
+        const headX = new THREE.Vector3(botPx - topPx, 0, botPz - topPz).normalize(); // горизонт. направление спуска
+        const crossH = new THREE.Vector3().crossVectors(headX, up).normalize();
 
-      // Балясины — по одной на каждую видимую проступь (i=0..n-2).
-      for (let i = 0; i < n - 1; i++) {
-        // Центр проступи i по плану: середина между задней кромкой (i·D + RISER_THICKNESS)
-        // и передней с nosing ((i+1)·D + STEP_NOSING).
-        const off = i * STEP_DEPTH + (RISER_THICKNESS + STEP_DEPTH + STEP_NOSING) / 2;
-        const t = off / stairDepth;
-        const bx = topPx + (botPx - topPx) * t;
-        const bz = topPz + (botPz - topPz) * t;
-        const surfY = bh - (i + 1) * realRise;     // верх проступи i
-        const handYHere = topY + (botY - topY) * t;
-        const baluH = handYHere - surfY;
-        if (baluH < 0.05) continue;
-        const balu = mesh(box(balW, baluH, balW), baluMat);
-        balu.position.set(bx, surfY + baluH/2, bz);
-        stairGroup.add(balu);
-        threeState.railingMeshes.push(balu);
+        // Верх продлеваем по скату вглубь террасы — перила входят в ствол колонны на углу
+        // проёма, а не висят в воздухе (см. STAIR_RAIL_INSET / terracePerimeterSegments).
+        const slope0 = new THREE.Vector3().subVectors(P1, P0);
+        const slopeLen0 = slope0.length() || 1e-6;
+        const run = Math.hypot(botPx - topPx, botPz - topPz) || 1e-6;
+        const topExt = (RAIL_INSET + CANOPY_COL_HALF) * slopeLen0 / run;
+        const u = slope0.clone().multiplyScalar(1 / slopeLen0);       // единичный вектор вниз по скату
+        const A = P0.clone().addScaledVector(u, -topExt);             // верх с продлением
+        const B = P1.clone();
+
+        // ── Перила (rails) под рейк: ось X — вдоль ската (наклон), Y — вертикаль (сдвиг) ──
+        const slopeVec = new THREE.Vector3().subVectors(B, A);
+        const L = slopeVec.length() || 1e-6;
+        const xAxis = slopeVec.clone().multiplyScalar(1 / L);
+        const zAxis = new THREE.Vector3().crossVectors(xAxis, up).normalize();
+        const mRail = new THREE.Matrix4().makeBasis(xAxis, up, zAxis);
+        mRail.setPosition(A.x, A.y, A.z);
+        mRail.multiply(new THREE.Matrix4().makeScale(L, 1, 1));        // тянем по длине ската
+        placeGeo(RC.rails, mRail);
+
+        // ── Нижний столб-ньюэл (post), вертикальный, на последней проступи ──
+        const mPost = new THREE.Matrix4().makeBasis(headX, up, crossH);
+        mPost.setPosition(B.x, B.y, B.z);
+        placeGeo(RC.post, mPost);
+
+        // ── Балясины по видимым проступям (i=0..n-2): вертикальные, нативное сечение,
+        //    высота по уровню (от проступи до поручня) — учитывает разницу уровней ──
+        for (let i = 0; i < n - 1; i++) {
+          const off = i * STEP_DEPTH + (RISER_THICKNESS + STEP_DEPTH + STEP_NOSING) / 2; // центр проступи i
+          const t = off / stairDepth;
+          const bx = topPx + (botPx - topPx) * t;
+          const bz = topPz + (botPz - topPz) * t;
+          const surfY = bh - (i + 1) * realRise;            // верх проступи i
+          const baseLineY = bh + (realRise - bh) * t;       // линия ската на этой проступи
+          const baluH = (baseLineY + 1.055) - surfY;        // до низа поручня (как в секции террасы)
+          if (baluH < 0.1) continue;
+          const mBal = new THREE.Matrix4().makeBasis(headX, up, crossH);
+          mBal.setPosition(bx, surfY, bz);
+          mBal.multiply(new THREE.Matrix4().makeScale(1, baluH / 1.055, 1)); // тянем ТОЛЬКО по высоте
+          placeGeo(RC.baluFloor, mBal);
+        }
       }
     }
   }
