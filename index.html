@@ -330,10 +330,17 @@
 <script src="canvas.js?v=24"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=73"></script>
-<!-- Каталожный API: домен. '' = same-origin (локальный dev-прокси devserver.py
-     проксирует /api и /static на sollersdev.ru — обходит отсутствие CORS).
-     Когда бэкенд включит CORS — поставить 'https://sollersdev.ru' и прокси не нужен. -->
-<script>window.RESOURCE_API_DOMAIN = '';</script>
+<!-- Каталожный API: домен выбирается по хосту.
+       • localhost/127.0.0.1 → '' (same-origin): локальный dev-прокси devserver.py
+         проксирует /api и /static на sollersdev.ru.
+       • любой другой хост (GitHub Pages и пр.) → напрямую на sollersdev.ru
+         (бэкенд теперь отдаёт CORS: Access-Control-Allow-Origin: * на /api и /static).
+     На статике (GitHub Pages) прокси нет, поэтому same-origin '' там не работает. -->
+<script>
+  window.RESOURCE_API_DOMAIN =
+    (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+      ? '' : 'https://sollersdev.ru';
+</script>
 <script src="ResourceManager.js?v=1"></script>
 <!-- 3D viewer -->
 <script src="viewer3d-core.js?v=111"></script>
