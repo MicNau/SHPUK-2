@@ -2677,21 +2677,70 @@ function _buildPathRibbon(parent, left, right, yBot, yTop, pathW, mat, meshArray
   if (meshArray && threeState[meshArray]) threeState[meshArray].push(m);
 }
 
+// Тримминг T-стыков: если КОНЕЦ линии упирается в ВНУТРЕННОСТЬ ребра другой линии
+// (ответвление), укорачиваем этот конец так, чтобы он встал на ближний край той дорожки
+// (на полуширину для перпендикулярного стыка) — лента примыкает, а не перекрывает.
+// Возвращает копии линий с поправленными концами. Концы у концов ребра (продолжение
+// дорожки) и свободные концы не трогаем.
+function _trimPathJunctions(lines, halfW) {
+  const out = lines.map(wp => wp.map(p => ({ x: p.x, z: p.z })));
+  for (let li = 0; li < out.length; li++) {
+    const wp = out[li];
+    for (const endIdx of [0, wp.length - 1]) {
+      const E = wp[endIdx];
+      const nb = (endIdx === 0) ? wp[1] : wp[wp.length - 2];   // соседняя точка (внутрь линии)
+      let dx = nb.x - E.x, dz = nb.z - E.z; const segLen = Math.hypot(dx, dz) || 1; dx /= segLen; dz /= segLen;
+      let bestTrim = 0;
+      for (let lj = 0; lj < lines.length; lj++) {
+        if (lj === li) continue;
+        const oth = lines[lj];
+        for (let k = 0; k < oth.length - 1; k++) {
+          const s0 = oth[k], s1 = oth[k + 1];
+          const sx = s1.x - s0.x, sz = s1.z - s0.z, sl2 = sx * sx + sz * sz; if (sl2 < 1e-9) continue;
+          const t = ((E.x - s0.x) * sx + (E.z - s0.z) * sz) / sl2;
+          if (t < 0.05 || t > 0.95) continue;                 // только интерьер ребра (не его концы)
+          const cx = s0.x + t * sx, cz = s0.z + t * sz;
+          if (Math.hypot(E.x - cx, E.z - cz) > halfW + 0.05) continue;  // конец вне дорожки — не стык
+          // укоротить вдоль d до ближнего края (perp = halfW на стороне подхода)
+          const sl = Math.sqrt(sl2), nx = -sz / sl, nz = sx / sl;       // нормаль ребра
+          const curr = (E.x - s0.x) * nx + (E.z - s0.z) * nz;           // знаковая перп-дистанция
+          const rate = dx * nx + dz * nz;                              // d·n
+          if (Math.abs(rate) < 1e-6) continue;
+          const side = (Math.abs(curr) < 1e-6) ? Math.sign(rate || 1) : Math.sign(curr);
+          const trim = (side * halfW - curr) / rate;
+          if (trim > bestTrim) bestTrim = trim;
+        }
+      }
+      bestTrim = Math.min(bestTrim, segLen - 0.05);
+      if (bestTrim > 1e-4) { E.x += dx * bestTrim; E.z += dz * bestTrim; }
+    }
+  }
+  return out;
+}
+
+// Дорожки: сеть линий (разделены break). Рендерим посегментными рибонами (митёные углы +
+// доски ⟂ каждому сегменту), а пересечения чиним тримингом концов-ответвлений (T-стыки)
+// на полуширину — конец линии примыкает к краю встречной дорожки без наложения.
 function buildPaths3d(parent, M, pts, houseL, houseW) {
   if (pts.filter(p => !p.break).length < 2) return;
   const pathW = parseFloat(document.getElementById('v-paths-width')?.value || 120) / 100;
   const halfW = pathW / 2, PATH_H = 0.05;
   const group = new THREE.Group();
-  // Один материал на все ленты — мировой UV даёт непрерывную текстуру (как у настила).
   const pathMat = (M.deck && M.deck.clone) ? M.deck.clone()
                                            : new THREE.MeshStandardMaterial({ color: 0x9a6b3f, roughness: 0.85 });
   pathMat.side = THREE.DoubleSide;
   const segments = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [pts.filter(p => !p.break)];
+
+  const lines = [];
   for (const seg of segments) {
     const raw = canvasToWorld(seg.filter(p => !p.break), houseL, houseW);
-    const wp = [];                                            // выкидываем совпадающие точки
+    const wp = [];
     for (const p of raw) if (!wp.length || Math.hypot(p.x - wp[wp.length-1].x, p.z - wp[wp.length-1].z) > 0.05) wp.push(p);
-    if (wp.length < 2) continue;
+    if (wp.length >= 2) lines.push(wp);
+  }
+  if (!lines.length) { parent.add(group); return; }
+
+  for (const wp of _trimPathJunctions(lines, halfW)) {
     const { left, right } = _offsetPolyline(wp, halfW);
     _buildPathRibbon(group, left, right, 0, PATH_H, pathW, pathMat, 'deckMeshes');
   }
