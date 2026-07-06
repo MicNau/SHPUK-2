@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PBR Texture Viewer — SHPUK</title>
+<!--
+  Отдельный самодостаточный PBR-визуализатор для проверки текстур.
+  Бокс 5×5×1 м, орбитальная камера, карты подгружаются с локального диска.
+  Тайл (одна полная текстура) = 1 м → box-UV с tileSize (по умолч. 1 м).
+  Работает и через devserver (http://localhost:8848/texture-viewer.html), и офлайн (file://).
+  Three.js r128 берётся локально из vendor/three/.
+-->
+<style>
+  :root { --bg:#20242b; --panel:#2b3038; --panel2:#343a44; --line:#3d4450; --txt:#e6e9ee; --mut:#9aa3b0; --accent:#6ea8fe; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--txt);
+    font-family: system-ui, "Segoe UI", Roboto, sans-serif; }
+  #app { position:fixed; inset:0; }
+  canvas { display:block; }
+  #panel {
+    position:absolute; top:12px; left:12px; width:290px; max-height:calc(100% - 24px);
+    overflow-y:auto; background:rgba(43,48,56,.94); border:1px solid var(--line); border-radius:10px;
+    padding:12px 12px 14px; backdrop-filter: blur(6px); font-size:13px;
+    box-shadow:0 8px 30px rgba(0,0,0,.4);
+  }
+  #panel h1 { font-size:14px; margin:0 0 2px; letter-spacing:.02em; }
+  #panel .sub { color:var(--mut); font-size:11px; margin:0 0 10px; }
+  .grp { border-top:1px solid var(--line); padding-top:10px; margin-top:10px; }
+  .grp:first-of-type { border-top:0; padding-top:0; margin-top:0; }
+  .grp h2 { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); margin:0 0 8px; }
+  .map { margin-bottom:8px; }
+  .map .row { display:flex; align-items:center; gap:6px; }
+  .map label.name { flex:1; font-weight:600; }
+  .map .meta { color:var(--mut); font-size:10.5px; margin-top:2px; min-height:12px; }
+  .btn { background:var(--panel2); border:1px solid var(--line); color:var(--txt); border-radius:6px;
+    padding:4px 8px; cursor:pointer; font-size:12px; }
+  .btn:hover { border-color:var(--accent); }
+  .btn.x { padding:3px 7px; color:var(--mut); }
+  .slider { margin:7px 0; }
+  .slider label { display:flex; justify-content:space-between; font-size:12px; margin-bottom:3px; color:var(--mut); }
+  .slider label b { color:var(--txt); font-weight:600; }
+  input[type=range] { width:100%; accent-color:var(--accent); }
+  .chk { display:flex; align-items:center; gap:7px; margin:6px 0; }
+  input[type=file] { display:none; }
+  #drop { position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(30,34,40,.72); border:3px dashed var(--accent); z-index:5; font-size:18px; color:#fff; }
+  #drop.on { display:flex; }
+  #hint { position:absolute; bottom:10px; left:50%; transform:translateX(-50%); color:var(--mut);
+    font-size:11.5px; background:rgba(43,48,56,.8); padding:5px 12px; border-radius:20px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="drop">Отпустите файлы текстур сюда</div>
+<div id="hint">ЛКМ — вращение · ПКМ — панорама · Колесо — зум · Файлы можно перетаскивать</div>
+
+<div id="panel">
+  <h1>PBR Texture Viewer</h1>
+  <p class="sub">Бокс 5×5×1 м · тайл 1×1 м</p>
+
+  <div class="grp">
+    <h2>Карты (drag&drop или кнопки)</h2>
+    <div id="maps"></div>
+  </div>
+
+  <div class="grp">
+    <h2>Материал</h2>
+    <div class="slider"><label>Размер тайла, м <b id="tileV">1.00</b></label>
+      <input type="range" id="tile" min="0.1" max="5" step="0.05" value="1"></div>
+    <div class="slider"><label>Сила нормали <b id="normV">1.00</b></label>
+      <input type="range" id="norm" min="0" max="3" step="0.05" value="1"></div>
+    <div class="slider"><label>Шероховатость (без карты) <b id="roughV">0.80</b></label>
+      <input type="range" id="rough" min="0" max="1" step="0.01" value="0.8"></div>
+    <div class="slider"><label>Металличность (без карты) <b id="metalV">0.00</b></label>
+      <input type="range" id="metal" min="0" max="1" step="0.01" value="0"></div>
+  </div>
+
+  <div class="grp">
+    <h2>Сцена</h2>
+    <div class="slider"><label>Экспозиция <b id="expV">1.00</b></label>
+      <input type="range" id="exp" min="0.1" max="2.5" step="0.05" value="1"></div>
+    <div class="slider"><label>Отражения (env) <b id="envV">1.00</b></label>
+      <input type="range" id="env" min="0" max="3" step="0.05" value="1"></div>
+    <div class="chk"><input type="checkbox" id="rot"><label for="rot">Автовращение</label></div>
+    <div class="chk"><input type="checkbox" id="wire"><label for="wire">Каркас</label></div>
+    <div class="row" style="display:flex; gap:8px; margin-top:8px;">
+      <button class="btn" id="reset">Сброс камеры</button>
+      <button class="btn" id="clear">Очистить карты</button>
+    </div>
+  </div>
+</div>
+
+<script src="vendor/three/three.min.js"></script>
+<script src="vendor/three/OrbitControls.js"></script>
+<script>
+(function () {
+  'use strict';
+  if (typeof THREE === 'undefined') { alert('Не удалось загрузить vendor/three/three.min.js'); return; }
+
+  // ── Каналы карт: slot материала, sRGB?, метка, поисковые слова для авто-раскладки ──
+  const CHANNELS = [
+    { key:'map',          srgb:true,  label:'Альбедо / Диффуз',  match:['diff','albedo','basecolor','base_color','color'] },
+    { key:'normalMap',    srgb:false, label:'Нормаль',           match:['norm','nrm','_n.'] },
+    { key:'roughnessMap', srgb:false, label:'Шероховатость',     match:['rough','_r.','rgh'] },
+    { key:'metalnessMap', srgb:false, label:'Металличность',     match:['metal','_m.','mtl'] },
+    { key:'aoMap',        srgb:false, label:'AO (затенение)',    match:['ao','occlusion','_ao'] },
+  ];
+
+  // ── Рендерер / сцена / камера ──
+  const app = document.getElementById('app');
+  const renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1;
+  app.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x20242b);
+
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 1000);
+  camera.position.set(6, 5, 7.5);
+
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.target.set(0, 0, 0);
+
+  // ── Освещение + процедурное окружение (PMREM из градиента) для честного PBR ──
+  scene.add(new THREE.HemisphereLight(0xdfe8f0, 0x3a3f47, 0.5));
+  const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(5, 8, 6); scene.add(key);
+  const fill = new THREE.DirectionalLight(0xbcd0e6, 0.6); fill.position.set(-6, 3, -4); scene.add(fill);
+
+  (function buildEnv() {
+    const c = document.createElement('canvas'); c.width = 512; c.height = 256;
+    const g = c.getContext('2d');
+    const grad = g.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0.0, '#e9f0f7'); grad.addColorStop(0.5, '#aeb8c4'); grad.addColorStop(1.0, '#4c525b');
+    g.fillStyle = grad; g.fillRect(0, 0, 512, 256);
+    const tex = new THREE.CanvasTexture(c); tex.mapping = THREE.EquirectangularReflectionMapping;
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromEquirectangular(tex).texture;
+    tex.dispose();
+  })();
+
+  // ── Материал + бокс 5×5×1 м с box-UV (тайл = tileSize метров) ──
+  const material = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.8, metalness: 0.0 });
+  material.normalScale = new THREE.Vector2(1, 1);
+
+  const BOX = { x: 5, y: 5, z: 1 };
+  const geometry = new THREE.BoxGeometry(BOX.x, BOX.y, BOX.z);
+  let tileSize = 1;
+
+  function applyBoxUV(geo, tile) {
+    const pos = geo.attributes.position, nor = geo.attributes.normal;
+    const uv = new Float32Array(pos.count * 2);
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const nx = Math.abs(nor.getX(i)), ny = Math.abs(nor.getY(i)), nz = Math.abs(nor.getZ(i));
+      let u, v;
+      if (ny >= nx && ny >= nz)      { u = x / tile; v = z / tile; } // грань ⟂ Y
+      else if (nx >= nz)             { u = z / tile; v = y / tile; } // грань ⟂ X
+      else                           { u = x / tile; v = y / tile; } // грань ⟂ Z
+      uv[i * 2] = u; uv[i * 2 + 1] = v;
+    }
+    geo.setAttribute('uv',  new THREE.BufferAttribute(uv, 2));
+    geo.setAttribute('uv2', new THREE.BufferAttribute(uv.slice(), 2)); // для aoMap
+  }
+  applyBoxUV(geometry, tileSize);
+  const mesh = new THREE.Mesh(geometry, material);
+  scene.add(mesh);
+
+  // тонкая рамка для читаемости габаритов
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry),
+    new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.15 }));
+  mesh.add(edges);
+
+  // ── Загрузка текстур с диска (File → objectURL → TextureLoader) ──
+  const loader = new THREE.TextureLoader();
+  const loaded = {}; // key → THREE.Texture
+
+  function setChannel(key, texture) {
+    const ch = CHANNELS.find(c => c.key === key);
+    if (loaded[key]) loaded[key].dispose();
+    if (texture) {
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(1, 1);                       // UV уже в метрах → repeat 1
+      texture.encoding = ch.srgb ? THREE.sRGBEncoding : THREE.LinearEncoding;
+      texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      texture.needsUpdate = true;
+    }
+    loaded[key] = texture || null;
+    material[key] = texture || null;
+    // rough/metal: при наличии карты множитель=1 (карта как есть), иначе — значение слайдера
+    if (key === 'roughnessMap') material.roughness = texture ? 1.0 : parseFloat(document.getElementById('rough').value);
+    if (key === 'metalnessMap') material.metalness = texture ? 1.0 : parseFloat(document.getElementById('metal').value);
+    material.needsUpdate = true;
+    updateMeta(key, texture);
+  }
+
+  function loadFile(key, file) {
+    const url = URL.createObjectURL(file);
+    loader.load(url, tex => {
+      tex.userData = { name: file.name, w: tex.image && tex.image.width, h: tex.image && tex.image.height };
+      setChannel(key, tex);
+      URL.revokeObjectURL(url);
+    }, undefined, () => { URL.revokeObjectURL(url); alert('Не удалось прочитать: ' + file.name); });
+  }
+
+  // авто-раскладка по имени файла (diffusion/normal/roughness/…)
+  function guessChannel(name) {
+    const n = name.toLowerCase();
+    for (const ch of CHANNELS) if (ch.match.some(m => n.includes(m))) return ch.key;
+    return null;
+  }
+  function acceptFiles(fileList, forcedKey) {
+    const files = [...fileList].filter(f => f.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp|tga)$/i.test(f.name));
+    if (!files.length) return;
+    if (forcedKey) { loadFile(forcedKey, files[0]); return; }
+    for (const f of files) {
+      const key = guessChannel(f.name) || 'map';
+      loadFile(key, f);
+    }
+  }
+
+  // ── UI: строки карт ──
+  const mapsEl = document.getElementById('maps');
+  const metaEls = {};
+  for (const ch of CHANNELS) {
+    const wrap = document.createElement('div'); wrap.className = 'map';
+    wrap.innerHTML =
+      '<div class="row"><span class="name">' + ch.label + '</span>' +
+      '<button class="btn" data-load="' + ch.key + '">Файл…</button>' +
+      '<button class="btn x" data-clear="' + ch.key + '" title="Убрать">✕</button></div>' +
+      '<div class="meta" id="meta-' + ch.key + '">—</div>' +
+      '<input type="file" accept="image/*" data-input="' + ch.key + '">';
+    mapsEl.appendChild(wrap);
+    metaEls[ch.key] = wrap.querySelector('#meta-' + ch.key);
+  }
+  function updateMeta(key, tex) {
+    const el = metaEls[key];
+    el.textContent = tex ? (tex.userData.name + '  ·  ' + tex.userData.w + '×' + tex.userData.h) : '—';
+  }
+  mapsEl.addEventListener('click', e => {
+    const l = e.target.getAttribute('data-load'), c = e.target.getAttribute('data-clear');
+    if (l) mapsEl.querySelector('[data-input="' + l + '"]').click();
+    if (c) setChannel(c, null);
+  });
+  mapsEl.addEventListener('change', e => {
+    const key = e.target.getAttribute('data-input');
+    if (key && e.target.files[0]) acceptFiles(e.target.files, key);
+    e.target.value = '';
+  });
+
+  // ── Drag & drop на всё окно ──
+  const drop = document.getElementById('drop');
+  let dragDepth = 0;
+  window.addEventListener('dragenter', e => { e.preventDefault(); if (++dragDepth === 1) drop.classList.add('on'); });
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('dragleave', e => { if (--dragDepth <= 0) { dragDepth = 0; drop.classList.remove('on'); } });
+  window.addEventListener('drop', e => {
+    e.preventDefault(); dragDepth = 0; drop.classList.remove('on');
+    if (e.dataTransfer && e.dataTransfer.files.length) acceptFiles(e.dataTransfer.files, null);
+  });
+
+  // ── Слайдеры / чекбоксы ──
+  const bind = (id, fn, fmt) => {
+    const el = document.getElementById(id), out = document.getElementById(id + 'V');
+    const apply = () => { const v = parseFloat(el.value); if (out) out.textContent = (fmt || (x => x.toFixed(2)))(v); fn(v); };
+    el.addEventListener('input', apply); apply();
+  };
+  bind('tile', v => { tileSize = v; applyBoxUV(geometry, v); geometry.attributes.uv.needsUpdate = true; geometry.attributes.uv2.needsUpdate = true; });
+  bind('norm', v => material.normalScale.set(v, v));
+  bind('rough', v => { if (!loaded.roughnessMap) { material.roughness = v; } });
+  bind('metal', v => { if (!loaded.metalnessMap) { material.metalness = v; } });
+  bind('exp', v => { renderer.toneMappingExposure = v; });
+  bind('env', v => { material.envMapIntensity = v; material.needsUpdate = true; });
+  document.getElementById('rot').addEventListener('change', e => { controls.autoRotate = e.target.checked; controls.autoRotateSpeed = 1.5; });
+  document.getElementById('wire').addEventListener('change', e => { material.wireframe = e.target.checked; });
+  document.getElementById('reset').addEventListener('click', () => { camera.position.set(6, 5, 7.5); controls.target.set(0, 0, 0); controls.update(); });
+  document.getElementById('clear').addEventListener('click', () => CHANNELS.forEach(ch => setChannel(ch.key, null)));
+
+  // ── Ресайз + цикл ──
+  function resize() {
+    const w = app.clientWidth, h = app.clientHeight;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize); resize();
+
+  (function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  })();
+})();
+</script>
+</body>
+</html>
