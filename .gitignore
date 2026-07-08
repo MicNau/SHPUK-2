@@ -18,3 +18,11 @@ node_modules/
 *.blend2
 *.blend3
 catalog_add-on.txt
+
+# Python (devserver)
+__pycache__/
+*.pyc
+
+# OS
+Thumbs.db
+.DS_Store

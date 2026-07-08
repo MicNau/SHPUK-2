@@ -13,7 +13,7 @@ const FilterType =  Object.freeze({
     PAGE: 'PAGE',
 });
 
-const SORT_FILEDS = Object.freeze({
+const SORT_FIELDS = Object.freeze({
     SORT: "sort",
     ID: "id",
     NAME: "name",
@@ -118,6 +118,10 @@ class ProductResource {
 
         if (!force_reload && this.isTextureLoadedSuccessed) return;
         const promises = [];
+        // Считаем реальные сбои загрузки: раньше каждый промис глотал ошибку своим
+        // catch, Promise.all никогда не реджектился и флаг успеха ставился даже
+        // когда ни одна текстура не загрузилась (повторная попытка не выполнялась).
+        let failures = 0;
 
         const textureLoader = new THREE.TextureLoader();
         for (let [textureName, textureUrl] of Object.entries(this.textureUrls)){
@@ -128,6 +132,7 @@ class ProductResource {
                         .catch(err => {
                             console.warn(`Failed to load ${textureName}:`, err);
                             this.textures[textureName] = null;
+                            failures++;
                         })
                 );
             }
@@ -136,16 +141,9 @@ class ProductResource {
             }
         }
 
-        try {
-            await Promise.all(promises);
-            this.isTextureLoadedSuccessed = true;
-            return true
-        } 
-        catch (error) {
-            console.warn(`Failed to load textures for product ${this.id}:`, error);
-            this.isTextureLoadedSuccessed = false
-            return false
-        }
+        await Promise.all(promises);
+        this.isTextureLoadedSuccessed = failures === 0;
+        return this.isTextureLoadedSuccessed;
     }
 }
 
@@ -172,10 +170,7 @@ class ResourceManager {
         [FilterType.PRODUCT_IDS]: (value) => ({'ids': value.join(',')}),
         [FilterType.PRICE_MAX]: (value) => ({'price_max': value}),
         [FilterType.PRICE_MIN]: (value) => ({'price_min': value}),
-        [FilterType.TAGS]: (value) => {
-            console.log(value)
-            return {'tags': value.join(',') }
-        },
+        [FilterType.TAGS]: (value) => ({'tags': value.join(',') }),
         [FilterType.SORT]: (value) => ({'sort': value}),
         [FilterType.SORT_ORDER]: (value) => ({'sort_order': value}),
         [FilterType.LIMIT]: (value) => ({'limit': value}),
@@ -226,7 +221,7 @@ class ResourceManager {
             }
         },
         [FilterType.SORT]: (value) => {
-            const validSorts = Object.values(SORT_FILEDS);
+            const validSorts = Object.values(SORT_FIELDS);
             if (!validSorts.includes(value)) {
                 throw new Error(`SORT must be one of: ${validSorts.join(', ')}`);
             }
@@ -238,7 +233,7 @@ class ResourceManager {
         },
         [FilterType.LIMIT]: (value) => {
             if (!Number.isInteger(value) || value < 1 ) {
-                throw new Error('LIMIT must be an integer bigger that 1');
+                throw new Error('LIMIT must be a positive integer');
             }
         },
         [FilterType.PAGE]: (value) => {

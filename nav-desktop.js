@@ -261,8 +261,10 @@ function dSelectHouseAndGo(typeId) {
                document.querySelector(`.d-house-card-empty[data-typeid="${typeId}"]`);
   if (card) card.classList.add('selected');
 
-  // S.houseType хранит typeId напрямую (например, "type_10"). Для "no_house" — special-case.
-  const newType = (typeId === 'no_house') ? null : typeId;
+  // S.houseType хранит typeId напрямую (например, "type_10") или 'no_house' («Пустой
+  // участок»). Раньше для no_house писали null — он неотличим от «ещё не выбрано»,
+  // а все проверки «без дома» (isEmptyLot в state.js) сравнивали с легаси-строкой.
+  const newType = typeId;
 
   // Если тип дома МЕНЯЕТСЯ — сбрасываем все настройки конструкций (терраса/крыльцо/…),
   // потому что они привязаны к геометрии конкретного дома. При повторном выборе того же
@@ -720,6 +722,11 @@ function _dRenderPanelContent() {
   if (secId === 'terrace' && S.matSubMode === 'railing') defSec = 2332;
   S.catSection = defSec || null;
 
+  // Палитра цветов у каждого элемента своя: выбранные для прошлого элемента цвета,
+  // которых нет в текущей палитре, вычищаем — иначе невидимый выбор фильтрует выдачу.
+  const _palette = new Set(_elementColors(secId, S.matSubMode).map(c => c.id));
+  S.catColors = new Set([...S.catColors].filter(n => _palette.has(n)));
+
   // Render swatches
   dRenderSwatches();
   // Auto-show catalog results
@@ -833,6 +840,63 @@ function dToggleColor(cid) {
   else S.catColors.add(cid);
   _dRenderColorGrid();
   dShowResults();
+}
+
+// ── Фильтр по цвету ──
+// У товаров API нет отдельного поля цвета — цвет входит в НАЗВАНИЕ товара
+// («Террасная доска … венге, м.пог»), см. COLORS.md. Поэтому цвета товара
+// определяем по тексту: ищем имена палитры (CATALOG_COLOR_HEX) как отдельные
+// слова. Длинные имена в приоритете: «тёмно-серый» в названии занимает диапазон
+// целиком и НЕ засчитывается как «Серый».
+function _colorNorm(s) { return String(s || '').toLowerCase().replace(/ё/g, 'е'); }
+
+const _COLOR_NAMES_BY_LEN = (typeof CATALOG_COLOR_HEX !== 'undefined')
+  ? Object.keys(CATALOG_COLOR_HEX).sort((a, b) => b.length - a.length)
+  : [];
+
+function _detectColorNames(text) {
+  const norm = _colorNorm(text);
+  const found = new Set();
+  const taken = [];                       // занятые диапазоны [start, end)
+  const isLetter = ch => !!ch && /[0-9a-zа-я]/.test(ch);
+  for (const name of _COLOR_NAMES_BY_LEN) {
+    const cn = _colorNorm(name);
+    let idx = norm.indexOf(cn);
+    while (idx !== -1) {
+      const end = idx + cn.length;
+      // Только целое слово («тик» ≠ «пластик») и вне уже занятых диапазонов.
+      const wholeWord = !isLetter(norm[idx - 1]) && !isLetter(norm[end]);
+      const overlaps = taken.some(([s, e]) => idx < e && end > s);
+      if (wholeWord && !overlaps) { found.add(name); taken.push([idx, end]); }
+      idx = norm.indexOf(cn, end);
+    }
+  }
+  return found;
+}
+
+// Цвета позиции: тексты перебираются ПО ПРИОРИТЕТУ, берём первый, где что-то
+// распозналось. Название точнее описания: у товара конкретного цвета («…дуб»)
+// preview_text перечисляет цвета всей линейки («венге, серый, шоколад…») и давал
+// ложные совпадения. Описание остаётся fallback'ом для позиций без цвета в
+// названии (многоцветные MIX-панели, заглушки).
+function _itemColors(textsOf, it) {
+  for (const t of textsOf(it)) {
+    const c = _detectColorNames(t);
+    if (c.size) return c;
+  }
+  return new Set();
+}
+
+// Оставляет позиции, чей цвет входит в выбранные (OR по выбранным цветам).
+// Позиции без распознанного цвета при активном фильтре скрываются.
+// textsOf(item) — массив текстов по убыванию приоритета (см. _itemColors).
+function _filterByColors(items, textsOf) {
+  if (!S.catColors.size) return items;
+  return items.filter(it => {
+    const colors = _itemColors(textsOf, it);
+    for (const c of S.catColors) if (colors.has(c)) return true;
+    return false;
+  });
 }
 
 function dSelectPrice(tid) {
@@ -956,9 +1020,11 @@ function dShowResults() {
 function _dRenderRealResults(allProducts) {
   const list = document.getElementById('d-mat-list');
   if (!list) return;
-  const products = _filterRealByPrice(allProducts);
+  // Цвет — из названия товара; preview_text только как fallback (см. _itemColors).
+  const products = _filterByColors(_filterRealByPrice(allProducts),
+    p => [p.name || '', p.previewText || '']);
   if (!products.length) {
-    list.innerHTML = '<div style="padding:16px;color:#999;font-size:13px;">Нет товаров под выбранный фильтр цены</div>';
+    list.innerHTML = '<div style="padding:16px;color:#999;font-size:13px;">Нет товаров под выбранные фильтры</div>';
     return;
   }
   list.innerHTML = products.map(p => {
@@ -1001,9 +1067,15 @@ function _dRenderStubResults() {
     price: 'от 10 000 ₽/м²', color: '#A0522D',
     url: 'https://outdoor-mebel.ru/catalog/terrasnaya_doska_iz_dpk/doska_dpk_universalnaya/deckron',
   }];
+  // Цвета заглушек: сначала название, затем текст («Цвета: тик, венге, серый…»).
+  results = _filterByColors(results, m => [m.name, `${m.short || ''} ${m.detail || ''}`]);
 
   const list = document.getElementById('d-mat-list');
   if (!list) return;
+  if (!results.length) {
+    list.innerHTML = '<div style="padding:16px;color:#999;font-size:13px;">Нет товаров под выбранные фильтры</div>';
+    return;
+  }
   list.innerHTML = results.map(m => `
     <div class="d-mat-card" id="dmc-${m.id}">
       <div class="d-mat-head" onclick="dToggleMatCard(${m.id})">
@@ -1208,7 +1280,7 @@ function _fmtRub(n) { return Math.round(n).toLocaleString('ru-RU') + ' ₽'; }
 function dShowSummary() {
   const desc = (typeof _houseCache !== 'undefined' && _houseCache.desc) ? _houseCache.desc : null;
   const rows = [
-    ['Тип дома', S.houseType || 'не выбран'],
+    ['Тип дома', S.houseType === 'no_house' ? 'Участок без дома' : (S.houseType || 'не выбран')],
     ['Общая площадь', (document.getElementById('v-area')?.value || '—') + ' кв.м'],
     ['Фундамент', (document.getElementById('v-found')?.value || '—') + ' см'],
   ];

@@ -19,8 +19,11 @@ function applyTransform(ctx, cx, W, H) {
 }
 
 function attachPanZoom(el, cvName, onRedraw) {
-  const cx = CV[cvName];
+  // CV[cvName] читаем СВЕЖИМ в каждом обработчике: initSnapCanvas пересоздаёт
+  // состояние (mkCvState) при каждом открытии редактора, а слушатели живут на el
+  // постоянно — захваченная в замыкании ссылка устаревала бы после переоткрытия.
   el.addEventListener('touchstart', e=>{
+    const cx = CV[cvName]; if (!cx) return;
     if (e.touches.length===2) {
       cx.pinching=true; cx.dragging=false;
       cx.lastDist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,
@@ -30,6 +33,7 @@ function attachPanZoom(el, cvName, onRedraw) {
     }
   },{passive:true});
   el.addEventListener('touchmove', e=>{
+    const cx = CV[cvName]; if (!cx) return;
     if (cx.pinching && e.touches.length===2) {
       const dist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,
                              e.touches[0].clientY-e.touches[1].clientY);
@@ -51,11 +55,13 @@ function attachPanZoom(el, cvName, onRedraw) {
     e.preventDefault();
   },{passive:false});
   el.addEventListener('touchend', e=>{
+    const cx = CV[cvName]; if (!cx) return;
     if (e.touches.length<2) cx.pinching=false;
     if (e.touches.length===0) cx.dragging=false;
   },{passive:true});
   el.addEventListener('wheel', e=>{
     e.preventDefault();
+    const cx = CV[cvName]; if (!cx) return;
     const r=el.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
     const mx=(e.clientX-r.left)*dpr, my=(e.clientY-r.top)*dpr;
     const f=e.deltaY<0?1.15:0.87;
@@ -76,14 +82,14 @@ function initSnapCanvas(name) {
   cv.style.width=sz+'px'; cv.style.height=sz+'px';
   CV[name]=mkCvState();
 
-  // Клонируем и заменяем — сбрасываем все старые слушатели
-  const newCv=cv.cloneNode(false);
-  newCv.width=sz*dpr; newCv.height=sz*dpr;
-  newCv.style.width=sz+'px'; newCv.style.height=sz+'px';
-  wrap.replaceChild(newCv, cv);
-
-  // Рисуем уже после того как новый canvas в DOM
   drawSnapCanvas(name);
+
+  // Слушатели (pan/zoom + click) вешаются на wrap ОДИН РАЗ. Раньше initSnapCanvas
+  // добавлял их при КАЖДОМ открытии редактора → после N открытий один клик ставил
+  // N точек (клонирование canvas не помогало — слушатели живут на wrap, не на canvas).
+  // Обработчики читают CV[name] свежим, поэтому переинициализация состояния им не мешает.
+  if (wrap._snapBound) return;
+  wrap._snapBound = true;
 
   attachPanZoom(wrap, name, ()=>drawSnapCanvas(name));
 
@@ -101,7 +107,7 @@ function initSnapCanvas(name) {
     // Прилипание к стенам дома для террас (порог 1 м).
     // Работает по ВСЕМ ortho-рёбрам полигона дома (не только bbox), чтобы
     // L/T/+/П-формы тоже снапались к своим внутренним углам.
-    if (['terrace','pool_terrace','pier'].includes(name) && S.houseType !== 'Участок без дома') {
+    if (['terrace','pool_terrace','pier'].includes(name) && !isEmptyLot()) {
       const hp = getHousePolygonNorm();
       const thr = 1.0 / GRID; // 1m порог в нормализованных координатах
       // Собираем уникальные snap-координаты (X для вертикальных рёбер, Y для горизонтальных)
@@ -214,7 +220,7 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
   const sc = cx.scale || 1;
 
   // 1. Дом — полигон по реальному outline дескриптора (или fallback-прямоугольник)
-  if (S.houseType !== 'Участок без дома') {
+  if (!isEmptyLot()) {
     const hp = getHousePolygonNorm();
     const bx = hp.bboxNorm.nx * W;
     const by = hp.bboxNorm.ny * H;
@@ -722,7 +728,7 @@ function snapNorm(v) { return Math.round(v * GRID / SNAP) * SNAP / GRID; }
 //     excludeTerraceIdx = -1 → все террасные rect'ы учитываются).
 function _snapTargets(excludeTerraceIdx) {
   const xs = [], ys = [];
-  if (S.houseType !== 'Участок без дома') {
+  if (!isEmptyLot()) {
     const hp = getHousePolygonNorm();
     for (const e of hp.edges) {
       if (e.axis === 'v') xs.push(e.coord);

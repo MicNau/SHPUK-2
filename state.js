@@ -230,4 +230,11 @@ const S = {
 const TOTAL = 10;
 let step = 1;
 
+// Участок без дома. Единый источник истины для canvas.js / viewer3d-core.js:
+// десктоп хранит в S.houseType typeId ('type_NN') или 'no_house' («Пустой участок»);
+// null — тип ещё не выбран (дом тоже не рисуем). Легаси-строка — от старого мобильного флоу.
+function isEmptyLot() {
+  return !S.houseType || S.houseType === 'no_house' || S.houseType === 'Участок без дома';
+}
+
 // ══════════════════════════════════════════════

@@ -69,12 +69,16 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        # Сбрасываем флаг на каждый запрос: при keep-alive один Handler обслуживает
+        # несколько запросов подряд, и «залипший» True лишал статику no-store.
+        self._proxying = False
         if self._should_proxy():
             self._proxy()
         else:
             super().do_GET()
 
     def do_HEAD(self):
+        self._proxying = False
         if self._should_proxy():
             self._proxy(head=True)
         else:

@@ -60,6 +60,9 @@ async function ensureHouseLoaded() {
   _houseCache.modules = null;
   _houseCache.loadingPromise = (typeof HouseBuilder !== 'undefined' ? HouseBuilder.loadHouseType(typeId) : Promise.reject(new Error('HouseBuilder not loaded')))
     .then(loaded => {
+      // Защита от гонки: пока грузился этот тип, пользователь мог выбрать другой —
+      // тогда результат устарел и кэш (уже перенацеленный на новый тип) не трогаем.
+      if (_houseCache.typeId !== typeId) return _houseCache;
       _houseCache.desc = loaded.desc;
       _houseCache.modules = loaded.modules;
       _houseCache.loadingPromise = null;
@@ -67,7 +70,7 @@ async function ensureHouseLoaded() {
     })
     .catch(err => {
       console.error('[3D] ensureHouseLoaded fail:', err);
-      _houseCache.loadingPromise = null;
+      if (_houseCache.typeId === typeId) _houseCache.loadingPromise = null;
       throw err;
     });
   return _houseCache.loadingPromise;
@@ -966,7 +969,10 @@ function buildScene3d() {
     else if (secId === 'porch')  M.step.color.set(S.activeSample.color);
   }
 
-  const isNoHouse = (S.houseType === 'Участок без дома');
+  // «Пустой участок»: единая проверка isEmptyLot (state.js). Десктоп хранит
+  // 'no_house', легаси — строку; раньше сравнение только со строкой ломало режим
+  // (при 'no_house' рисовался процедурный fallback-дом).
+  const isNoHouse = isEmptyLot();
   // Параметры собираем через dCollectParams (nav-desktop.js) — поддерживает per-floor массивы.
   // Если она недоступна (например, мобильная версия) — fallback на legacy DOM-id'и.
   const collected = (typeof dCollectParams === 'function')
