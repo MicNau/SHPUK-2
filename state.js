@@ -18,6 +18,22 @@ const SECS = [
 
 // Порядок шагов конфигурации (до шага 10)
 // Ключ — id секции, значение — id экрана
+// Маппинг легаси-имён типа дома («человеческие» названия из старого мобильного
+// флоу) → typeId дескриптора ('type_NN') или 'no_house'. ЕДИНЫЙ источник:
+// им пользуются getHouseTypeId (viewer3d-core.js) и dSelHouse (nav-desktop.js) —
+// раньше карта дублировалась в обоих файлах.
+const HOUSE_TYPE_MAP = {
+  'Одноэтажный дом':  'type_01',
+  'Двухэтажный дом':  'type_09',
+  'Дом с мансардой':  'type_10',
+  'Участок без дома': 'no_house',
+};
+
+// Дефолтный rect ступеней (нормализованные 0..1 координаты сетки GRID=32 м):
+// 2×1.5 м у нижнего края дома. Единый источник для стартового состояния S.steps
+// и сбросов (nav-desktop.js) — раньше числа дублировались в трёх местах.
+const DEFAULT_STEPS_RECT = { x: 0.45, y: 0.65, w: 0.0625, h: 0.046875 };
+
 const SEC_SCREEN = {
   terrace:      '6',
   pool_terrace: '6b',
@@ -201,7 +217,7 @@ const S = {
   activeTerraceRect: null, // индекс выбранного rect или null
   // Ступени: один rect (положение + ширина = от пользователя; глубина в 3D
   // пересчитывается автоматически из количества подступенков).
-  steps: { x: 0.45, y: 0.65, w: 0.0625, h: 0.046875 },
+  steps: { ...DEFAULT_STEPS_RECT },
   // Грядки: массив прямоугольников фиксированного размера 3×1 м. Ориентация
   // ортогональная — длинная сторона (3 м) вдоль X (w>h) или вдоль Y (w<h).
   // Размер не меняется (только перемещение + поворот на 90°). Координаты 0..1.
@@ -222,6 +238,11 @@ const S = {
   catSection: null,    // выбранный раздел каталога (bitrix_id) или null = дефолт по элементу
   catShowResults: false,
   estimate: {},        // elementId -> { id, name, price } — выбранный в смету товар по элементу
+  // Тумблеры canvas-редакторов (id из data-id → bool): 'terrace-railing',
+  // 'terrace-roof', 'steps-railing', 'steps-sheathing'… Зеркалируются из DOM
+  // в ttg/_dCacheToggleDefaults — 3D-слой читает ТОЛЬКО отсюда (tgOn), не DOM.
+  toggles: {},
+  pathWidth: 120,      // ширина дорожки, см (инпут v-paths-width зеркалится сюда)
   // Материалы дома (шаг «Параметры дома»).
   roofMat: 'tile',     // tile | metal_green | metal_red
   baseMat: 'concrete', // concrete | stone
@@ -235,6 +256,12 @@ let step = 1;
 // null — тип ещё не выбран (дом тоже не рисуем). Легаси-строка — от старого мобильного флоу.
 function isEmptyLot() {
   return !S.houseType || S.houseType === 'no_house' || S.houseType === 'Участок без дома';
+}
+
+// Состояние тумблера редактора по data-id ('terrace-roof', 'steps-railing'…).
+// Единственный способ чтения тумблеров из 3D-слоя (viewer3d-*): DOM там не трогаем.
+function tgOn(id) {
+  return !!(S.toggles && S.toggles[id]);
 }
 
 // ══════════════════════════════════════════════

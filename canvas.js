@@ -359,8 +359,7 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
   if (excludeName !== 'paths') {
     const pp = S.pts.paths;
     if (pp && pp.length >= 2) {
-      const pathWidthCm = parseFloat(document.getElementById('v-paths-width')?.value || 120);
-      const pathHalfW = (pathWidthCm / 100) / GRID * W / 2;
+      const pathHalfW = ((S.pathWidth || 120) / 100) / GRID * W / 2;
       const segs = splitAtBreaks(pp);
       for (const seg of segs) {
         if (seg.length < 2) continue;
@@ -431,8 +430,7 @@ function drawSnapCanvas(name) {
     const segments = (name==='paths'||name==='fence') ? splitAtBreaks(pts) : [realPts];
 
     if (name === 'paths') {
-      const pathWidthCm = parseFloat(document.getElementById('v-paths-width')?.value || 120);
-      const pathW = (pathWidthCm / 100) / GRID * W;
+      const pathW = ((S.pathWidth || 120) / 100) / GRID * W;
       for (const seg of segments) {
         if (seg.length < 1) continue;
         // Полоса

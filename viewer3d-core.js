@@ -25,22 +25,15 @@ let threeState = null;
 //   currentSlot, animId }
 
 // ══════════════════════════════════════════════
-// МАППИНГ S.houseType → typeId дескриптора
-// (Шаг 1 UI использует «человеческие» имена; дескрипторы лежат под typeId='type_NN'.)
-// «Участок без дома» → null (дом не рендерится).
+// S.houseType → typeId дескриптора
+// (S.houseType: 'type_NN' | 'no_house' | легаси-имя из HOUSE_TYPE_MAP в state.js.)
+// null → дом не рендерится (пустой участок / тип не выбран).
 // ══════════════════════════════════════════════
-const HOUSE_TYPE_MAP = {
-  'Одноэтажный дом':  'type_01',
-  'Двухэтажный дом':  'type_09',
-  'Дом с мансардой':  'type_10',
-  'Участок без дома': null,
-};
-
 function getHouseTypeId() {
-  const name = (typeof S !== 'undefined') ? S.houseType : null;
+  let name = (typeof S !== 'undefined') ? S.houseType : null;
   if (!name) return null;
-  if (name in HOUSE_TYPE_MAP) return HOUSE_TYPE_MAP[name];
-  // Если houseType — это уже typeId (например, для тестов), пропускаем напрямую
+  if (name in HOUSE_TYPE_MAP) name = HOUSE_TYPE_MAP[name];  // легаси-имя → typeId
+  if (name === 'no_house') return null;                     // пустой участок
   if (/^type_\d+$/.test(name)) return name;
   return null;
 }
@@ -999,12 +992,18 @@ function buildScene3d() {
   // Если дескриптор уже загружен — переопределяем houseL/houseW реальными
   // размерами bbox полигона (для крестообразных, T-, L-, П-форм). Также
   // сохраняем bbox.minX/minZ для корректного маппинга канвас→мир.
+  // Полигон считается ОДИН РАЗ на сборку и кэшируется в _housePoly — все
+  // билдеры (доски/ступени/перила/навесы) берут его отсюда, а не пересчитывают
+  // с чтением v-area из DOM (раньше — до 5 повторных вычислений за сборку,
+  // причём с НЕклампованной площадью — мог разойтись с реально построенным домом).
   _houseBboxMinX = 0;
   _houseBboxMinZ = 0;
+  _housePoly = null;
   if (!isNoHouse && typeof HouseBuilder !== 'undefined'
       && typeof HouseBuilder.getHouseFloorPolygon === 'function'
       && _houseCache.desc) {
     const poly = HouseBuilder.getHouseFloorPolygon(_houseCache.desc, { area });
+    _housePoly = poly || null;
     if (poly && poly.bbox) {
       houseL = poly.bbox.maxX - poly.bbox.minX;
       houseW = poly.bbox.maxZ - poly.bbox.minZ;
@@ -1070,16 +1069,12 @@ function buildScene3d() {
     // разбивки на блоки): переднее/заднее крыло → доски вдоль X, боковое → вдоль Z.
     // Fallback (нет дома) — длинная сторона блока.
     let _hEdges = null;
-    if (!isNoHouse && typeof HouseBuilder !== 'undefined'
-        && typeof HouseBuilder.getHouseFloorPolygon === 'function' && _houseCache.desc) {
-      const poly = HouseBuilder.getHouseFloorPolygon(_houseCache.desc,
-        { area: parseFloat(document.getElementById('v-area')?.value || 80) });
-      if (poly && poly.corners && poly.corners.length >= 2) {
-        _hEdges = [];
-        for (let k = 0; k < poly.corners.length; k++) {
-          const a = poly.corners[k], b = poly.corners[(k + 1) % poly.corners.length];
-          _hEdges.push({ ax: a.x, az: a.z, dx: b.x - a.x, dz: b.z - a.z });
-        }
+    if (!isNoHouse && _housePoly && _housePoly.corners && _housePoly.corners.length >= 2) {
+      const poly = _housePoly;
+      _hEdges = [];
+      for (let k = 0; k < poly.corners.length; k++) {
+        const a = poly.corners[k], b = poly.corners[(k + 1) % poly.corners.length];
+        _hEdges.push({ ax: a.x, az: a.z, dx: b.x - a.x, dz: b.z - a.z });
       }
     }
     const plankDir = (cx, cz, fallback) => {
@@ -1201,14 +1196,14 @@ function buildScene3d() {
   });
 
   // Навес строим ДО перил: высоту высоких столбов перила берут рейкастом по готовым плитам навеса.
-  const terraceCanopyOn = document.querySelector('.tg[data-id="terrace-roof"]')?.classList.contains('on');
+  const terraceCanopyOn = tgOn('terrace-roof');
   if (terraceCanopyOn && S.sections.includes('terrace')) {
     try {
       buildTerraceCanopies(houseGroup, M, terraceRectPolys, isNoHouse ? 0.35 : bh, houseL, houseW);
     } catch (e) { console.error('[buildTerraceCanopies]', e); }
   }
 
-  const terraceRailingOn = document.querySelector('.tg[data-id="terrace-railing"]')?.classList.contains('on');
+  const terraceRailingOn = tgOn('terrace-railing');
   if (terraceRailingOn && S.sections.includes('terrace')) {
     if (_railingCache && _railingCache.rails) {
       // Высоту высоких столбов берём по РЕАЛЬНЫМ плитам навеса (рейкаст), а не аналитикой —
@@ -1256,7 +1251,7 @@ function buildScene3d() {
     }
   }
   if (S.sections.includes('paths') && S.pts.paths.filter(p=>!p.break).length >= 2) {
-    const pw2=parseFloat(document.getElementById('v-paths-width')?.value||120)/100;
+    const pw2=(S.pathWidth||120)/100;
     const segs2=(typeof splitAtBreaks==='function')?splitAtBreaks(S.pts.paths):[S.pts.paths.filter(p=>!p.break)];
     for(const seg of segs2){if(seg.length<2)continue; threeState.occupiedZones.push({type:'path',points:canvasToWorld(seg,houseL,houseW),width:pw2});}
   }
@@ -1476,6 +1471,11 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
 // (центрированные по bbox в сетке GRID×GRID) корректно ложились на дом в 3D-мире.
 let _houseBboxMinX = 0;
 let _houseBboxMinZ = 0;
+// Кэш полигона этажа дома на ТЕКУЩУЮ сборку сцены. Ставится в начале buildScene3d
+// (клампованная площадь — та же, с которой строится дом), null на пустом участке
+// или пока дескриптор не загружен. Билдеры читают его вместо повторных
+// HouseBuilder.getHouseFloorPolygon(...) с параметрами из DOM.
+let _housePoly = null;
 
 function canvasToWorld(pts, houseL, houseW) {
   const gridSize=GRID, offsetX=(gridSize-houseL)/2, offsetZ=(gridSize-houseW)/2;
@@ -1871,16 +1871,11 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       for (let i = 0; i < 4; i++) supportEdges.push([tc[i], tc[(i+1)%4]]);
     }
   }
-  if (typeof HouseBuilder !== 'undefined'
-      && typeof HouseBuilder.getHouseFloorPolygon === 'function'
-      && _houseCache.desc) {
-    const params = { area: parseFloat(document.getElementById('v-area')?.value || 80) };
-    const poly = HouseBuilder.getHouseFloorPolygon(_houseCache.desc, params);
-    if (poly && poly.corners) {
-      for (let i = 0; i < poly.corners.length; i++) {
-        const a = poly.corners[i], b = poly.corners[(i+1) % poly.corners.length];
-        supportEdges.push([{ x:a.x, z:a.z }, { x:b.x, z:b.z }]);
-      }
+  if (_housePoly && _housePoly.corners) {
+    const poly = _housePoly;
+    for (let i = 0; i < poly.corners.length; i++) {
+      const a = poly.corners[i], b = poly.corners[(i+1) % poly.corners.length];
+      supportEdges.push([{ x:a.x, z:a.z }, { x:b.x, z:b.z }]);
     }
   }
 
@@ -1919,13 +1914,8 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   }
   // Точка внутри outline дома?
   function insideHouse(pt) {
-    if (typeof HouseBuilder === 'undefined'
-        || typeof HouseBuilder.getHouseFloorPolygon !== 'function'
-        || !_houseCache.desc) return false;
-    const params = { area: parseFloat(document.getElementById('v-area')?.value || 80) };
-    const poly = HouseBuilder.getHouseFloorPolygon(_houseCache.desc, params);
-    if (!poly || !poly.corners) return false;
-    const c = poly.corners;
+    if (!_housePoly || !_housePoly.corners) return false;
+    const c = _housePoly.corners;
     let inside = false;
     for (let i = 0, j = c.length - 1; i < c.length; j = i++) {
       const xi = c[i].x, zi = c[i].z, xj = c[j].x, zj = c[j].z;
@@ -2068,7 +2058,7 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   //       2: ((i+1)·D + N, y_bot_tread_i - TREAD_THICKNESS)  — низ nosing
   //       3: ((i+1)·D + R, y_bot_tread_i - TREAD_THICKNESS)  — низ проступи на передней плоскости подступенка i+1
   //   После последней ступени: (0, 0) — задний-низ.
-  const hasSheathing = !!document.querySelector('.tg[data-id="steps-sheathing"]')?.classList.contains('on');
+  const hasSheathing = tgOn('steps-sheathing');
   if (hasSheathing && THREE.ShapeUtils && typeof THREE.ShapeUtils.triangulateShape === 'function') {
     for (const lateralSign of [-1, +1]) {
       const latX = (bestSide.axisAlong === 'X') ? (cxW + lateralSign * stairWidth / 2) : null;
@@ -2134,7 +2124,7 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   // Перила лестницы (toggle steps-railing) — из того же GLB-модуля, что и ограждение
   // террасы (post / rails / balu_floor). Поручень+нижнее перило идут под РЕЙК (наклон по
   // разнице уровней верх→низ), балясины — вертикальные, нативного сечения, по проступям.
-  const hasRailing = !!document.querySelector('.tg[data-id="steps-railing"]')?.classList.contains('on');
+  const hasRailing = tgOn('steps-railing');
   if (hasRailing) {
     const RC = _railingCache;
     if (!(RC && RC.rails && RC.post && RC.baluFloor)) {
@@ -2427,8 +2417,8 @@ function buildPorch3d(parent,M,porch,houseL,houseW,bh){
   }
 
   // ── Навес и перила — по toggle'ам в canvas-редакторе крыльца ─────────────
-  const hasCanopy  = !!document.querySelector('.tg[data-id="porch-canopy"]')?.classList.contains('on');
-  const hasRailing = !!document.querySelector('.tg[data-id="porch-railing"]')?.classList.contains('on');
+  const hasCanopy  = tgOn('porch-canopy');
+  const hasRailing = tgOn('porch-railing');
   const matCanopy = M.roof   || M.deck;
   const matRail   = M.deck   || M.step;
   const matPost   = M.post   || M.step;
@@ -2729,7 +2719,7 @@ function _trimPathJunctions(lines, halfW) {
 // на полуширину — конец линии примыкает к краю встречной дорожки без наложения.
 function buildPaths3d(parent, M, pts, houseL, houseW) {
   if (pts.filter(p => !p.break).length < 2) return;
-  const pathW = parseFloat(document.getElementById('v-paths-width')?.value || 120) / 100;
+  const pathW = (S.pathWidth || 120) / 100;
   const halfW = pathW / 2, PATH_H = 0.05;
   const group = new THREE.Group();
   const pathMat = (M.deck && M.deck.clone) ? M.deck.clone()
@@ -2879,20 +2869,14 @@ function _railSplitBySkipRanges(ax,az,bx,bz,skipRanges){
   return out;
 }
 
-// Рёбра outline дома (мир).
+// Рёбра outline дома (мир) — из кэша _housePoly текущей сборки.
 function _railHouseEdges(){
   const edges=[];
-  if (typeof HouseBuilder !== 'undefined'
-      && typeof HouseBuilder.getHouseFloorPolygon === 'function'
-      && _houseCache.desc) {
-    const params = { area: parseFloat(document.getElementById('v-area')?.value || 80) };
-    const poly = HouseBuilder.getHouseFloorPolygon(_houseCache.desc, params);
-    if (poly && poly.corners && poly.corners.length >= 3) {
-      const c = poly.corners;
-      for (let i = 0; i < c.length; i++) {
-        const a = c[i], b = c[(i+1)%c.length];
-        edges.push([a.x, a.z, b.x, b.z]);
-      }
+  if (_housePoly && _housePoly.corners && _housePoly.corners.length >= 3) {
+    const c = _housePoly.corners;
+    for (let i = 0; i < c.length; i++) {
+      const a = c[i], b = c[(i+1)%c.length];
+      edges.push([a.x, a.z, b.x, b.z]);
     }
   }
   return edges;
@@ -3240,14 +3224,7 @@ function _terraceCanopyParams(worldPts, houseL, houseW) {
   const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
 
   // Опорная стена дома → ось ridge + сторона (ребро дома, ближайшее к центру bbox).
-  let housePoly = null;
-  if (typeof HouseBuilder !== 'undefined'
-      && typeof HouseBuilder.getHouseFloorPolygon === 'function'
-      && _houseCache.desc) {
-    const params = { area: parseFloat(document.getElementById('v-area')?.value || 80) };
-    const poly = HouseBuilder.getHouseFloorPolygon(_houseCache.desc, params);
-    if (poly && poly.corners) housePoly = poly.corners;
-  }
+  const housePoly = (_housePoly && _housePoly.corners) ? _housePoly.corners : null;
   let ridgeAlongX, ridgeAtMaxZ = false, ridgeAtMaxX = false;
   if (housePoly && housePoly.length >= 2) {
     let bestDist = Infinity, bestPz = cz, bestPx = cx, bestDx = 0, bestDz = 0;
@@ -3407,8 +3384,7 @@ function buildTerraceCanopies(parent, M, rectPolys, deckHeight, houseL, houseW) 
   }
   // Если включено ограждение террасы — опоры навеса даёт само ограждение (высокие
   // столбы каждые ~2.5 м), отдельные колонны навеса не строим (иначе задвоение).
-  const railingOn = !!document.querySelector('.tg[data-id="terrace-railing"]')?.classList.contains('on')
-                    && S.sections.includes('terrace');
+  const railingOn = tgOn('terrace-railing') && S.sections.includes('terrace');
   const useGlbCol = (typeof HouseBuilder !== 'undefined'
                      && HouseBuilder.placeScaledGlb
                      && _houseCache.modules

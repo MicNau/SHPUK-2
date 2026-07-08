@@ -219,7 +219,7 @@ function _dResetAllConfigurations() {
   S.pts = { pool_terrace: [], paths: [], pier: [], fence: [] };
   S.terraceRects = [];
   S.activeTerraceRect = null;
-  S.steps = { x: 0.45, y: 0.65, w: 0.0625, h: 0.046875 };
+  S.steps = { ...DEFAULT_STEPS_RECT };
   S.beds = [];
   S.activeBed = null;
   S.bedH = 0.20;
@@ -238,11 +238,16 @@ function _dResetAllConfigurations() {
   dActiveItem = null;
   dEditorOpen = false;
   // Возвращаем toggle'ы (террасы / крыльца) к дефолтным значениям из HTML
-  // (initial-class "on" → ON). Сбрасываем все .tg в их HTML-дефолт.
+  // (initial-class "on" → ON). Сбрасываем все .tg в их HTML-дефолт + зеркало S.toggles.
   document.querySelectorAll('.d-center-canvas .tg').forEach(tg => {
     const isInitiallyOn = tg.dataset.initialOn === '1';
     tg.classList.toggle('on', isInitiallyOn);
+    if (tg.dataset.id) S.toggles[tg.dataset.id] = isInitiallyOn;
   });
+  // Ширина дорожки — к дефолту (S + инпут).
+  S.pathWidth = 120;
+  const pwInp = document.getElementById('v-paths-width');
+  if (pwInp) pwInp.value = 120;
 }
 
 // Запоминаем стартовое состояние toggle'ов один раз при инициализации UI
@@ -252,6 +257,9 @@ function _dCacheToggleDefaults() {
     if (tg.dataset.initialOn === undefined) {
       tg.dataset.initialOn = tg.classList.contains('on') ? '1' : '0';
     }
+    // Зеркалим стартовое состояние в S.toggles — 3D-слой читает тумблеры
+    // только оттуда (tgOn в state.js), DOM из viewer3d-* не трогается.
+    if (tg.dataset.id) S.toggles[tg.dataset.id] = tg.classList.contains('on');
   });
 }
 
@@ -286,14 +294,7 @@ function dSelectHouseAndGo(typeId) {
 
 // Сохраняем legacy dSelHouse для совместимости (на случай старых вызовов из мобильной/общей логики).
 function dSelHouse(el, name) {
-  // Маппинг старых русских имён на typeId. Можно расширять или удалить когда legacy не нужен.
-  const legacyMap = {
-    'Одноэтажный дом':  'type_01',
-    'Двухэтажный дом':  'type_09',
-    'Дом с мансардой':  'type_10',
-    'Участок без дома': 'no_house',
-  };
-  dSelectHouseAndGo(legacyMap[name] || 'type_01');
+  dSelectHouseAndGo(HOUSE_TYPE_MAP[name] || 'type_01');   // карта — в state.js
 }
 
 // ══════════════════════════════════════════════
@@ -448,9 +449,11 @@ function dOnParam() {
   if (typeof onParamChange === 'function') onParamChange();
 }
 
-// Ширина дорожки: сразу обновляем превью в canvas-редакторе и пересобираем 3D
-// (раньше ширина применялась только при повторном входе в редактор).
+// Ширина дорожки: инпут зеркалится в S.pathWidth (см), затем обновляем превью
+// в canvas-редакторе и пересобираем 3D. Canvas и 3D читают только S.pathWidth.
 function dOnPathWidth() {
+  const v = parseFloat(document.getElementById('v-paths-width')?.value);
+  if (!isNaN(v) && v > 0) S.pathWidth = v;
   if (typeof drawSnapCanvas === 'function') drawSnapCanvas('paths');
   if (typeof onParamChange === 'function') onParamChange();
 }
@@ -563,7 +566,7 @@ function dDeleteItem(secId) {
   // Чистим данные позиции
   if (S.pts && S.pts[secId]) S.pts[secId] = [];
   if (secId === 'terrace') { S.terraceRects = []; S.activeTerraceRect = null; }
-  if (secId === 'steps')   { S.steps = { x: 0.45, y: 0.65, w: 0.0625, h: 0.046875 }; }
+  if (secId === 'steps')   { S.steps = { ...DEFAULT_STEPS_RECT }; }
   if (secId === 'beds')    { S.beds = []; S.activeBed = null; }
   S.sections = S.sections.filter(s => s !== secId);
   if (S.mats && S.mats[secId]) delete S.mats[secId];
@@ -1233,7 +1236,7 @@ function _boardWidthM(name) {
 function _elementMetric(el) {
   if (el === 'terrace') { const a = _rectsAreaM2(S.terraceRects); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'steps')   { const G = _GRIDm(); const a = (S.steps.w * G) * (S.steps.h * G); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
-  if (el === 'paths')   { const len = _polyLenM(S.pts.paths); const w = parseFloat(document.getElementById('v-paths-width')?.value || 120) / 100; const a = len * w; return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
+  if (el === 'paths')   { const len = _polyLenM(S.pts.paths); const w = (S.pathWidth || 120) / 100; const a = len * w; return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'pool_terrace') { const a = _polyAreaM2(S.pts.pool_terrace); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'pier')    { const a = _polyAreaM2(S.pts.pier); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'fence')   { const len = _polyLenM(S.pts.fence); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
@@ -1354,14 +1357,14 @@ const TG_PAIRS = {
 };
 function ttg(el) {
   el.classList.toggle('on');
+  const isOn = el.classList.contains('on');
   const id = el.dataset.id;
+  if (id) S.toggles[id] = isOn;             // зеркало для 3D-слоя (tgOn)
   const partnerId = id && TG_PAIRS[id];
   if (partnerId) {
     const partner = document.querySelector(`.tg[data-id="${partnerId}"]`);
-    if (partner) {
-      const isOn = el.classList.contains('on');
-      partner.classList.toggle('on', isOn);
-    }
+    if (partner) partner.classList.toggle('on', isOn);
+    S.toggles[partnerId] = isOn;
   }
 }
 
