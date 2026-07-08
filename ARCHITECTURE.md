@@ -32,8 +32,10 @@
   nav-desktop.js          # dGoTo, sidebar, canvas editors, right panel, catalog,
                           # карусель домов + прогресс-каунтер генерации превью
 
-/frontend — legacy мобильные файлы (мобильный wizard удалён, файлы оставлены)
-  styles.css, nav.js, ui.js, catalog.js  # не подключены ни одним HTML
+/frontend — legacy мобильные файлы УДАЛЕНЫ (styles.css, nav.js, ui.js, catalog.js
+  не были подключены ни одним HTML; лежат в git-истории). Вместе с ними удалены
+  мёртвые заглушки совместимости в nav-desktop.js (goTo/updProg/selHouse/tci/
+  renderSec/renderSwatches) и константы SEC_SCREEN/CATALOG_COLORS/TOTAL/step.
 
 /frontend — общие файлы
   state.js                # S (+ elementMat, estimate, catSection, beds, bedH, fenceH), SECS,
@@ -548,6 +550,16 @@ CREATE TABLE projects (
 ---
 
 ## Recent cleanup (tech debt)
+
+Сделано в итерации v=116 (рефакторинг по код-ревью, пп. 7–13):
+
+- **3D-слой не читает DOM (п.7).** Тумблеры редакторов зеркалятся в `S.toggles` (в `ttg`/`_dCacheToggleDefaults`/сбросе), 3D читает через `tgOn(id)` (state.js); ширина дорожки — `S.pathWidth` (canvas и 3D берут только из S). Полигон этажа дома считается один раз за сборку и кэшируется в `_housePoly` — билдеры берут его из кэша вместо ≤5 повторных `getHouseFloorPolygon` с чтением `v-area` из DOM (заодно ушло расхождение клампованной/сырой площади между домом и конструкциями).
+- **Дедуп констант (п.8).** `HOUSE_TYPE_MAP` — единый источник в state.js ('Участок без дома' → 'no_house'); `DEFAULT_STEPS_RECT` вместо трёх копий чисел.
+- **Разрез viewer3d-core.js (п.9).** 3.4 тыс. строк → `viewer3d-core.js` (сцена/материалы/UV/оркестратор buildScene3d) + `viewer3d-builders.js` (дом-fallback, настилы, грядки, ступени, крыльцо, дорожки, забор) + `viewer3d-railing.js` (периметр, ограждение GLB, навесы). Код перенесён без изменений; общая глобальная область видимости, важен порядок подключения (см. «Порядок подключения скриптов»).
+- **Легаси удалено (п.10).** nav.js, ui.js, catalog.js, styles.css (не подключались; в git-истории), no-op заглушки совместимости в nav-desktop.js, мёртвые `SEC_SCREEN`/`CATALOG_COLORS`/`TOTAL`/`step` в state.js. Репозиторий git уже существовал (origin: MicNau/SHPUK-2).
+- **_loadTex без placeholder-хака (п.11).** `TextureLoader.load` возвращает текстуру сразу — placeholder + `Object.assign` (копировал id/uuid, путал кэши рендерера) убраны; три загрузчика сведены к `_loadTexBase`.
+- **Мягкий сброс шага 2 (п.13).** Проект обнуляется только если при возврате в workspace изменился КОНТУР дома (тип/площади — `_dParamsSig`); высоты этажа/фундамента сброса не вызывают. Введённые значения параметров при повторном входе на шаг 2 сохраняются (`keepValues` в `_dRenderFloorParams`).
+- Cache-bust: `state.js?v=25`, `canvas.js?v=26`, `nav-desktop.js?v=44`, `viewer3d-core.js?v=116` + новые `viewer3d-builders.js?v=1`, `viewer3d-railing.js?v=1`.
 
 Сделано в итерации v=115 (фиксы код-ревью: пустой участок, дубли слушателей, цвето-фильтр):
 

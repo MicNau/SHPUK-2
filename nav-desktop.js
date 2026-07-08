@@ -293,10 +293,6 @@ function dSelectHouseAndGo(typeId) {
   dGoTo(2);
 }
 
-// Сохраняем legacy dSelHouse для совместимости (на случай старых вызовов из мобильной/общей логики).
-function dSelHouse(el, name) {
-  dSelectHouseAndGo(HOUSE_TYPE_MAP[name] || 'type_01');   // карта — в state.js
-}
 
 // ══════════════════════════════════════════════
 // STEP 2 — Parameters + 3D
@@ -1369,16 +1365,11 @@ function dCloseSummary() {
 }
 
 // ══════════════════════════════════════════════
-// COMPATIBILITY — overrides for mobile nav functions
+// TOGGLES / ACTIVE SECTION
+// (Слой совместимости с мобильным флоу удалён вместе с nav.js/ui.js/catalog.js —
+// no-op заглушки goTo/updProg/selHouse/tci/renderSec/renderSwatches никого не
+// обслуживали. getActive и ttg остаются: их использует viewer3d и index.html.)
 // ══════════════════════════════════════════════
-function goTo(s) { /* no-op on desktop */ }
-function updProg() { /* no-op */ }
-function goToConditional() { /* no-op */ }
-function goToAfter() { /* no-op */ }
-function goToPrev() { /* no-op */ }
-function goBack10() { /* no-op */ }
-function selHouse(el, name) { dSelHouse(el, name); }
-function tci(el) { el.classList.toggle('checked'); }
 // Парные toggle'ы крыльца ↔ террасы: навес и ограждение синхронизируются автоматически.
 const TG_PAIRS = {
   'porch-canopy':    'terrace-roof',
@@ -1398,10 +1389,6 @@ function ttg(el) {
     S.toggles[partnerId] = isOn;
   }
 }
-
-// Override renderSec/renderSwatches for desktop
-function renderSec() { _dRenderPanelContent(); }
-function renderSwatches() { dRenderSwatches(); }
 
 // getActive() — returns the currently active section for material application
 function getActive() {

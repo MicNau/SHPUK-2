@@ -16,12 +16,10 @@ const SECS = [
   {id:'pier',         lbl:'Причал',             req:'pier'},
 ];
 
-// Порядок шагов конфигурации (до шага 10)
-// Ключ — id секции, значение — id экрана
 // Маппинг легаси-имён типа дома («человеческие» названия из старого мобильного
-// флоу) → typeId дескриптора ('type_NN') или 'no_house'. ЕДИНЫЙ источник:
-// им пользуются getHouseTypeId (viewer3d-core.js) и dSelHouse (nav-desktop.js) —
-// раньше карта дублировалась в обоих файлах.
+// флоу) → typeId дескриптора ('type_NN') или 'no_house'. Единый источник —
+// им пользуется getHouseTypeId (viewer3d-core.js): в S.houseType легаси-строка
+// может остаться от старых сохранений/вызовов.
 const HOUSE_TYPE_MAP = {
   'Одноэтажный дом':  'type_01',
   'Двухэтажный дом':  'type_09',
@@ -34,35 +32,8 @@ const HOUSE_TYPE_MAP = {
 // и сбросов (nav-desktop.js) — раньше числа дублировались в трёх местах.
 const DEFAULT_STEPS_RECT = { x: 0.45, y: 0.65, w: 0.0625, h: 0.046875 };
 
-const SEC_SCREEN = {
-  terrace:      '6',
-  pool_terrace: '6b',
-  paths:        '6c',
-  pier:         '6d',
-  porch:        '7',
-  fence:        '8',
-  // facade убран — сразу переходит к шагу 10
-};
-
-// 16 цветов для фильтра
-const CATALOG_COLORS = [
-  {id:'c1',  hex:'#5C3317', label:'Тёмный дуб'},
-  {id:'c2',  hex:'#8B6331', label:'Светлый дуб'},
-  {id:'c3',  hex:'#C8A96E', label:'Натуральный'},
-  {id:'c4',  hex:'#F5DEB3', label:'Пшеничный'},
-  {id:'c5',  hex:'#E8D5B0', label:'Сосна'},
-  {id:'c6',  hex:'#D2B48C', label:'Бежевый'},
-  {id:'c7',  hex:'#A0522D', label:'Терракот'},
-  {id:'c8',  hex:'#704214', label:'Шоколад'},
-  {id:'c9',  hex:'#3D2B1F', label:'Венге'},
-  {id:'c10', hex:'#1C1C1C', label:'Антрацит'},
-  {id:'c11', hex:'#808080', label:'Серый'},
-  {id:'c12', hex:'#B0C4B1', label:'Зелёный'},
-  {id:'c13', hex:'#E0E0E0', label:'Светло-серый'},
-  {id:'c14', hex:'#F5F5F5', label:'Белый'},
-  {id:'c15', hex:'#C0A080', label:'Тауп'},
-  {id:'c16', hex:'#9B7653', label:'Орех'},
-];
+// (SEC_SCREEN и CATALOG_COLORS удалены вместе с мобильным флоу: порядок экранов
+// wizard'а и 16-цветный фильтр использовались только nav.js/catalog.js.)
 
 // Палитра именованных цветов каталога (имя → hex). Имена — из COLORS.md.
 const CATALOG_COLOR_HEX = {
@@ -248,8 +219,7 @@ const S = {
   baseMat: 'concrete', // concrete | stone
   wallMat: 'stucco',   // stucco | brick | siding
 };
-const TOTAL = 10;
-let step = 1;
+// (TOTAL и глобальный step удалены — прогресс-бар мобильного wizard'а.)
 
 // Участок без дома. Единый источник истины для canvas.js / viewer3d-core.js:
 // десктоп хранит в S.houseType typeId ('type_NN') или 'no_house' («Пустой участок»);
