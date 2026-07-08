@@ -211,8 +211,9 @@ function _dApplyPreviewToCard(typeId, dataURL) {
 
 // Полный сброс ВСЕХ настроек проекта: конструкции (терраса/крыльцо/дорожки/забор/
 // грядки/…), материалы по элементам, смета, накопленные образцы, каталожные фильтры
-// и UI-состояние. Вызывается при смене типа дома И при переходе к «Размеры дома»
-// (шаг 2) — меняя габариты дома, всё размещённое становится невалидным.
+// и UI-состояние. Вызывается при смене типа дома И при возврате в workspace с
+// ИЗМЕНЁННЫМ контуром дома (площади — см. _dInitWorkspace): размещённое становится
+// невалидным. Просто заглянуть на шаг 2 и вернуться — сброса НЕ вызывает.
 // 3D-объекты удаляются при следующей пересборке сцены (buildScene3d чистит houseGroup).
 function _dResetAllConfigurations() {
   S.sections = [];
@@ -301,10 +302,11 @@ function dSelHouse(el, name) {
 // STEP 2 — Parameters + 3D
 // ══════════════════════════════════════════════
 function _dInitParamsView() {
-  // Переход к «Размеры дома» обнуляет ВСЕ настройки проекта и удаляет 3D-объекты:
-  // меняя габариты дома, размещённые конструкции/материалы становятся невалидными.
-  _dResetAllConfigurations();
-  // Перерендерим параметры по дескриптору (если уже загружен) или по дефолтам.
+  // Мягкий сброс: раньше вход на шаг 2 обнулял проект БЕЗУСЛОВНО (даже «зашёл
+  // посмотреть и вернулся»). Теперь сброс происходит при возврате в workspace и
+  // только если контур дома реально изменился — см. _dParamsSig в _dInitWorkspace.
+  // Перерендерим параметры по дескриптору (если уже загружен) или по дефолтам;
+  // введённые значения при том же типе дома сохраняются (keepValues).
   _dRenderFloorParams();
   _dRenderHouseMaterials();
   _dSyncRanges();
@@ -345,9 +347,17 @@ function dSetHouseMat(kind, id) {
 
 // Рендерит per-floor контролы (высота этажа + площадь этажа) на основе дескриптора.
 // Глобальный area-слайдер служит для синхронной установки площадей всех этажей.
+// При повторном входе на шаг 2 с ТЕМ ЖЕ типом дома введённые значения сохраняются
+// (keepValues); дефолты ставятся только после смены типа.
+let _dFloorParamsType = null;   // тип дома, для которого параметры отрисованы
+
 function _dRenderFloorParams() {
   const cont = document.getElementById('d-floors-params');
   if (!cont) return;
+  const keepValues = (_dFloorParamsType === S.houseType);
+  const prev = {};
+  cont.querySelectorAll('input[id]').forEach(inp => { prev[inp.id] = inp.value; });
+  const prevArea = document.getElementById('v-area')?.value;
   cont.innerHTML = '';
   // Возьмём дескриптор из кэша HouseBuilder (если уже загружен), иначе пропустим.
   const desc = (typeof _houseCache !== 'undefined' && _houseCache.desc) ? _houseCache.desc : null;
@@ -361,8 +371,9 @@ function _dRenderFloorParams() {
     const a = firstFloor.constraints.area;
     const aInp = document.getElementById('v-area'), aRng = document.getElementById('r-area');
     const hint = document.getElementById('d-area-range-hint');
-    if (aInp) { aInp.min = a.min; aInp.max = a.max; aInp.value = a.default; }
-    if (aRng) { aRng.min = a.min; aRng.max = a.max; aRng.step = a.step || 5; aRng.value = a.default; }
+    const aVal = (keepValues && prevArea) ? prevArea : a.default;
+    if (aInp) { aInp.min = a.min; aInp.max = a.max; aInp.value = aVal; }
+    if (aRng) { aRng.min = a.min; aRng.max = a.max; aRng.step = a.step || 5; aRng.value = aVal; }
     if (hint) hint.textContent = `${a.min} — ${a.max} кв.м`;
   }
   // Per-floor: для каждого этажа — высота этажа + площадь этажа.
@@ -374,6 +385,8 @@ function _dRenderFloorParams() {
     const factor = (floor.area_factor !== undefined) ? floor.area_factor : 1.0;
     const aDefault = aConstr ? aConstr.default : Math.round((firstFloor?.constraints?.area?.default || 80) * factor);
     const hDefault = hConstr ? hConstr.default : 300;
+    const aVal = (keepValues && prev[`v-area-${fi}`] !== undefined) ? prev[`v-area-${fi}`] : aDefault;
+    const hVal = (keepValues && prev[`v-floor-${fi}`] !== undefined) ? prev[`v-floor-${fi}`] : hDefault;
 
     const wrap = document.createElement('div');
     wrap.className = 'd-param-group';
@@ -382,18 +395,19 @@ function _dRenderFloorParams() {
     wrap.innerHTML = `
       <div class="d-param-label" style="font-weight: 600; margin-bottom: 6px;">${label}</div>
       <div class="d-param-sublabel" style="font-size: 12px; color: #666; margin-bottom: 4px;">Высота этажа (см)</div>
-      <input class="d-param-input" type="number" id="v-floor-${fi}" value="${hDefault}" min="${hConstr?.min ?? 270}" max="${hConstr?.max ?? 360}"
+      <input class="d-param-input" type="number" id="v-floor-${fi}" value="${hVal}" min="${hConstr?.min ?? 270}" max="${hConstr?.max ?? 360}"
              oninput="dOnFloorParam(${fi})">
-      <input class="d-param-range" type="range" id="r-floor-${fi}" value="${hDefault}" min="${hConstr?.min ?? 270}" max="${hConstr?.max ?? 360}" step="${hConstr?.step ?? 10}"
+      <input class="d-param-range" type="range" id="r-floor-${fi}" value="${hVal}" min="${hConstr?.min ?? 270}" max="${hConstr?.max ?? 360}" step="${hConstr?.step ?? 10}"
              oninput="document.getElementById('v-floor-${fi}').value=this.value; dOnFloorParam(${fi})">
       <div class="d-param-sublabel" style="font-size: 12px; color: #666; margin: 8px 0 4px;">Площадь этажа (кв.м)</div>
-      <input class="d-param-input" type="number" id="v-area-${fi}" value="${aDefault}" min="${aConstr?.min ?? 40}" max="${aConstr?.max ?? 140}"
+      <input class="d-param-input" type="number" id="v-area-${fi}" value="${aVal}" min="${aConstr?.min ?? 40}" max="${aConstr?.max ?? 140}"
              oninput="dOnFloorParam(${fi})">
-      <input class="d-param-range" type="range" id="r-area-${fi}" value="${aDefault}" min="${aConstr?.min ?? 40}" max="${aConstr?.max ?? 140}" step="${aConstr?.step ?? 5}"
+      <input class="d-param-range" type="range" id="r-area-${fi}" value="${aVal}" min="${aConstr?.min ?? 40}" max="${aConstr?.max ?? 140}" step="${aConstr?.step ?? 5}"
              oninput="document.getElementById('v-area-${fi}').value=this.value; dOnFloorParam(${fi})">
     `;
     cont.appendChild(wrap);
   });
+  _dFloorParamsType = S.houseType;
 }
 
 // Изменение глобального area: распространяется на все этажи по их area_factor.
@@ -515,7 +529,24 @@ function dCollectParams() {
 // ══════════════════════════════════════════════
 // STEP 3 — Workspace
 // ══════════════════════════════════════════════
+// Сигнатура параметров, определяющих КОНТУР дома (площади), на момент последнего
+// входа в workspace. Высота этажа/фундамента контур не меняют — их правка проект
+// не сбрасывает (3D пересобирается сам).
+let _dParamsSig = null;
+
+function _dParamsSignature() {
+  const c = (typeof dCollectParams === 'function') ? dCollectParams() : null;
+  return c ? JSON.stringify({ houseType: S.houseType, area: c.area, floorAreas: c.floorAreas }) : null;
+}
+
 function _dInitWorkspace() {
+  // Мягкий сброс: проект обнуляется только если контур дома изменился с прошлого
+  // входа в workspace (площади / тип). «Сходил на шаг 2 посмотреть и вернулся» —
+  // ничего не трогает.
+  const sig = _dParamsSignature();
+  if (_dParamsSig !== null && sig !== _dParamsSig) _dResetAllConfigurations();
+  _dParamsSig = sig;
+
   dActiveItem = null;
   dEditorOpen = false;
   _dCloseAllCanvases();

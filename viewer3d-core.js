@@ -76,83 +76,45 @@ function rebuildHouseAsync() {
 
 // ══════════════════════════════════════════════
 // ЗАГРУЗКА ТЕКСТУР
-// Возвращает текстуру из файла или null (тихо).
+// Возвращает текстуру сразу (TextureLoader.load отдаёт объект синхронно и
+// дозаполняет image по загрузке — стандартный паттерн three.js). Раньше здесь
+// был placeholder + Object.assign(placeholder, tex): assign копировал id/uuid
+// чужой текстуры и путал внутренние кэши рендерера (ловили на текстуре земли).
 // Кэш: повторные вызовы с тем же путём отдают тот же объект.
+// При ошибке загрузки текстура остаётся пустой — материал рендерится цветом.
 // ══════════════════════════════════════════════
-function _loadTex(filename, repeat = 4, onLoad = null) {
+function _loadTexBase(cachePrefix, filename, repeat, encoding, onLoad) {
   if (!threeState) return null;
   const cache = threeState.texCache;
-  const key = filename + '_' + repeat;
+  const key = cachePrefix + filename + '_' + repeat;
   if (cache[key]) { if (onLoad) onLoad(cache[key]); return cache[key]; }
 
-  const loader = new THREE.TextureLoader();
-  // Создаём placeholder-текстуру (1×1 белый пиксель) чтобы вернуть сразу
-  const placeholder = new THREE.Texture();
-  placeholder.needsUpdate = false;
-
-  loader.load(
+  const tex = new THREE.TextureLoader().load(
     ASSETS + filename,
-    (tex) => {
-      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(repeat, repeat);
-      tex.encoding = THREE.sRGBEncoding;
-      // Копируем в placeholder чтобы обновить уже выданные материалы
-      Object.assign(placeholder, tex);
-      placeholder.image = tex.image;
-      placeholder.needsUpdate = true;
-      cache[key] = placeholder;
-      if (onLoad) onLoad(placeholder);
-    },
+    (t) => { if (onLoad) onLoad(t); },   // t === tex (тот же объект)
     undefined,
     () => { /* файл не найден — тихо, материал останется однотонным */ }
   );
-
-  cache[key] = placeholder;
-  return placeholder;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeat, repeat);
+  tex.encoding = encoding;
+  cache[key] = tex;
+  return tex;
 }
 
-// Загружает normal-map (без sRGB encoding)
+// Albedo (sRGB)
+function _loadTex(filename, repeat = 4, onLoad = null) {
+  return _loadTexBase('', filename, repeat, THREE.sRGBEncoding, onLoad);
+}
+
+// Normal-map (linear — sRGB не нужен)
 function _loadNorm(filename, repeat = 4) {
-  if (!threeState) return null;
-  const cache = threeState.texCache;
-  const key = 'norm_' + filename + '_' + repeat;
-  if (cache[key]) return cache[key];
-
-  const loader = new THREE.TextureLoader();
-  const placeholder = new THREE.Texture();
-  loader.load(ASSETS + filename, (tex) => {
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(repeat, repeat);
-    // Normal maps НЕ нужен sRGB
-    Object.assign(placeholder, tex);
-    placeholder.image = tex.image;
-    placeholder.needsUpdate = true;
-    cache[key] = placeholder;
-  }, undefined, () => {});
-  cache[key] = placeholder;
-  return placeholder;
+  return _loadTexBase('norm_', filename, repeat, THREE.LinearEncoding, null);
 }
 
-// Загружает roughness/AO (LinearEncoding)
+// Roughness/AO (linear)
 function _loadData(filename, repeat = 4) {
-  if (!threeState) return null;
-  const cache = threeState.texCache;
-  const key = 'data_' + filename + '_' + repeat;
-  if (cache[key]) return cache[key];
-
-  const loader = new THREE.TextureLoader();
-  const placeholder = new THREE.Texture();
-  loader.load(ASSETS + filename, (tex) => {
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(repeat, repeat);
-    tex.encoding = THREE.LinearEncoding;
-    Object.assign(placeholder, tex);
-    placeholder.image = tex.image;
-    placeholder.needsUpdate = true;
-    cache[key] = placeholder;
-  }, undefined, () => {});
-  cache[key] = placeholder;
-  return placeholder;
+  return _loadTexBase('data_', filename, repeat, THREE.LinearEncoding, null);
 }
 
 // ══════════════════════════════════════════════
