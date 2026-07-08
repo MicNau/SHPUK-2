@@ -43,11 +43,15 @@
   ResourceManager.js      # клиент каталожного API sollersdev.ru (ResourceManager, Filter,
                           # FilterType, Presets, ProductResource). Домен — глобал RESOURCE_API_DOMAIN.
   canvas.js               # pan/zoom движок, snap-canvas, крыльцо (drag+resize), грядки (beds)
-  viewer3d-core.js        # сцена, HDRI, PBR-материалы, buildScene3d.
+  viewer3d-core.js        # ядро 3D: сцена, HDRI, PBR-материалы, UV, buildScene3d-оркестратор.
                           # Дом строится через HouseBuilder.buildHouseFromDescriptor (см. shared/house-builder.js);
-                          # старый процедурный buildHouseMeshes остаётся как fallback пока loadHouseType в полёте.
-                          # HOUSE_TYPE_MAP маппит S.houseType → typeId дескриптора.
                           # ensureHouseLoaded() — async-кэш дескриптора и GLB-модулей.
+                          # _housePoly — кэш полигона этажа на сборку (билдеры не пересчитывают).
+  viewer3d-builders.js    # строители конструкций (выделен из core): дом-fallback
+                          # (buildHouseMeshes), настилы/подкладки, грядки, кэш GLB
+                          # ограждения, ступени, крыльцо, дорожки, забор
+  viewer3d-railing.js     # периметр террасы (skip-диапазоны), union-контур блоков,
+                          # buildRailing3d (GLB mod_railing), навесы террасы
   viewer3d-entourage.js   # антураж (общий для обеих платформ): GLB-модели → PNG cross-billboard → процедурный fallback;
                           # автоматически определяет IS_MOBILE (UA + ширина окна) для подбора параметров
   shared/house-builder.js # ⭐ Общий модуль модульной сборки дома по JSON-дескриптору.
@@ -132,7 +136,12 @@ Three.js r128 → OrbitControls → RGBELoader → EXRLoader → GLTFLoader
 state.js → canvas.js
 → shared/house-builder.js
 → RESOURCE_API_DOMAIN (inline) → ResourceManager.js  (каталожный API; зависит от THREE)
-→ viewer3d-core.js → viewer3d-entourage.js → nav-desktop.js
+→ viewer3d-core.js → viewer3d-builders.js → viewer3d-railing.js
+→ viewer3d-entourage.js → nav-desktop.js
+
+viewer3d-core/builders/railing — classic scripts с общей глобальной областью
+видимости; кросс-файловые обращения только на этапе вызова (runtime), поэтому
+важен лишь порядок подключения.
 ```
 
 **Тестовая песочница (test-house.html):**
