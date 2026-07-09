@@ -910,7 +910,8 @@ function buildScene3d() {
   threeState.railingMeshes = [];
   threeState.canopyMeshes  = [];
   threeState.bedMeshes     = [];
-  threeState.facadeSegs    = [];      // вертикальные сегменты стен (segId) — соберём после сборки дома
+  threeState.facadeSegs    = [];      // элементы фасада (segId) — соберём после сборки дома
+  threeState.facadePillars = [];      // угловые столбы (facadePillar) — отделка «под ближайшую вставку»
   threeState._facadePanelMat = null;  // материал панелей уже диспознут clearGroup'ом выше
 
   const M = getHouseMats();
@@ -1283,14 +1284,37 @@ function clearGroup(group, disposeMaterials) {
 // shared/house-builder.js). Выбор — S.wallZones (segId → true); материал панелей —
 // S.elementMat.facade. Пустой выбор при заданном материале = «весь фасад».
 // Клик в 3D в режиме S.facadeMode тоглит сегмент (drag/orbit кликом не считается).
+// Оконные колонки (стена над/под проёмом) — два меша с ОБЩИМ segId (`:o{n}`).
+// Угловые столбы (userData.facadePillar) не выбираются сами — отделываются
+// АВТОМАТИЧЕСКИ «под ближайшую вставку»: если любой примыкающий (bbox-касание)
+// элемент фасада выбран под панели, столб красится вместе с ним.
 // Фронтоны/мансардные стены segId не имеют и под отделку не выбираются.
 // ══════════════════════════════════════════════
 const FACADE_SELECT_EMISSIVE = 0x2f6fd8;   // подсветка выбранных сегментов в режиме фасада
 
 function _collectFacadeSegments(root) {
-  const segs = [];
-  root.traverse(o => { if (o.userData && o.userData.segId) segs.push(o); });
+  const segs = [], pillars = [];
+  root.traverse(o => {
+    if (!o.userData) return;
+    if (o.userData.segId) segs.push(o);
+    else if (o.userData.facadePillar) pillars.push(o);
+  });
   threeState.facadeSegs = segs;
+  threeState.facadePillars = pillars;
+  // Смежность столбов с элементами фасада (bbox-касание с допуском) — один раз
+  // на пересборку; по ней столб следует за состоянием соседних вставок.
+  if (pillars.length && segs.length) {
+    root.updateMatrixWorld(true);
+    const segBoxes = segs.map(s => ({ id: s.userData.segId, box: new THREE.Box3().setFromObject(s) }));
+    for (const p of pillars) {
+      const pb = new THREE.Box3().setFromObject(p).expandByScalar(0.08);
+      const adj = new Set();
+      for (const sb of segBoxes) if (pb.intersectsBox(sb.box)) adj.add(sb.id);
+      p.userData._adjIds = [...adj];
+    }
+  } else {
+    for (const p of pillars) p.userData._adjIds = [];
+  }
 }
 
 // Материал панелей отделки из S.elementMat.facade: PBR-текстуры товара каталога
@@ -1327,10 +1351,10 @@ function _applyFacadeSelection() {
     panel.emissive = new THREE.Color(FACADE_SELECT_EMISSIVE);
     panel.emissiveIntensity = 0.35;
   }
-  for (const seg of threeState.facadeSegs) {
-    const selected = !!zones[seg.userData.segId];
-    const usePanel = !!panel && (selected || selCount === 0);
-    seg.traverse(o => {
+  // Общий раскрасчик: панель (с одноразовым мировым UV) либо родной материал
+  // (+ подсветка на его собственном материале — cloneModule клонирует per-mesh).
+  const paint = (rootObj, usePanel, highlight) => {
+    rootObj.traverse(o => {
       if (!o.isMesh || !o.material) return;
       if (!o.userData._baseMat) o.userData._baseMat = o.material;
       if (usePanel) {
@@ -1338,25 +1362,44 @@ function _applyFacadeSelection() {
         o.material = panel;
       } else {
         o.material = o.userData._baseMat;
-        // Подсветка выбранного сегмента без материала — на его собственном
-        // материале (cloneModule клонирует материалы per-mesh, чужих не заденем).
         if (o.material.emissive !== undefined) {
-          o.material.emissive.setHex(facadeMode && selected ? FACADE_SELECT_EMISSIVE : 0x000000);
+          o.material.emissive.setHex(highlight ? FACADE_SELECT_EMISSIVE : 0x000000);
           o.material.emissiveIntensity = 0.35;
         }
       }
     });
+  };
+
+  for (const seg of threeState.facadeSegs) {
+    const selected = !!zones[seg.userData.segId];
+    paint(seg, !!panel && (selected || selCount === 0), facadeMode && selected);
+  }
+
+  // Угловые столбы — «под ближайшую вставку»: включён, если пустой выбор
+  // (весь фасад) или выбран любой примыкающий элемент. Флаг _facadeOn читает
+  // facadeSelectedAreaM2 (площадь столба попадает в смету вместе со вставкой).
+  for (const p of (threeState.facadePillars || [])) {
+    const on = selCount === 0 || (p.userData._adjIds || []).some(id => zones[id]);
+    p.userData._facadeOn = on;
+    paint(p, !!panel && on, facadeMode && selCount > 0 && on);
   }
 }
 
-// Площадь сегментов под отделку (м²) для сметы; пустой выбор = весь фасад.
+// Площадь элементов под отделку (м²) для сметы; пустой выбор = весь фасад.
+// Оконная колонка — два меша с общим segId и СВОИМИ segH (перемычка/подоконник),
+// сумма по мешам даёт точную площадь без задвоения. Угловые столбы добавляются
+// по флагу _facadeOn (выставляет _applyFacadeSelection).
 function facadeSelectedAreaM2() {
   const segs = (threeState && threeState.facadeSegs) || [];
   if (!segs.length) return 0;
   const zones = (typeof S !== 'undefined' && S.wallZones) ? S.wallZones : {};
   const sel = segs.filter(s => zones[s.userData.segId]);
   const list = sel.length ? sel : segs;
-  return list.reduce((a, s) => a + (s.userData.segW || 0) * (s.userData.segH || 0), 0);
+  let a = list.reduce((s, o) => s + (o.userData.segW || 0) * (o.userData.segH || 0), 0);
+  for (const p of ((threeState && threeState.facadePillars) || [])) {
+    if (p.userData._facadeOn) a += (p.userData.segW || 0) * (p.userData.segH || 0);
+  }
+  return a;
 }
 
 // ── Пикинг сегментов кликом в 3D ──

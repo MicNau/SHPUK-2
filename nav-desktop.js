@@ -617,10 +617,12 @@ function _dSyncFacadeMode() {
 function _dUpdateFacadeBar() {
   const el = document.getElementById('d-facade-count');
   if (!el) return;
-  const total = (typeof threeState !== 'undefined' && threeState && threeState.facadeSegs)
-    ? threeState.facadeSegs.length : 0;
+  // Уникальные id: оконная колонка (стена над/под окном) — два меша с общим segId.
+  const segs = (typeof threeState !== 'undefined' && threeState && threeState.facadeSegs) || [];
+  const total = new Set(segs.map(s => s.userData.segId)).size;
   const n = Object.keys(S.wallZones || {}).length;
-  el.textContent = n ? `Выбрано: ${n} из ${total}` : 'Ничего не выбрано — материал ляжет на весь фасад';
+  el.textContent = n ? `Выбрано: ${n} из ${total} (углы — автоматически)`
+                     : 'Ничего не выбрано — материал ляжет на весь фасад';
 }
 
 // Перерисовать план-редактор фасада, если он сейчас открыт.

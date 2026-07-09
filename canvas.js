@@ -225,14 +225,18 @@ function getHousePolygonNorm() {
 // что кладёт buildEdgeWall при 3D-сборке → выбор сегмента на плане и в 3D
 // работает с одним S.wallZones. Кэш по (desc, area) — пересчёт только при смене.
 // ══════════════════════════════════════════════
-let _hwtCache = null;   // { desc, area, T }
+let _hwtCache = null;   // { desc, key, T }
 
 function _houseWorldTransform() {
   const desc = (typeof _houseCache !== 'undefined' && _houseCache.desc) ? _houseCache.desc : null;
   if (!desc || typeof HouseBuilder === 'undefined' || !HouseBuilder.getHouseFacadeLayout) return null;
-  const area = parseFloat(document.getElementById('v-area')?.value || 80);
-  if (_hwtCache && _hwtCache.desc === desc && _hwtCache.area === area) return _hwtCache.T;
-  const layout = HouseBuilder.getHouseFacadeLayout(desc, { area });
+  // Полные параметры (включая высоту этажа — от неё зависит, есть ли у проёма
+  // стена над окном, т.е. выбираемая оконная колонка).
+  const params = (typeof dCollectParams === 'function') ? dCollectParams()
+               : { area: parseFloat(document.getElementById('v-area')?.value || 80) };
+  const key = `${params.area}|${(params.floorHs && params.floorHs[0]) || params.floorH || ''}`;
+  if (_hwtCache && _hwtCache.desc === desc && _hwtCache.key === key) return _hwtCache.T;
+  const layout = HouseBuilder.getHouseFacadeLayout(desc, params);
   if (!layout) return null;
   // Центрирование bbox в сетке GRID — как в getHousePolygonNorm (общая система).
   const b = layout.bbox;
@@ -243,7 +247,7 @@ function _houseWorldTransform() {
     toNorm:  (x, z)   => ({ x: (x + offX) / GRID, y: (z + offZ) / GRID }),
     toWorld: (nx, ny) => ({ x: nx * GRID - offX,  z: ny * GRID - offZ  }),
   };
-  _hwtCache = { desc, area, T };
+  _hwtCache = { desc, key, T };
   return T;
 }
 
@@ -618,8 +622,9 @@ function initFacadeCanvas() {
   });
 }
 
-// Поиск сегмента стены по клику (нормализованные координаты плана): проекция на
-// ось ребра внутри [start, start+width] + перпендикуляр ближе порога.
+// Поиск элемента фасада по клику (нормализованные координаты плана): проекция на
+// ось ребра внутри [start, start+width] + перпендикуляр ближе порога. Выбираются
+// и wall-сегменты, и оконные колонки (проёмы с segId — стена над/под окном).
 function _facadeHitSegment(nx, ny) {
   const T = _houseWorldTransform(); if (!T) return null;
   const p = T.toWorld(nx, ny);
@@ -630,7 +635,7 @@ function _facadeHitSegment(nx, ny) {
     const perp = Math.abs((p.x - e.x) * -e.dz + (p.z - e.z) * e.dx);
     if (perp > thr) continue;
     for (const it of e.items) {
-      if (it.type !== 'wall' || !it.segId) continue;
+      if (!it.segId) continue;
       if (t < it.start - 0.05 || t > it.start + it.width + 0.05) continue;
       if (perp < bestD) { bestD = perp; best = it.segId; }
     }
@@ -659,18 +664,23 @@ function drawFacadeCanvas() {
 
   const T = _houseWorldTransform();
   if (T) {
-    // Кликабельные полосы-сегменты по рёбрам. Выбранные — синим.
+    // Кликабельные полосы по рёбрам: wall-сегменты — плотные, оконные колонки —
+    // полупрозрачные (символ окна/двери остаётся виден). Выбранные — синим.
     const bandW = Math.max((T.layout.wt || 0.2) / GRID * W * 1.6, 6 / cx.scale);
+    const zonesN = Object.keys(S.wallZones || {}).length;
     for (const e of T.layout.edges) {
       for (const it of e.items) {
-        if (it.type !== 'wall' || !it.segId || it.width < 0.03) continue;
+        if (!it.segId || it.width < 0.03) continue;
         const a = T.toNorm(e.x + e.dx * it.start,              e.z + e.dz * it.start);
         const b = T.toNorm(e.x + e.dx * (it.start + it.width), e.z + e.dz * (it.start + it.width));
         const sel = !!S.wallZones[it.segId];
-        ctx.strokeStyle = sel ? 'rgba(47,111,216,.9)' : 'rgba(70,70,70,.32)';
+        const isWall = it.type === 'wall';
+        ctx.strokeStyle = isWall
+          ? (sel ? 'rgba(47,111,216,.9)'  : 'rgba(70,70,70,.32)')
+          : (sel ? 'rgba(47,111,216,.45)' : 'rgba(70,70,70,.14)');
         ctx.lineWidth = bandW; ctx.lineCap = 'butt';
         ctx.beginPath(); ctx.moveTo(a.x * W, a.y * H); ctx.lineTo(b.x * W, b.y * H); ctx.stroke();
-        // Поперечные штрихи на границах сегмента (видно, где сегменты делятся)
+        // Поперечные штрихи на границах элемента (видно, где элементы делятся)
         ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 1.4 / cx.scale;
         for (const pnt of [a, b]) {
           const px = pnt.x * W, py = pnt.y * H;
@@ -681,13 +691,24 @@ function drawFacadeCanvas() {
         }
       }
     }
+    // Угловые столбы: не выбираются сами — отделываются «под ближайшую вставку»
+    // (примыкающий элемент выбран → угол синий). Показываем это на плане.
+    for (const p of (T.layout.pillars || [])) {
+      const eP = T.layout.edges[p.prevEdge], eN = T.layout.edges[p.nextEdge];
+      const lastOf  = ed => { for (let i = ed.items.length - 1; i >= 0; i--) if (ed.items[i].segId) return ed.items[i].segId; return null; };
+      const firstOf = ed => { for (const i of ed.items) if (i.segId) return i.segId; return null; };
+      const on = zonesN > 0 && (!!S.wallZones[lastOf(eP)] || !!S.wallZones[firstOf(eN)]);
+      const c = T.toNorm(p.cx, p.cz);
+      const half = Math.max(p.ps / GRID * W, 6 / cx.scale) / 2 * 1.6;
+      ctx.fillStyle = on ? 'rgba(47,111,216,.9)' : 'rgba(70,70,70,.32)';
+      ctx.fillRect(c.x * W - half, c.y * H - half, half * 2, half * 2);
+    }
     // Счётчик в футере редактора
     const cnt = document.getElementById('d-facade-plan-count');
     if (cnt) {
       const total = T.layout.edges.reduce((s, e) => s + e.items.filter(i => i.segId).length, 0);
-      const n = Object.keys(S.wallZones || {}).length;
-      cnt.textContent = n ? `Выбрано сегментов: ${n} из ${total} (1-й этаж)`
-                          : 'Ничего не выбрано — материал ляжет на весь фасад';
+      cnt.textContent = zonesN ? `Выбрано элементов: ${zonesN} из ${total} (1-й этаж; углы — автоматически)`
+                               : 'Ничего не выбрано — материал ляжет на весь фасад';
     }
   } else {
     ctx.fillStyle = '#aaa'; ctx.font = `${13 / cx.scale}px Roboto`; ctx.textAlign = 'center';

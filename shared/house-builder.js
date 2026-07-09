@@ -576,6 +576,13 @@ function buildPillar(parent, modules, item, wallH, yOffset, ps) {
   p.scale.set(ps, wallH, ps);
   const pos = pillarPosition(item, ps);
   p.position.set(pos.x, yOffset, pos.z);
+  // Угловой столб фасада: отделывается АВТОМАТИЧЕСКИ «под ближайшую вставку» —
+  // если примыкающий элемент фасада выбран под панели, столб красится вместе с ним
+  // (смежность определяется bbox-касанием в _collectFacadeSegments, viewer3d-core).
+  // segW/segH — площадь двух наружных граней для сметы.
+  p.userData.facadePillar = true;
+  p.userData.segW = 2 * ps;
+  p.userData.segH = wallH;
   setupShadows(p);
   parent.add(p);
 }
@@ -605,12 +612,15 @@ function buildBasePillar(parent, modules, item, baseH, ps, overhang) {
   parent.add(p);
 }
 
-// segPrefix (опционально) — стабильный префикс `f{floor}:e{edge}` для вертикальных
-// элементов фасада: каждый полноростовой wall-сегмент получает userData.segId
-// (`f0:e2:s1`) + размеры (segW×segH, м) — по ним фронт даёт выбирать сегменты под
-// декоративную отделку (S.wallZones) и считает площадь в смету. Id детерминирован
-// для фиксированных дескриптора и площади (смена площади сбрасывает проект).
-// Перемычки над/под окнами — часть оконной колонки, segId не получают.
+// segPrefix (опционально) — стабильный префикс `f{floor}:e{edge}` для элементов
+// фасада, выбираемых под декоративную отделку (S.wallZones):
+//   • полноростовой wall-сегмент → userData.segId = `{prefix}:s{n}`;
+//   • ОКОННАЯ КОЛОНКА (стена над окном/дверью + стена под окном) → ОБЩИЙ
+//     userData.segId = `{prefix}:o{n}` на перемычке и подоконной части —
+//     выбираются и красятся как одно целое.
+// segW/segH — размеры КАЖДОГО меша (перемычка и подоконник дают свои высоты) —
+// площадь в смету суммируется по мешам без задвоения. Id детерминированы для
+// фиксированных дескриптора и площади (смена площади сбрасывает проект).
 function buildEdgeWall(parent, modules, modulesDef, edge, wallH, yOffset, wt, ps, segPrefix) {
   const fills = resolveFills(edge, modulesDef);
   const startX = edge.x + edge.dx * edge.startOffset;
@@ -618,6 +628,7 @@ function buildEdgeWall(parent, modules, modulesDef, edge, wallH, yOffset, wt, ps
   const ry = edgeRotation(edge.dx, edge.dz);
   let cursor = 0;
   let segIdx = 0;
+  let openIdx = 0;
   for (const fill of fills) {
     const endX = startX + edge.dx * (cursor + fill.width);
     const endZ = startZ + edge.dz * (cursor + fill.width);
@@ -638,6 +649,7 @@ function buildEdgeWall(parent, modules, modulesDef, edge, wallH, yOffset, wt, ps
       }
       segIdx++;
     } else if (fill.type === 'window' || fill.type === 'door') {
+      const openId = segPrefix ? `${segPrefix}:o${openIdx}` : null;
       const mod = cloneModule(modules, fill.model);
       if (mod) {
         transformParametricModule(mod, fill.params, fill.model);
@@ -652,6 +664,11 @@ function buildEdgeWall(parent, modules, modulesDef, edge, wallH, yOffset, wt, ps
             lintel.scale.set(fill.width, topH, wt / 0.2);
             lintel.position.set(endX, yOffset + sillY + fill.params.h, endZ);
             lintel.rotation.y = ry;
+            if (openId) {
+              lintel.userData.segId = openId;
+              lintel.userData.segW = fill.width;
+              lintel.userData.segH = topH;
+            }
             setupShadows(lintel);
             parent.add(lintel);
           }
@@ -662,11 +679,17 @@ function buildEdgeWall(parent, modules, modulesDef, edge, wallH, yOffset, wt, ps
             sub.scale.set(fill.width, sillY, wt / 0.2);
             sub.position.set(endX, yOffset, endZ);
             sub.rotation.y = ry;
+            if (openId) {
+              sub.userData.segId = openId;
+              sub.userData.segW = fill.width;
+              sub.userData.segH = sillY;
+            }
             setupShadows(sub);
             parent.add(sub);
           }
         }
       }
+      openIdx++;
     }
     cursor += fill.width;
   }
@@ -3605,15 +3628,20 @@ function getHouseFloorPolygon(desc, params) {
   return { corners, bbox: outline.bbox };
 }
 
-// Плановая раскладка фасада ПЕРВОГО этажа: рёбра с элементами — сегменты стен
-// (с ТЕМИ ЖЕ segId, что присваивает buildEdgeWall при 3D-сборке), окна, двери —
-// в мировых координатах дома (система совпадает с getHouseFloorPolygon).
-// Для 2D-плана: отрисовка окон/дверей и выбор сегментов под отделку (S.wallZones).
-// params: { area, floorAreas? } — как у buildHouseFromDescriptor (берётся этаж 0).
-// Возвращает { edges: [{ x, z, dx, dz, wallLength, items }], bbox, wt } | null,
-// где items = [{ type: 'wall'|'window'|'door', start, width, segId? }],
-// start — метры вдоль ребра от начала СТЕНЫ (startOffset столба уже учтён),
-// (x,z) — начало стены, (dx,dz) — единичное направление ребра.
+// Плановая раскладка фасада ПЕРВОГО этажа: рёбра с элементами — сегменты стен и
+// оконные колонки (с ТЕМИ ЖЕ segId, что присваивает buildEdgeWall при 3D-сборке),
+// окна, двери — в мировых координатах дома (система совпадает с getHouseFloorPolygon).
+// Для 2D-плана: отрисовка окон/дверей и выбор элементов под отделку (S.wallZones).
+// params: { area, floorAreas?, floorH?, floorHs? } — как у buildHouseFromDescriptor
+// (берётся этаж 0; высота нужна, чтобы знать, есть ли у проёма стена над/под).
+// Возвращает { edges, pillars, bbox, wt } | null:
+//   edges  = [{ x, z, dx, dz, wallLength, items }], где items =
+//     [{ type: 'wall'|'window'|'door', start, width, segId? }] — segId у wall всегда,
+//     у window/door — если есть стена над/под проёмом (оконная колонка `:o{n}`);
+//   pillars = [{ cx, cz, ps, prevEdge, nextEdge }] — угловые столбы (позиция центра
+//     квадрата ps×ps в интерьерном квадранте) с индексами смежных рёбер;
+//   start — метры вдоль ребра от начала СТЕНЫ (startOffset столба уже учтён),
+//   (x,z) — начало стены, (dx,dz) — единичное направление ребра.
 function getHouseFacadeLayout(desc, params) {
   if (!desc || !desc.floors || !desc.floors[0]) return null;
   const floor = desc.floors[0];
@@ -3626,6 +3654,8 @@ function getHouseFacadeLayout(desc, params) {
   const vars = evalVars(floor.vars, { area: floorArea });
   const wt = (desc.constraints && desc.constraints.wall_thickness) || 0.2;
   const ps = (desc.constraints && desc.constraints.pillar_size) || wt;
+  const wallH = (((params && params.floorHs && params.floorHs[0]) || (params && params.floorH)
+    || (floor.constraints && floor.constraints.floor_h && floor.constraints.floor_h.default) || 300)) / 100;
   const offsetSpec = floor.start_offset || { x: 0, z: 0 };
   const startX = evalExpr(offsetSpec.x !== undefined ? offsetSpec.x : 0, vars);
   const startZ = evalExpr(offsetSpec.z !== undefined ? offsetSpec.z : 0, vars);
@@ -3633,23 +3663,55 @@ function getHouseFacadeLayout(desc, params) {
 
   const edges = [];
   let edgeIdx = 0;   // считаем ТОЛЬКО wall-items — как в цикле buildHouseFromDescriptor
+  const wallIdxByItem = new Map();
   for (const item of outline.items) {
     if (item.type !== 'wall') continue;
+    wallIdxByItem.set(item, edgeIdx);
     const fills = resolveFills(item, desc.modules);
     const ex = item.x + item.dx * item.startOffset;
     const ez = item.z + item.dz * item.startOffset;
     const parts = [];
-    let cursor = 0, segIdx = 0;   // segIdx — как в buildEdgeWall (каждый wall-fill)
+    let cursor = 0, segIdx = 0, openIdx = 0;   // счётчики — как в buildEdgeWall
     for (const fill of fills) {
       const p = { type: fill.type, start: cursor, width: fill.width };
-      if (fill.type === 'wall') { p.segId = `f0:e${edgeIdx}:s${segIdx}`; segIdx++; }
+      if (fill.type === 'wall') {
+        p.segId = `f0:e${edgeIdx}:s${segIdx}`; segIdx++;
+      } else {
+        // Оконная колонка выбирается, только если у проёма есть стена над/под
+        // (buildEdgeWall при их отсутствии не создаёт мешей с этим id).
+        const y = (fill.params && fill.params.y) || 0;
+        const h = (fill.params && fill.params.h) || 0;
+        const hasLintel = wallH - (y + h) > 0.05;
+        const hasSub = fill.type === 'window' && y > 0.05;
+        if (hasLintel || hasSub) p.segId = `f0:e${edgeIdx}:o${openIdx}`;
+        openIdx++;
+      }
       parts.push(p);
       cursor += fill.width;
     }
     edges.push({ x: ex, z: ez, dx: item.dx, dz: item.dz, wallLength: item.wallLength, items: parts });
     edgeIdx++;
   }
-  return { edges, bbox: outline.bbox, wt };
+
+  // Угловые столбы: центр квадрата ps×ps в интерьерном квадранте (sx/sz из
+  // computeOutline) + индексы смежных стен — план показывает, что угол
+  // отделается «под ближайшую вставку».
+  const pillars = [];
+  const n = outline.items.length;
+  outline.items.forEach((item, i) => {
+    if (item.type !== 'pillar') return;
+    const prev = outline.items[(i - 1 + n) % n], next = outline.items[(i + 1) % n];
+    if (prev.type !== 'wall' || next.type !== 'wall') return;
+    pillars.push({
+      cx: item.x + (item.sx || 1) * ps / 2,
+      cz: item.z + (item.sz || 1) * ps / 2,
+      ps,
+      prevEdge: wallIdxByItem.get(prev),
+      nextEdge: wallIdxByItem.get(next),
+    });
+  });
+
+  return { edges, pillars, bbox: outline.bbox, wt };
 }
 
 global.HouseBuilder = {
