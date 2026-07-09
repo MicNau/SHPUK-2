@@ -863,7 +863,7 @@ mat_planter_wood — дерево (короб грядки)
 
 **Сборка** (отдельная конструкция, как забор — не часть дескриптора дома): см. реализацию ниже.
 
-**Интеграция в код (сделано, `viewer3d-core.js`).** `mod_railing.glb` подключён в `buildRailing3d`,
+**Интеграция в код (сделано, `viewer3d-railing.js`, ранее в viewer3d-core.js).** `mod_railing.glb` подключён в `buildRailing3d`,
 процедурные поручень/балясины убраны:
 1. Async-загрузка + кэш GLB — `ensureRailingLoaded()` (как `ensurePlanterLoaded`); до загрузки сцена
    перестраивается после подгрузки.
@@ -1423,9 +1423,9 @@ function applyMaterialToSelected(matSlot) {
 
 - `viewer3d-core.js`: инициализация сцены, HDRI, освещение, OrbitControls
 - `viewer3d-entourage.js`: растительность (общий файл для обеих платформ, авто-детект IS_MOBILE)
-- `buildTerrace3d()`, `buildPorch3d()`, `buildFence3d()`, `buildRailing3d()` — отдельные конструкции (террасы, крыльцо, забор, перила — не часть дескриптора дома)
+- `buildTerrace3d()`, `buildPorch3d()`, `buildFence3d()` (viewer3d-builders.js), `buildRailing3d()` (viewer3d-railing.js) — отдельные конструкции (террасы, крыльцо, забор, перила — не часть дескриптора дома)
 - `canvas.js`: разметка полигонов
-- `nav.js`, `catalog.js` — навигация и каталог
+- `nav-desktop.js` — навигация и каталог (легаси nav.js/catalog.js удалены)
 
 ### 6.3. Что добавляется
 
