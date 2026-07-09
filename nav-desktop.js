@@ -15,7 +15,7 @@ const D_SIDEBAR_ITEMS = [
   { id: 'steps',         lbl: 'Ступени',             hasEditor: true  },
   { id: 'paths',         lbl: 'Дорожки',             hasEditor: true  },
   { id: 'fence',         lbl: 'Забор',               hasEditor: true  },
-  { id: 'facade',        lbl: 'Отделка фасада',      hasEditor: false },
+  { id: 'facade',        lbl: 'Отделка фасада',      hasEditor: true  },
   { id: 'beds',          lbl: 'Грядки',              hasEditor: true  },
   { id: 'furniture',     lbl: 'Садовая мебель',      hasEditor: false },
   { id: 'pool_terrace',  lbl: 'Терраса у бассейна',  hasEditor: true  },
@@ -31,6 +31,7 @@ const D_CANVAS_INIT = {
   pier:         () => initSnapCanvas('pier'),
   fence:        () => { initSnapCanvas('fence'); _dSyncFenceHeight(); },
   beds:         () => initBedsCanvas(),
+  facade:       () => initFacadeCanvas(),
 };
 
 // ══════════════════════════════════════════════
@@ -598,7 +599,9 @@ function _dRenderSidebar() {
 // сегментам стен в 3D тоглят их (S.wallZones), над 3D — тулбар с подсказкой.
 // ══════════════════════════════════════════════
 function _dSyncFacadeMode() {
-  const on = (dActiveItem === 'facade' && dStep === 3);
+  // !dEditorOpen: пока открыт план-редактор фасада, 3D спрятан под оверлеем —
+  // 3D-пикинг и плавающий тулбар не нужны (у редактора свой счётчик/кнопки).
+  const on = (dActiveItem === 'facade' && dStep === 3 && !dEditorOpen);
   if (S.facadeMode !== on) {
     S.facadeMode = on;
     // Подсветка выбранных сегментов включается/гаснет вместе с режимом.
@@ -620,17 +623,36 @@ function _dUpdateFacadeBar() {
   el.textContent = n ? `Выбрано: ${n} из ${total}` : 'Ничего не выбрано — материал ляжет на весь фасад';
 }
 
+// Перерисовать план-редактор фасада, если он сейчас открыт.
+function _dRedrawFacadePlan() {
+  if (typeof drawFacadeCanvas === 'function'
+      && document.getElementById('d-canvas-facade')?.classList.contains('active')) {
+    drawFacadeCanvas();
+  }
+}
+
 function dFacadeSelectAll() {
+  // Основной источник — 3D-сегменты (все этажи); если сцена ещё не собрана
+  // (например, редактор открыт до готовности GLB) — раскладка плана (1-й этаж).
   const segs = (typeof threeState !== 'undefined' && threeState && threeState.facadeSegs) || [];
-  for (const s of segs) S.wallZones[s.userData.segId] = true;
+  if (segs.length) {
+    for (const s of segs) S.wallZones[s.userData.segId] = true;
+  } else if (typeof _houseWorldTransform === 'function') {
+    const T = _houseWorldTransform();
+    if (T) for (const e of T.layout.edges) for (const it of e.items) {
+      if (it.segId) S.wallZones[it.segId] = true;
+    }
+  }
   if (typeof _applyFacadeSelection === 'function') _applyFacadeSelection();
   _dUpdateFacadeBar();
+  _dRedrawFacadePlan();
 }
 
 function dFacadeClear() {
   S.wallZones = {};
   if (typeof _applyFacadeSelection === 'function') _applyFacadeSelection();
   _dUpdateFacadeBar();
+  _dRedrawFacadePlan();
 }
 
 // ── Delete (×) button — сбросить настройки конкретной позиции ──

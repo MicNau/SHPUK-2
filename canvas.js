@@ -214,6 +214,87 @@ function getHousePolygonNorm() {
   };
 }
 
+// ══════════════════════════════════════════════
+// ПЛАН ДОМА: раскладка фасада (окна/двери/сегменты стен)
+// Раскладка — HouseBuilder.getHouseFacadeLayout (этаж 1): те же fills и segId,
+// что кладёт buildEdgeWall при 3D-сборке → выбор сегмента на плане и в 3D
+// работает с одним S.wallZones. Кэш по (desc, area) — пересчёт только при смене.
+// ══════════════════════════════════════════════
+let _hwtCache = null;   // { desc, area, T }
+
+function _houseWorldTransform() {
+  const desc = (typeof _houseCache !== 'undefined' && _houseCache.desc) ? _houseCache.desc : null;
+  if (!desc || typeof HouseBuilder === 'undefined' || !HouseBuilder.getHouseFacadeLayout) return null;
+  const area = parseFloat(document.getElementById('v-area')?.value || 80);
+  if (_hwtCache && _hwtCache.desc === desc && _hwtCache.area === area) return _hwtCache.T;
+  const layout = HouseBuilder.getHouseFacadeLayout(desc, { area });
+  if (!layout) return null;
+  // Центрирование bbox в сетке GRID — как в getHousePolygonNorm (общая система).
+  const b = layout.bbox;
+  const offX = (GRID - (b.maxX - b.minX)) / 2 - b.minX;
+  const offZ = (GRID - (b.maxZ - b.minZ)) / 2 - b.minZ;
+  const T = {
+    layout,
+    toNorm:  (x, z)   => ({ x: (x + offX) / GRID, y: (z + offZ) / GRID }),
+    toWorld: (nx, ny) => ({ x: nx * GRID - offX,  z: ny * GRID - offZ  }),
+  };
+  _hwtCache = { desc, area, T };
+  return T;
+}
+
+// Точка (норм.) внутри полигона дома? — для стороны открывания двери на плане.
+function _normPtInHouse(nx, ny) {
+  const c = getHousePolygonNorm().corners;
+  let inside = false;
+  for (let i = 0, j = c.length - 1; i < c.length; j = i++) {
+    if ((c[i].y > ny) !== (c[j].y > ny)
+        && nx < (c[j].x - c[i].x) * (ny - c[i].y) / (c[j].y - c[i].y + 1e-12) + c[i].x) inside = !inside;
+  }
+  return inside;
+}
+
+// Окна и двери на плане дома (условные обозначения: окно — тонкая линия в проёме,
+// дверь — проём со створкой и дугой открывания внутрь). Рисуется поверх контура.
+function _drawHouseOpenings(ctx, W, H, sc) {
+  const T = _houseWorldTransform();
+  if (!T) return;
+  const gapW = Math.max((T.layout.wt || 0.2) / GRID * W * 2.2, 5 / sc);
+  for (const e of T.layout.edges) {
+    for (const it of e.items) {
+      if (it.type === 'wall') continue;
+      const aN = T.toNorm(e.x + e.dx * it.start,              e.z + e.dz * it.start);
+      const bN = T.toNorm(e.x + e.dx * (it.start + it.width), e.z + e.dz * (it.start + it.width));
+      const ax = aN.x * W, ay = aN.y * H, bx = bN.x * W, by = bN.y * H;
+      // Проём: разрыв контурной линии стены (фоновым цветом).
+      ctx.strokeStyle = '#d9d9d9'; ctx.lineWidth = gapW; ctx.lineCap = 'butt';
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      if (it.type === 'window') {
+        // Остекление — тонкая синяя линия в проёме.
+        ctx.strokeStyle = '#3d7dc4'; ctx.lineWidth = 1.6 / sc;
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      } else {
+        // Дверь: створка от петли (a) перпендикулярно внутрь + пунктирная дуга к (b).
+        const len = Math.hypot(bx - ax, by - ay); if (len < 1e-3) continue;
+        let nxv = -(by - ay) / len, nyv = (bx - ax) / len;
+        const off = 0.5 / GRID;   // проба на 0.5 м по нормали (canvas квадратный: W==H)
+        if (!_normPtInHouse((aN.x + bN.x) / 2 + nxv * off, (aN.y + bN.y) / 2 + nyv * off)) {
+          nxv = -nxv; nyv = -nyv;
+        }
+        const lx = ax + nxv * len, ly = ay + nyv * len;
+        ctx.strokeStyle = '#8a5a2b'; ctx.lineWidth = 1.6 / sc;
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(lx, ly); ctx.stroke();
+        const a0 = Math.atan2(ly - ay, lx - ax), a1 = Math.atan2(by - ay, bx - ax);
+        let d = a1 - a0;
+        while (d > Math.PI) d -= 2 * Math.PI;
+        while (d < -Math.PI) d += 2 * Math.PI;
+        ctx.setLineDash([3 / sc, 3 / sc]);
+        ctx.beginPath(); ctx.arc(ax, ay, len, a0, a1, d < 0); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+  }
+}
+
 // Рисование ранее заданных объектов как фон на canvas-шагах
 // excludeName — текущая секция (не рисуем её повторно, она рисуется как основной слой)
 function drawPreviousLayers(ctx, W, H, cx, excludeName) {
@@ -255,6 +336,8 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
       ctx.beginPath(); ctx.moveTo(bx+d, by); ctx.lineTo(bx+d-bh, by+bh); ctx.stroke();
     }
     ctx.restore();
+    // Окна и двери (условные обозначения) — «внятный план» во всех редакторах.
+    _drawHouseOpenings(ctx, W, H, sc);
     // Подпись и габариты по bbox
     ctx.fillStyle='#666'; ctx.font=`bold ${13/sc}px Roboto`; ctx.textAlign='center';
     ctx.fillText('ДОМ', bx+bw/2, by+bh/2+5/sc);
@@ -489,6 +572,124 @@ function addBreak(n) {
 
 // Для дорожек - тот же snap-canvas, уже обрабатывается выше
 function initPathsCanvas() { initSnapCanvas('paths'); }
+
+// ══════════════════════════════════════════════
+// ОТДЕЛКА ФАСАДА: план-редактор выбора сегментов стен
+// Кликабельные полосы-сегменты по рёбрам 1-го этажа (segId как в 3D);
+// выбор пишется в S.wallZones и сразу подхватывается 3D (_applyFacadeSelection).
+// Сегменты верхних этажей выбираются в 3D-режиме.
+// ══════════════════════════════════════════════
+function initFacadeCanvas() {
+  const wrap = document.getElementById('cw-facade');
+  const cv   = document.getElementById('cv-facade');
+  const dpr = window.devicePixelRatio || 1, sz = wrap.offsetWidth;
+  cv.width = sz * dpr; cv.height = sz * dpr;
+  cv.style.width = sz + 'px'; cv.style.height = sz + 'px';
+  CV['facade'] = mkCvState();
+
+  drawFacadeCanvas();
+
+  if (wrap._facadeBound) return;   // слушатели — один раз (см. initSnapCanvas)
+  wrap._facadeBound = true;
+
+  attachPanZoom(wrap, 'facade', () => drawFacadeCanvas());
+
+  wrap.addEventListener('click', e => {
+    const cx = CV['facade']; if (!cx || cx.pinching) return;
+    const cvEl = document.getElementById('cv-facade'); if (!cvEl) return;
+    const r = wrap.getBoundingClientRect(), dpr2 = window.devicePixelRatio || 1;
+    const sx = (e.clientX - r.left) * dpr2, sy = (e.clientY - r.top) * dpr2;
+    const wx = (sx - cx.ox) / cx.scale, wy = (sy - cx.oy) / cx.scale;
+    const segId = _facadeHitSegment(wx / cvEl.width, wy / cvEl.height);
+    if (!segId) return;
+    if (S.wallZones[segId]) delete S.wallZones[segId];
+    else S.wallZones[segId] = true;
+    drawFacadeCanvas();
+    // Живое отражение в 3D (сцена под оверлеем редактора) + счётчик 3D-тулбара.
+    if (typeof _applyFacadeSelection === 'function' && typeof threeState !== 'undefined' && threeState) {
+      _applyFacadeSelection();
+    }
+    if (typeof _dUpdateFacadeBar === 'function') _dUpdateFacadeBar();
+  });
+}
+
+// Поиск сегмента стены по клику (нормализованные координаты плана): проекция на
+// ось ребра внутри [start, start+width] + перпендикуляр ближе порога.
+function _facadeHitSegment(nx, ny) {
+  const T = _houseWorldTransform(); if (!T) return null;
+  const p = T.toWorld(nx, ny);
+  const thr = Math.max((T.layout.wt || 0.2) * 1.5, 0.45);   // м
+  let best = null, bestD = thr;
+  for (const e of T.layout.edges) {
+    const t    = (p.x - e.x) *  e.dx + (p.z - e.z) * e.dz;  // вдоль ребра (dx,dz — единичные)
+    const perp = Math.abs((p.x - e.x) * -e.dz + (p.z - e.z) * e.dx);
+    if (perp > thr) continue;
+    for (const it of e.items) {
+      if (it.type !== 'wall' || !it.segId) continue;
+      if (t < it.start - 0.05 || t > it.start + it.width + 0.05) continue;
+      if (perp < bestD) { bestD = perp; best = it.segId; }
+    }
+  }
+  return best;
+}
+
+function drawFacadeCanvas() {
+  const cvEl = document.getElementById('cv-facade'); if (!cvEl) return;
+  const ctx = cvEl.getContext('2d'), W = cvEl.width, H = cvEl.height;
+  const cx = CV['facade'] || { scale: 1, ox: 0, oy: 0 };
+  applyTransform(ctx, cx, W, H);
+
+  ctx.fillStyle = '#d9d9d9'; ctx.fillRect(0, 0, W, H);
+  // Сетка + метки (как в остальных редакторах)
+  const step = W / CELLS;
+  for (let r = 0; r <= CELLS; r++) for (let c = 0; c <= CELLS; c++) {
+    const isMajor = (r * SNAP) % 1 === 0 && (c * SNAP) % 1 === 0;
+    ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
+    ctx.beginPath(); ctx.arc(c * step, r * step, (isMajor ? 2 : 1.2) / cx.scale, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.fillStyle = '#999'; ctx.font = `${9 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+  for (let m = 5; m <= GRID; m += 5) { const px = m / GRID * W; ctx.fillText(m + 'м', px, H - 3 / cx.scale); }
+
+  drawPreviousLayers(ctx, W, H, cx, 'facade');   // дом (с окнами/дверями) + конструкции фоном
+
+  const T = _houseWorldTransform();
+  if (T) {
+    // Кликабельные полосы-сегменты по рёбрам. Выбранные — синим.
+    const bandW = Math.max((T.layout.wt || 0.2) / GRID * W * 1.6, 6 / cx.scale);
+    for (const e of T.layout.edges) {
+      for (const it of e.items) {
+        if (it.type !== 'wall' || !it.segId || it.width < 0.03) continue;
+        const a = T.toNorm(e.x + e.dx * it.start,              e.z + e.dz * it.start);
+        const b = T.toNorm(e.x + e.dx * (it.start + it.width), e.z + e.dz * (it.start + it.width));
+        const sel = !!S.wallZones[it.segId];
+        ctx.strokeStyle = sel ? 'rgba(47,111,216,.9)' : 'rgba(70,70,70,.32)';
+        ctx.lineWidth = bandW; ctx.lineCap = 'butt';
+        ctx.beginPath(); ctx.moveTo(a.x * W, a.y * H); ctx.lineTo(b.x * W, b.y * H); ctx.stroke();
+        // Поперечные штрихи на границах сегмента (видно, где сегменты делятся)
+        ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 1.4 / cx.scale;
+        for (const pnt of [a, b]) {
+          const px = pnt.x * W, py = pnt.y * H;
+          ctx.beginPath();
+          ctx.moveTo(px - e.dz * bandW * 0.6, py + e.dx * bandW * 0.6);
+          ctx.lineTo(px + e.dz * bandW * 0.6, py - e.dx * bandW * 0.6);
+          ctx.stroke();
+        }
+      }
+    }
+    // Счётчик в футере редактора
+    const cnt = document.getElementById('d-facade-plan-count');
+    if (cnt) {
+      const total = T.layout.edges.reduce((s, e) => s + e.items.filter(i => i.segId).length, 0);
+      const n = Object.keys(S.wallZones || {}).length;
+      cnt.textContent = n ? `Выбрано сегментов: ${n} из ${total} (1-й этаж)`
+                          : 'Ничего не выбрано — материал ляжет на весь фасад';
+    }
+  } else {
+    ctx.fillStyle = '#aaa'; ctx.font = `${13 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+    ctx.fillText('План недоступен: дом ещё загружается или участок без дома', W / 2, H * 0.5);
+  }
+  ctx.restore();
+}
 
 // ══════════════════════════════════════════════
 // СТУПЕНИ: один rect drag+resize

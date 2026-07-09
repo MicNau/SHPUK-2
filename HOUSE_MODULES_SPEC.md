@@ -1430,8 +1430,9 @@ function applyMaterialToSelected(matSlot) {
 ### 6.3. Что добавляется
 
 - ✅ **«Отделка фасада»** — интерактивный выбор вертикальных сегментов стен кликом в 3D
-  (raycast по `userData.segId`, подсветка emissive), назначение материала панелей из
-  каталога на выбранные сегменты. Сделано в v=117 (см. ARCHITECTURE.md → Recent cleanup).
+  (raycast по `userData.segId`, подсветка emissive) И на 2D-плане (план-редактор с
+  окнами/дверями, `getHouseFacadeLayout`), назначение материала панелей из каталога
+  на выбранные сегменты. Сделано в v=117/v=118 (см. ARCHITECTURE.md → Recent cleanup).
 - ✅ **`S.wallZones`** — в state.js: `segId → true` (выбранные сегменты); материал —
   `S.elementMat.facade`. Пустой выбор = весь фасад.
 - **`S.floors`** — массив параметров этажей `[{ area, floorH }, ...]`

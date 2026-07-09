@@ -3588,7 +3588,11 @@ function getHouseFloorPolygon(desc, params) {
   const area = (params && typeof params.area === 'number') ? params.area : areaDef;
   const areaFactor = (floor.area_factor !== undefined) ? floor.area_factor : 1.0;
   const vars = evalVars(floor.vars, { area: area * areaFactor });
-  const ps = (desc.constraints && desc.constraints.pillar_size) || 0.25;
+  // Дефолт ps — как в buildHouseFromDescriptor (wall_thickness||0.2); раньше здесь
+  // было 0.25 — при отсутствии pillar_size в дескрипторе контур на плане расходился
+  // с реально построенным домом на сантиметры.
+  const ps = (desc.constraints && desc.constraints.pillar_size)
+          || (desc.constraints && desc.constraints.wall_thickness) || 0.2;
   const offsetSpec = floor.start_offset || { x: 0, z: 0 };
   const startX = evalExpr(offsetSpec.x !== undefined ? offsetSpec.x : 0, vars);
   const startZ = evalExpr(offsetSpec.z !== undefined ? offsetSpec.z : 0, vars);
@@ -3601,6 +3605,53 @@ function getHouseFloorPolygon(desc, params) {
   return { corners, bbox: outline.bbox };
 }
 
+// Плановая раскладка фасада ПЕРВОГО этажа: рёбра с элементами — сегменты стен
+// (с ТЕМИ ЖЕ segId, что присваивает buildEdgeWall при 3D-сборке), окна, двери —
+// в мировых координатах дома (система совпадает с getHouseFloorPolygon).
+// Для 2D-плана: отрисовка окон/дверей и выбор сегментов под отделку (S.wallZones).
+// params: { area, floorAreas? } — как у buildHouseFromDescriptor (берётся этаж 0).
+// Возвращает { edges: [{ x, z, dx, dz, wallLength, items }], bbox, wt } | null,
+// где items = [{ type: 'wall'|'window'|'door', start, width, segId? }],
+// start — метры вдоль ребра от начала СТЕНЫ (startOffset столба уже учтён),
+// (x,z) — начало стены, (dx,dz) — единичное направление ребра.
+function getHouseFacadeLayout(desc, params) {
+  if (!desc || !desc.floors || !desc.floors[0]) return null;
+  const floor = desc.floors[0];
+  const areaDef = (floor.constraints && floor.constraints.area && floor.constraints.area.default) || 80;
+  const areaGlobal = (params && typeof params.area === 'number') ? params.area : areaDef;
+  const areaFactor = (floor.area_factor !== undefined) ? floor.area_factor : 1.0;
+  // Площадь этажа 0 — как в buildHouseFromDescriptor (иначе segId разойдутся с 3D).
+  const floorArea = (params && params.floorAreas && params.floorAreas[0] !== undefined)
+                    ? params.floorAreas[0] : areaGlobal * areaFactor;
+  const vars = evalVars(floor.vars, { area: floorArea });
+  const wt = (desc.constraints && desc.constraints.wall_thickness) || 0.2;
+  const ps = (desc.constraints && desc.constraints.pillar_size) || wt;
+  const offsetSpec = floor.start_offset || { x: 0, z: 0 };
+  const startX = evalExpr(offsetSpec.x !== undefined ? offsetSpec.x : 0, vars);
+  const startZ = evalExpr(offsetSpec.z !== undefined ? offsetSpec.z : 0, vars);
+  const outline = computeOutline(floor.perimeter, vars, ps, startX, startZ);
+
+  const edges = [];
+  let edgeIdx = 0;   // считаем ТОЛЬКО wall-items — как в цикле buildHouseFromDescriptor
+  for (const item of outline.items) {
+    if (item.type !== 'wall') continue;
+    const fills = resolveFills(item, desc.modules);
+    const ex = item.x + item.dx * item.startOffset;
+    const ez = item.z + item.dz * item.startOffset;
+    const parts = [];
+    let cursor = 0, segIdx = 0;   // segIdx — как в buildEdgeWall (каждый wall-fill)
+    for (const fill of fills) {
+      const p = { type: fill.type, start: cursor, width: fill.width };
+      if (fill.type === 'wall') { p.segId = `f0:e${edgeIdx}:s${segIdx}`; segIdx++; }
+      parts.push(p);
+      cursor += fill.width;
+    }
+    edges.push({ x: ex, z: ez, dx: item.dx, dz: item.dz, wallLength: item.wallLength, items: parts });
+    edgeIdx++;
+  }
+  return { edges, bbox: outline.bbox, wt };
+}
+
 global.HouseBuilder = {
   setLogger,
   loadHouseType,
@@ -3609,6 +3660,7 @@ global.HouseBuilder = {
   drawOutlineOverlay,
   decomposeOrthoPolygonIntoRectangles,
   getHouseFloorPolygon,
+  getHouseFacadeLayout,
   // Хелперы для размещения GLB-модулей (используются процедурным крыльцом)
   placeScaledGlb,
   detectNativeBbox,

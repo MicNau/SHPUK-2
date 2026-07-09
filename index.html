@@ -243,6 +243,24 @@
           </div>
         </div>
 
+        <div class="d-center-canvas" id="d-canvas-facade">
+          <div class="d-canvas-header">
+            <div>
+              <div class="d-canvas-title">Отделка фасада — выбор сегментов</div>
+              <div class="d-canvas-hint">Кликайте по сегментам стен на плане (1-й этаж; окна и двери показаны условно). Сегменты верхних этажей — кликом в 3D после «Готово».</div>
+            </div>
+          </div>
+          <div class="d-canvas-area" id="cw-facade" style="cursor:pointer;"><canvas id="cv-facade"></canvas></div>
+          <div class="d-canvas-footer">
+            <span class="d-facade-count" id="d-facade-plan-count"></span>
+            <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="dFacadeSelectAll()">Выбрать всё</button>
+              <button class="d-canvas-btn" onclick="dFacadeClear()">Сбросить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('facade')">✓ Готово</button>
+            </div>
+          </div>
+        </div>
+
         <div class="d-center-canvas" id="d-canvas-fence">
           <div class="d-canvas-header">
             <div>
@@ -336,9 +354,9 @@
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
 <script src="state.js?v=26"></script>
-<script src="canvas.js?v=26"></script>
+<script src="canvas.js?v=27"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
-<script src="shared/house-builder.js?v=74"></script>
+<script src="shared/house-builder.js?v=75"></script>
 <!-- Каталожный API: домен выбирается по хосту.
        • localhost/127.0.0.1 → '' (same-origin): локальный dev-прокси devserver.py
          проксирует /api и /static на sollersdev.ru.
@@ -358,6 +376,6 @@
 <script src="viewer3d-railing.js?v=1"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=45"></script>
+<script src="nav-desktop.js?v=46"></script>
 </body>
 </html>
