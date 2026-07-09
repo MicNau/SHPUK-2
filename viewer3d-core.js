@@ -187,6 +187,9 @@ function init3dCanvas(targetSlotId) {
   const controls = _setupControls(camera, renderer.domElement);
   controls.target.set(4, 2, 2.5);
 
+  // Пикинг сегментов фасада (активен только в S.facadeMode; см. «Отделка фасада»)
+  _initFacadePicking(renderer.domElement);
+
   // ── Процедурное небо (до загрузки HDRI) ───────
   const skyMesh = _buildProceduralSky();
   scene.add(skyMesh);
@@ -907,6 +910,8 @@ function buildScene3d() {
   threeState.railingMeshes = [];
   threeState.canopyMeshes  = [];
   threeState.bedMeshes     = [];
+  threeState.facadeSegs    = [];      // вертикальные сегменты стен (segId) — соберём после сборки дома
+  threeState._facadePanelMat = null;  // материал панелей уже диспознут clearGroup'ом выше
 
   const M = getHouseMats();
 
@@ -915,13 +920,12 @@ function buildScene3d() {
   // материал из S.elementMat (см. _resolveDeckMat). Базовый используется как дефолт.
   const _baseDeck = M.deck;
 
-  // Цвет активного образца для НЕ-deck элементов (фасад/крыльцо). Деко-элементы
-  // красятся per-element ниже, поэтому здесь deck НЕ трогаем.
+  // Цвет активного образца для крыльца. Деко-элементы красятся per-element ниже;
+  // фасад — per-segment через _applyFacadeSelection (S.elementMat.facade + S.wallZones).
   if (S.activeSample && S.activeSample.color) {
     const sec   = getActive()[S.curSec];
     const secId = sec ? sec.id : '';
-    if      (secId === 'facade') M.wall.color.set(S.activeSample.color);
-    else if (secId === 'porch')  M.step.color.set(S.activeSample.color);
+    if (secId === 'porch') M.step.color.set(S.activeSample.color);
   }
 
   // «Пустой участок»: единая проверка isEmptyLot (state.js). Десктоп хранит
@@ -1018,6 +1022,11 @@ function buildScene3d() {
     // Выбранные материалы дома (крыша/цоколь/стены) + деревянные части коричневым.
     // ДО постройки террасы — deck-меши не имеют mat_* имён и не затрагиваются.
     _applyHouseMaterials(houseGroup);
+    // Отделка фасада: собираем вертикальные сегменты стен (segId) и накладываем
+    // выбор/материал панелей (S.wallZones + S.elementMat.facade). ПОСЛЕ
+    // _applyHouseMaterials — базовый материал сегмента кэшируется уже текстурированным.
+    _collectFacadeSegments(houseGroup);
+    _applyFacadeSelection();
   }
 
   // Терраса/Крыльцо — multi-rect. Каждый rect → 4-точечный polygon → buildTerrace3d.
@@ -1267,6 +1276,127 @@ function clearGroup(group, disposeMaterials) {
   // Текстуры не диспозим — они в texCache и переиспользуются между сборками.
 }
 
+
+// ══════════════════════════════════════════════
+// ОТДЕЛКА ФАСАДА — выбор вертикальных сегментов стен в 3D
+// Сегменты — wall_segment'ы с userData.segId/segW/segH (см. buildEdgeWall в
+// shared/house-builder.js). Выбор — S.wallZones (segId → true); материал панелей —
+// S.elementMat.facade. Пустой выбор при заданном материале = «весь фасад».
+// Клик в 3D в режиме S.facadeMode тоглит сегмент (drag/orbit кликом не считается).
+// Фронтоны/мансардные стены segId не имеют и под отделку не выбираются.
+// ══════════════════════════════════════════════
+const FACADE_SELECT_EMISSIVE = 0x2f6fd8;   // подсветка выбранных сегментов в режиме фасада
+
+function _collectFacadeSegments(root) {
+  const segs = [];
+  root.traverse(o => { if (o.userData && o.userData.segId) segs.push(o); });
+  threeState.facadeSegs = segs;
+}
+
+// Материал панелей отделки из S.elementMat.facade: PBR-текстуры товара каталога
+// (раздел фасадных панелей, walls-тег) или однотонный цвет. null — не выбран.
+function _facadePanelMaterial() {
+  const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat.facade : null;
+  if (!em) return null;
+  const env = threeState.envMap || null;
+  const m = new THREE.MeshStandardMaterial({
+    color: 0xffffff, roughness: 0.82, metalness: 0.0,
+    envMap: env, envMapIntensity: env ? 0.5 : 0,
+  });
+  m.name = 'mat_facade';
+  if (em.textures && _applyDeckProductTextures({ deck: m }, em.textures)) return m;
+  if (em.color) { m.color.set(em.color); return m; }
+  m.dispose();
+  return null;
+}
+
+// Применяет выбор/материал к сегментам БЕЗ пересборки сцены (дёшево — вызывается
+// на каждый клик). Родной материал меша (после _applyHouseMaterials) кэшируется в
+// userData._baseMat и возвращается при снятии выбора. Мировой box-UV ставится мешу
+// один раз (userData._facadeUV) — текстура панелей не растягивается масштабом сегмента.
+function _applyFacadeSelection() {
+  if (!threeState || !threeState.facadeSegs || !threeState.facadeSegs.length) return;
+  const zones = (typeof S !== 'undefined' && S.wallZones) ? S.wallZones : {};
+  const selCount = Object.keys(zones).length;
+  const facadeMode = !!(typeof S !== 'undefined' && S.facadeMode);
+  if (threeState._facadePanelMat) threeState._facadePanelMat.dispose();
+  const panel = _facadePanelMaterial();          // ОБЩИЙ на все панельные сегменты
+  threeState._facadePanelMat = panel;
+  if (panel && facadeMode && selCount > 0) {
+    // Панель стоит только на выбранных → подсветку можно дать общему материалу.
+    panel.emissive = new THREE.Color(FACADE_SELECT_EMISSIVE);
+    panel.emissiveIntensity = 0.35;
+  }
+  for (const seg of threeState.facadeSegs) {
+    const selected = !!zones[seg.userData.segId];
+    const usePanel = !!panel && (selected || selCount === 0);
+    seg.traverse(o => {
+      if (!o.isMesh || !o.material) return;
+      if (!o.userData._baseMat) o.userData._baseMat = o.material;
+      if (usePanel) {
+        if (!o.userData._facadeUV) { _applyWorldBoxUV(o, HOUSE_WALL_TILE); o.userData._facadeUV = true; }
+        o.material = panel;
+      } else {
+        o.material = o.userData._baseMat;
+        // Подсветка выбранного сегмента без материала — на его собственном
+        // материале (cloneModule клонирует материалы per-mesh, чужих не заденем).
+        if (o.material.emissive !== undefined) {
+          o.material.emissive.setHex(facadeMode && selected ? FACADE_SELECT_EMISSIVE : 0x000000);
+          o.material.emissiveIntensity = 0.35;
+        }
+      }
+    });
+  }
+}
+
+// Площадь сегментов под отделку (м²) для сметы; пустой выбор = весь фасад.
+function facadeSelectedAreaM2() {
+  const segs = (threeState && threeState.facadeSegs) || [];
+  if (!segs.length) return 0;
+  const zones = (typeof S !== 'undefined' && S.wallZones) ? S.wallZones : {};
+  const sel = segs.filter(s => zones[s.userData.segId]);
+  const list = sel.length ? sel : segs;
+  return list.reduce((a, s) => a + (s.userData.segW || 0) * (s.userData.segH || 0), 0);
+}
+
+// ── Пикинг сегментов кликом в 3D ──
+let _fpDown = null;
+function _initFacadePicking(dom) {
+  dom.addEventListener('pointerdown', e => {
+    if (e.button === 0) _fpDown = { x: e.clientX, y: e.clientY, t: performance.now() };
+  });
+  dom.addEventListener('pointerup', e => {
+    const d = _fpDown; _fpDown = null;
+    if (!d || e.button !== 0) return;
+    // Отличаем клик от orbit-drag: малое смещение и короткое время удержания.
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6 || performance.now() - d.t > 500) return;
+    if (!threeState || typeof S === 'undefined' || !S.facadeMode) return;
+    _pickFacadeSegment(e.clientX, e.clientY);
+  });
+}
+
+function _pickFacadeSegment(cx, cy) {
+  const { renderer, camera, houseGroup } = threeState;
+  const r = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+  const rc = new THREE.Raycaster();
+  rc.setFromCamera(ndc, camera);
+  for (const h of rc.intersectObjects(houseGroup.children, true)) {
+    if (h.object.material && h.object.material.transparent) continue;  // стекло — смотрим дальше
+    let o = h.object, segId = null;
+    while (o && o !== houseGroup) {
+      if (o.userData && o.userData.segId) { segId = o.userData.segId; break; }
+      o = o.parent;
+    }
+    if (segId) {
+      if (S.wallZones[segId]) delete S.wallZones[segId];
+      else S.wallZones[segId] = true;
+      _applyFacadeSelection();
+      if (typeof _dUpdateFacadeBar === 'function') _dUpdateFacadeBar();
+    }
+    return;   // первый непрозрачный хит решает — сквозь дом не выбираем
+  }
+}
 
 // ══════════════════════════════════════════════
 // MATERIAL APPLICATION (примерка образцов)

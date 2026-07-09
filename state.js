@@ -214,6 +214,11 @@ const S = {
   // в ttg/_dCacheToggleDefaults — 3D-слой читает ТОЛЬКО отсюда (tgOn), не DOM.
   toggles: {},
   pathWidth: 120,      // ширина дорожки, см (инпут v-paths-width зеркалится сюда)
+  // Отделка фасада: выбранные вертикальные сегменты стен (segId из house-builder,
+  // формат 'f{этаж}:e{ребро}:s{сегмент}' → true). Пустой выбор при заданном
+  // материале (S.elementMat.facade) = «весь фасад». Материал панелей — S.elementMat.facade.
+  wallZones: {},
+  facadeMode: false,   // режим выбора сегментов в 3D (активен элемент «Отделка фасада»)
   // Материалы дома (шаг «Параметры дома»).
   roofMat: 'tile',     // tile | metal_green | metal_red
   baseMat: 'concrete', // concrete | stone

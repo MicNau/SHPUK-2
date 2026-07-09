@@ -557,3 +557,14 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
 .est-table tfoot td { border-top:2px solid #333; border-bottom:none; font-weight:700; padding-top:10px; }
 .est-total { font-size:16px; }
 .est-note { font-size:11px; color:#999; margin-top:8px; }
+
+/* ── Отделка фасада: тулбар режима выбора сегментов (над 3D) ── */
+.d-facade-bar {
+  position:absolute; top:12px; left:50%; transform:translateX(-50%);
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  max-width:calc(100% - 32px);
+  padding:8px 14px; background:rgba(255,255,255,.94);
+  box-shadow:0 2px 10px rgba(0,0,0,.12); z-index:5;
+}
+.d-facade-hint  { font-size:12px; font-weight:600; color:#333; }
+.d-facade-count { font-size:12px; color:#777; white-space:nowrap; }

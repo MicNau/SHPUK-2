@@ -605,12 +605,19 @@ function buildBasePillar(parent, modules, item, baseH, ps, overhang) {
   parent.add(p);
 }
 
-function buildEdgeWall(parent, modules, modulesDef, edge, wallH, yOffset, wt, ps) {
+// segPrefix (опционально) — стабильный префикс `f{floor}:e{edge}` для вертикальных
+// элементов фасада: каждый полноростовой wall-сегмент получает userData.segId
+// (`f0:e2:s1`) + размеры (segW×segH, м) — по ним фронт даёт выбирать сегменты под
+// декоративную отделку (S.wallZones) и считает площадь в смету. Id детерминирован
+// для фиксированных дескриптора и площади (смена площади сбрасывает проект).
+// Перемычки над/под окнами — часть оконной колонки, segId не получают.
+function buildEdgeWall(parent, modules, modulesDef, edge, wallH, yOffset, wt, ps, segPrefix) {
   const fills = resolveFills(edge, modulesDef);
   const startX = edge.x + edge.dx * edge.startOffset;
   const startZ = edge.z + edge.dz * edge.startOffset;
   const ry = edgeRotation(edge.dx, edge.dz);
   let cursor = 0;
+  let segIdx = 0;
   for (const fill of fills) {
     const endX = startX + edge.dx * (cursor + fill.width);
     const endZ = startZ + edge.dz * (cursor + fill.width);
@@ -621,9 +628,15 @@ function buildEdgeWall(parent, modules, modulesDef, edge, wallH, yOffset, wt, ps
         seg.scale.set(fill.width, wallH, wt / 0.2);
         seg.position.set(endX, yOffset, endZ);
         seg.rotation.y = ry;
+        if (segPrefix) {
+          seg.userData.segId = `${segPrefix}:s${segIdx}`;
+          seg.userData.segW = fill.width;
+          seg.userData.segH = wallH;
+        }
         setupShadows(seg);
         parent.add(seg);
       }
+      segIdx++;
     } else if (fill.type === 'window' || fill.type === 'door') {
       const mod = cloneModule(modules, fill.model);
       if (mod) {
@@ -3420,11 +3433,14 @@ function buildHouseFromDescriptor(houseGroup, desc, modules, params, options = {
       }
     }
 
+    let edgeIdx = 0;
     for (const item of outline.items) {
       if (item.type === 'pillar') {
         buildPillar(houseGroup, modules, item, wallH, yOffset, ps);
       } else if (item.type === 'wall') {
-        buildEdgeWall(houseGroup, modules, desc.modules, item, wallH, yOffset, wt, ps);
+        // segPrefix — стабильный id ребра для выбора сегментов фасада (S.wallZones)
+        buildEdgeWall(houseGroup, modules, desc.modules, item, wallH, yOffset, wt, ps, `f${fi}:e${edgeIdx}`);
+        edgeIdx++;
       }
     }
 

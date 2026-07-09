@@ -44,6 +44,10 @@ function dGoTo(s) {
   const el = document.getElementById('d-screen-' + s);
   if (el) el.classList.add('active');
 
+  // Режим фасада живёт только на шаге 3 — при уходе гасим (иначе клики по 3D
+  // на шаге 2 продолжали бы тоглить сегменты).
+  if (typeof _dSyncFacadeMode === 'function') _dSyncFacadeMode();
+
   // Хедер убран; «Итог» — плавающая кнопка, видна только на шаге 3.
   const summaryBtn = document.getElementById('d-btn-summary');
   if (summaryBtn) summaryBtn.style.display = s === 3 ? '' : 'none';
@@ -225,6 +229,7 @@ function _dResetAllConfigurations() {
   S.activeBed = null;
   S.bedH = 0.20;
   S.fenceH = 1.5;
+  S.wallZones = {};   // выбор сегментов фасада привязан к контуру дома
   S.mats = {};
   S.elementMat = {};
   S.estimate = {};
@@ -581,6 +586,51 @@ function _dRenderSidebar() {
   // Правую панель материалов показываем только когда выбран элемент проекта.
   const panel = document.getElementById('d-panel');
   if (panel) panel.classList.toggle('hidden', !dActiveItem);
+
+  // Режим «Отделка фасада» зависит от dActiveItem — синхронизируем здесь
+  // (единая точка: sidebar перерисовывается при каждой смене активного элемента).
+  _dSyncFacadeMode();
+}
+
+// ══════════════════════════════════════════════
+// ОТДЕЛКА ФАСАДА — режим выбора сегментов стен в 3D
+// Выбран элемент «facade» на шаге 3 → S.facadeMode: клики по вертикальным
+// сегментам стен в 3D тоглят их (S.wallZones), над 3D — тулбар с подсказкой.
+// ══════════════════════════════════════════════
+function _dSyncFacadeMode() {
+  const on = (dActiveItem === 'facade' && dStep === 3);
+  if (S.facadeMode !== on) {
+    S.facadeMode = on;
+    // Подсветка выбранных сегментов включается/гаснет вместе с режимом.
+    if (typeof _applyFacadeSelection === 'function' && typeof threeState !== 'undefined' && threeState) {
+      _applyFacadeSelection();
+    }
+  }
+  const bar = document.getElementById('d-facade-bar');
+  if (bar) bar.style.display = on ? '' : 'none';
+  if (on) _dUpdateFacadeBar();
+}
+
+function _dUpdateFacadeBar() {
+  const el = document.getElementById('d-facade-count');
+  if (!el) return;
+  const total = (typeof threeState !== 'undefined' && threeState && threeState.facadeSegs)
+    ? threeState.facadeSegs.length : 0;
+  const n = Object.keys(S.wallZones || {}).length;
+  el.textContent = n ? `Выбрано: ${n} из ${total}` : 'Ничего не выбрано — материал ляжет на весь фасад';
+}
+
+function dFacadeSelectAll() {
+  const segs = (typeof threeState !== 'undefined' && threeState && threeState.facadeSegs) || [];
+  for (const s of segs) S.wallZones[s.userData.segId] = true;
+  if (typeof _applyFacadeSelection === 'function') _applyFacadeSelection();
+  _dUpdateFacadeBar();
+}
+
+function dFacadeClear() {
+  S.wallZones = {};
+  if (typeof _applyFacadeSelection === 'function') _applyFacadeSelection();
+  _dUpdateFacadeBar();
 }
 
 // ── Delete (×) button — сбросить настройки конкретной позиции ──
@@ -595,6 +645,7 @@ function dDeleteItem(secId) {
   if (secId === 'terrace') { S.terraceRects = []; S.activeTerraceRect = null; }
   if (secId === 'steps')   { S.steps = { ...DEFAULT_STEPS_RECT }; }
   if (secId === 'beds')    { S.beds = []; S.activeBed = null; }
+  if (secId === 'facade')  { S.wallZones = {}; }
   S.sections = S.sections.filter(s => s !== secId);
   if (S.mats && S.mats[secId]) delete S.mats[secId];
   if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
@@ -807,8 +858,16 @@ function _applySampleToActive(sample) {
     S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures }
                               : (sample.color ? { color: sample.color } : null);
     if (typeof buildScene3d === 'function') buildScene3d();
+  } else if (dActiveItem === 'facade') {
+    // Фасад: материал панелей ложится на выбранные сегменты (S.wallZones) без
+    // пересборки сцены; пустой выбор = весь фасад.
+    S.elementMat.facade = sample.textures ? { textures: sample.textures }
+                        : (sample.color ? { color: sample.color } : null);
+    if (typeof _applyFacadeSelection === 'function' && typeof threeState !== 'undefined' && threeState) {
+      _applyFacadeSelection();
+    }
   } else if (sample.color && typeof applyMaterialToScene === 'function') {
-    applyMaterialToScene(sample.color);    // фасад/забор/ограждение — цвет
+    applyMaterialToScene(sample.color);    // забор/ограждение — цвет
   }
   dRenderSwatches();
 }
@@ -1268,6 +1327,11 @@ function _elementMetric(el) {
   if (el === 'pier')    { const a = _polyAreaM2(S.pts.pier); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'fence')   { const len = _polyLenM(S.pts.fence); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
   if (el === 'beds')    { const n = (S.beds || []).length; return n > 0 ? { kind: 'piece', value: n, text: n + ' шт' } : null; }
+  if (el === 'facade')  {
+    // Площадь выбранных сегментов стен (пустой выбор = весь фасад) — из viewer3d.
+    const a = (typeof facadeSelectedAreaM2 === 'function') ? facadeSelectedAreaM2() : 0;
+    return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null;
+  }
   return null;
 }
 
@@ -1276,7 +1340,7 @@ function _elementMetric(el) {
 //   linear — длина × 1.05 × цена/м.пог;
 //   piece  — количество × цена/шт.
 function _computeEstimate() {
-  const order = ['terrace', 'steps', 'paths', 'pool_terrace', 'pier', 'fence', 'beds'];
+  const order = ['terrace', 'steps', 'paths', 'pool_terrace', 'pier', 'fence', 'beds', 'facade'];
   const rows = [];
   for (const el of order) {
     if (!S.sections.includes(el)) continue;
