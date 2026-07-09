@@ -7,6 +7,11 @@ const CV = {};
 const GRID = 32;       // total meters (canvas area)
 const SNAP = 0.5;      // snap step (meters)
 const CELLS = GRID / SNAP; // 64 grid cells
+// Порог прилипания кромок/точек к стенам дома и соседним rect'ам, м.
+// ВАЖНО: grid-снап (SNAP=0.5 м) применяется ДО wall-снапа, поэтому эффективный
+// радиус захвата ≈ порог + полклетки. С прежним 1.0 м захват начинался за ~1.5 м
+// от стены — слишком рано; 0.5 м даёт захват с ~0.75 м.
+const EDGE_SNAP_DIST = 0.5;
 
 function mkCvState() {
   return { scale:1, ox:0, oy:0, minScale:0.5, maxScale:4,
@@ -109,7 +114,7 @@ function initSnapCanvas(name) {
     // L/T/+/П-формы тоже снапались к своим внутренним углам.
     if (['terrace','pool_terrace','pier'].includes(name) && !isEmptyLot()) {
       const hp = getHousePolygonNorm();
-      const thr = 1.0 / GRID; // 1m порог в нормализованных координатах
+      const thr = EDGE_SNAP_DIST / GRID; // порог в нормализованных координатах
       // Собираем уникальные snap-координаты (X для вертикальных рёбер, Y для горизонтальных)
       const xCoords = new Set(), yCoords = new Set();
       for (const e of hp.edges) {
@@ -944,9 +949,9 @@ function _snapTargets(excludeTerraceIdx) {
   return { xs, ys };
 }
 
-// Ближайшая snap-цель к координате coord в пределах порога thr; иначе null.
+// Ближайшая snap-цель к координате coord в пределах порога EDGE_SNAP_DIST; иначе null.
 function _nearestTarget(coord, targets) {
-  const thr = 1.0 / GRID;  // 1 м
+  const thr = EDGE_SNAP_DIST / GRID;
   let best = null, bestD = thr;
   for (const t of targets) {
     const d = Math.abs(coord - t);

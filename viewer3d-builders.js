@@ -866,12 +866,16 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         const headX = new THREE.Vector3(botPx - topPx, 0, botPz - topPz).normalize(); // горизонт. направление спуска
         const crossH = new THREE.Vector3().crossVectors(headX, up).normalize();
 
-        // Верх продлеваем по скату вглубь террасы — перила входят в ствол колонны на углу
-        // проёма, а не висят в воздухе (см. STAIR_RAIL_INSET / terracePerimeterSegments).
+        // Верх продлеваем по скату вглубь террасы до ОСИ столба на линии ограждения
+        // (inset RAIL_INSET от кромки) — конец перил прячется в теле стойки на углу
+        // проёма (см. STAIR_RAIL_INSET / terracePerimeterSegments), а не висит в воздухе.
+        // Раньше добавлялась ещё CANOPY_COL_HALF (расчёт на толстую колонну навеса
+        // 0.14 м): у обычной стойки ограждения (~0.1 м) конец выходил насквозь с
+        // обратной стороны. До оси — надёжно при любой толщине стойки.
         const slope0 = new THREE.Vector3().subVectors(P1, P0);
         const slopeLen0 = slope0.length() || 1e-6;
         const run = Math.hypot(botPx - topPx, botPz - topPz) || 1e-6;
-        const topExt = (RAIL_INSET + CANOPY_COL_HALF) * slopeLen0 / run;
+        const topExt = RAIL_INSET * slopeLen0 / run;
         const u = slope0.clone().multiplyScalar(1 / slopeLen0);       // единичный вектор вниз по скату
         const A = P0.clone().addScaledVector(u, -topExt);             // верх с продлением
         const B = P1.clone();
