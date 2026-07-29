@@ -60,6 +60,7 @@ class ProductResource {
         
         this.previewText = data.preview_text;
         this.previewTextType = data.preview_text_type;
+        this.color = data.color || '';   // имя цвета товара (появилось в API 2026-07-29)
         
         this.previewPicture = data.preview_picture;
         this.detailPicture = data.detail_picture;
@@ -88,6 +89,7 @@ class ProductResource {
         this.sections = productData.sections || this.sections;
         this.previewText = productData.preview_text || this.previewText;
         this.previewTextType = productData.preview_text_type || this.previewTextType;
+        this.color = productData.color || this.color;
         this.previewPicture = productData.preview_picture || this.previewPicture;         
         this.detailPicture = productData.detail_picture || this.detailPicture;
         this.prices = productData.prices || this.prices;

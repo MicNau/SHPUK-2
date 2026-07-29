@@ -824,7 +824,7 @@ function _dRenderPanelContent() {
   // Дефолтный раздел каталога для текущего элемента (сбрасываем явный выбор при
   // смене элемента/подрежима). Для ограждения террасы — раздел «Ограждения террасы».
   let defSec = (typeof CONSTRUCTION_TO_SECTION !== 'undefined') ? CONSTRUCTION_TO_SECTION[secId] : null;
-  if (secId === 'terrace' && S.matSubMode === 'railing') defSec = 2332;
+  if (secId === 'terrace' && S.matSubMode === 'railing') defSec = 2331; // «Ограждения для террасы из ДПК» (2332 в API — бренд TalverWood)
   S.catSection = defSec || null;
 
   // Палитра цветов у каждого элемента своя: выбранные для прошлого элемента цвета,
@@ -1133,9 +1133,10 @@ function dShowResults() {
 function _dRenderRealResults(allProducts) {
   const list = document.getElementById('d-mat-list');
   if (!list) return;
-  // Цвет — из названия товара; preview_text только как fallback (см. _itemColors).
+  // Цвет — приоритетно из ПОЛЯ color (появилось в API 2026-07-29, имена совпадают
+  // с палитрой COLORS.md); затем название; preview_text — fallback (см. _itemColors).
   const products = _filterByColors(_filterRealByPrice(allProducts),
-    p => [p.name || '', p.previewText || '']);
+    p => [p.color || '', p.name || '', p.previewText || '']);
   if (!products.length) {
     list.innerHTML = '<div style="padding:16px;color:#999;font-size:13px;">Нет товаров под выбранные фильтры</div>';
     return;
