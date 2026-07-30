@@ -1073,13 +1073,15 @@ function _productPrice(p) {
   return isNaN(v) ? null : v;
 }
 
-// Клиентский фильтр по выбранному ценовому тиру (реальные цены — ₽/м.пог).
+// Клиентский фильтр по выбранному ценовому тиру. Границы — по реальному
+// распределению цен каталога (₽/м.пог, ревизия 2026-07-31: 250–1305 с разрывами
+// на ~500 и ~900); подписи тиров — PRICE_TIERS в state.js, держать в синхроне.
 function _filterRealByPrice(products) {
   if (!S.catPrice) return products;
   const num = p => _productPrice(p) ?? 0;
-  if (S.catPrice === 'budget')   return products.filter(p => num(p) < 2000);
-  if (S.catPrice === 'balanced') return products.filter(p => num(p) >= 2000 && num(p) <= 5000);
-  if (S.catPrice === 'premium')  return products.filter(p => num(p) > 5000);
+  if (S.catPrice === 'budget')   return products.filter(p => num(p) < 500);
+  if (S.catPrice === 'balanced') return products.filter(p => num(p) >= 500 && num(p) <= 900);
+  if (S.catPrice === 'premium')  return products.filter(p => num(p) > 900);
   // МПК: надёжный признак — принадлежность разделу 2329 «Террасная доска из МПК»
   // (тег mpk, ревизия API 2026-07-31); подстрока в названии — fallback.
   if (S.catPrice === 'mpk')      return products.filter(p =>
