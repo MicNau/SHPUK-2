@@ -1080,7 +1080,10 @@ function _filterRealByPrice(products) {
   if (S.catPrice === 'budget')   return products.filter(p => num(p) < 2000);
   if (S.catPrice === 'balanced') return products.filter(p => num(p) >= 2000 && num(p) <= 5000);
   if (S.catPrice === 'premium')  return products.filter(p => num(p) > 5000);
-  if (S.catPrice === 'mpk')      return products.filter(p => /мпк/i.test(p.name || ''));
+  // МПК: надёжный признак — принадлежность разделу 2329 «Террасная доска из МПК»
+  // (тег mpk, ревизия API 2026-07-31); подстрока в названии — fallback.
+  if (S.catPrice === 'mpk')      return products.filter(p =>
+    (p.sections || []).includes(2329) || /мпк/i.test(p.name || ''));
   return products;
 }
 
