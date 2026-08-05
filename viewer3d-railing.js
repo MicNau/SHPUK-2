@@ -297,12 +297,15 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopy
     mesh.castShadow = mesh.receiveShadow = true;
     parent.add(mesh); threeState.railingMeshes.push(mesh);
   }
+  // Масштаб модуля по высоте: родная высота столба → RAIL_POST_H (1 м). Секции по
+  // осям столбов — RAIL_SECTION_W (1.5 м). Профиль столбов/балясин в плане не меняется.
+  const ky = _railingCache.ky || 1;
   // Базис модуля: local +X → вдоль сегмента, +Y → вверх, +Z → поперёк; старт в (px,pz) на настиле.
   function mat(px, pz, ux, uz, sx) {
     const m = new THREE.Matrix4().makeBasis(
       new THREE.Vector3(ux, 0, uz), up, new THREE.Vector3(-uz, 0, ux));
     m.setPosition(px, deckHeight, pz);
-    if (sx !== 1) m.multiply(new THREE.Matrix4().makeScale(sx, 1, 1));
+    if (sx !== 1 || ky !== 1) m.multiply(new THREE.Matrix4().makeScale(sx, ky, 1));
     return m;
   }
 
@@ -315,7 +318,7 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopy
     if (yU === null) yU = canopyUndersideY(px, pz);
     if (yU === null) return null;
     const h = yU - deckHeight;
-    if (!isFinite(h) || h <= 1.2) return null;
+    if (!isFinite(h) || h <= RAIL_POST_H) return null;   // ниже обычного столба — смысла нет
     const colT = 0.10;
     const b = new THREE.Mesh(new THREE.BoxGeometry(colT, h, colT), railMat);
     b.position.set(px, deckHeight + h / 2, pz);

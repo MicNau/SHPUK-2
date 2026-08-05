@@ -47,7 +47,6 @@ function dGoTo(s) {
 
   // Режим фасада живёт только на шаге 3 — при уходе гасим (иначе клики по 3D
   // на шаге 2 продолжали бы тоглить сегменты).
-  if (typeof _dSyncFacadeMode === 'function') _dSyncFacadeMode();
 
   // Хедер убран; «Итог» — плавающая кнопка, видна только на шаге 3.
   const summaryBtn = document.getElementById('d-btn-summary');
@@ -588,42 +587,14 @@ function _dRenderSidebar() {
   const panel = document.getElementById('d-panel');
   if (panel) panel.classList.toggle('hidden', !dActiveItem);
 
-  // Режим «Отделка фасада» зависит от dActiveItem — синхронизируем здесь
-  // (единая точка: sidebar перерисовывается при каждой смене активного элемента).
-  _dSyncFacadeMode();
 }
 
 // ══════════════════════════════════════════════
-// ОТДЕЛКА ФАСАДА — режим выбора сегментов стен в 3D
-// Выбран элемент «facade» на шаге 3 → S.facadeMode: клики по вертикальным
-// сегментам стен в 3D тоглят их (S.wallZones), над 3D — тулбар с подсказкой.
+// ОТДЕЛКА ФАСАДА — выбор ведётся ТОЛЬКО на плане (редактор d-canvas-facade,
+// initFacadeCanvas в canvas.js). 3D-пикинг и плавающий тулбар над сценой убраны:
+// в 3D видно результат (панели), выбор — на плане. Кнопки ниже вызываются из
+// футера план-редактора.
 // ══════════════════════════════════════════════
-function _dSyncFacadeMode() {
-  // !dEditorOpen: пока открыт план-редактор фасада, 3D спрятан под оверлеем —
-  // 3D-пикинг и плавающий тулбар не нужны (у редактора свой счётчик/кнопки).
-  const on = (dActiveItem === 'facade' && dStep === 3 && !dEditorOpen);
-  if (S.facadeMode !== on) {
-    S.facadeMode = on;
-    // Подсветка выбранных сегментов включается/гаснет вместе с режимом.
-    if (typeof _applyFacadeSelection === 'function' && typeof threeState !== 'undefined' && threeState) {
-      _applyFacadeSelection();
-    }
-  }
-  const bar = document.getElementById('d-facade-bar');
-  if (bar) bar.style.display = on ? '' : 'none';
-  if (on) _dUpdateFacadeBar();
-}
-
-function _dUpdateFacadeBar() {
-  const el = document.getElementById('d-facade-count');
-  if (!el) return;
-  // Уникальные id: оконная колонка (стена над/под окном) — два меша с общим segId.
-  const segs = (typeof threeState !== 'undefined' && threeState && threeState.facadeSegs) || [];
-  const total = new Set(segs.map(s => s.userData.segId)).size;
-  const n = Object.keys(S.wallZones || {}).length;
-  el.textContent = n ? `Выбрано: ${n} из ${total} (углы — автоматически)`
-                     : 'Ничего не выбрано — материал ляжет на весь фасад';
-}
 
 // Перерисовать план-редактор фасада, если он сейчас открыт.
 function _dRedrawFacadePlan() {
@@ -634,26 +605,19 @@ function _dRedrawFacadePlan() {
 }
 
 function dFacadeSelectAll() {
-  // Основной источник — 3D-сегменты (все этажи); если сцена ещё не собрана
-  // (например, редактор открыт до готовности GLB) — раскладка плана (1-й этаж).
-  const segs = (typeof threeState !== 'undefined' && threeState && threeState.facadeSegs) || [];
-  if (segs.length) {
-    for (const s of segs) S.wallZones[s.userData.segId] = true;
-  } else if (typeof _houseWorldTransform === 'function') {
-    const T = _houseWorldTransform();
-    if (T) for (const e of T.layout.edges) for (const it of e.items) {
-      if (it.segId) S.wallZones[it.segId] = true;
-    }
+  // Выбираем то, что показано на плане (элементы 1-го этажа) — иначе выбор
+  // содержал бы недоступные для снятия сегменты верхних этажей.
+  const T = (typeof _houseWorldTransform === 'function') ? _houseWorldTransform() : null;
+  if (T) for (const e of T.layout.edges) for (const it of e.items) {
+    if (it.segId) S.wallZones[it.segId] = true;
   }
   if (typeof _applyFacadeSelection === 'function') _applyFacadeSelection();
-  _dUpdateFacadeBar();
   _dRedrawFacadePlan();
 }
 
 function dFacadeClear() {
   S.wallZones = {};
   if (typeof _applyFacadeSelection === 'function') _applyFacadeSelection();
-  _dUpdateFacadeBar();
   _dRedrawFacadePlan();
 }
 

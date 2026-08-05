@@ -23,7 +23,35 @@ function applyTransform(ctx, cx, W, H) {
   ctx.translate(cx.ox, cx.oy); ctx.scale(cx.scale, cx.scale);
 }
 
+// Перемещение плана ПРАВОЙ кнопкой мыши (pan) — как в 3D-виде (ПКМ = перемещение).
+// Левая кнопка остаётся за инструментами редактора (точки, перетаскивание блоков).
+// Вешается один раз на wrap каждого редактора; состояние CV[cvName] читается свежим.
+function attachMousePan(el, cvName, onRedraw) {
+  let panning = false, lastX = 0, lastY = 0, prevCursor = '';
+  el.addEventListener('contextmenu', e => e.preventDefault());   // без меню по ПКМ
+  el.addEventListener('mousedown', e => {
+    if (e.button !== 2 || !CV[cvName]) return;
+    panning = true; lastX = e.clientX; lastY = e.clientY;
+    prevCursor = el.style.cursor; el.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    const cx = CV[cvName];
+    if (!panning || !cx) return;
+    const dpr = window.devicePixelRatio || 1;
+    cx.ox += (e.clientX - lastX) * dpr;
+    cx.oy += (e.clientY - lastY) * dpr;
+    lastX = e.clientX; lastY = e.clientY;
+    onRedraw();
+  });
+  document.addEventListener('mouseup', e => {
+    if (!panning || e.button !== 2) return;
+    panning = false; el.style.cursor = prevCursor;
+  });
+}
+
 function attachPanZoom(el, cvName, onRedraw) {
+  attachMousePan(el, cvName, onRedraw);   // ПКМ-перемещение для всех snap-редакторов
   // CV[cvName] читаем СВЕЖИМ в каждом обработчике: initSnapCanvas пересоздаёт
   // состояние (mkCvState) при каждом открытии редактора, а слушатели живут на el
   // постоянно — захваченная в замыкании ссылка устаревала бы после переоткрытия.
@@ -618,7 +646,6 @@ function initFacadeCanvas() {
     if (typeof _applyFacadeSelection === 'function' && typeof threeState !== 'undefined' && threeState) {
       _applyFacadeSelection();
     }
-    if (typeof _dUpdateFacadeBar === 'function') _dUpdateFacadeBar();
   });
 }
 
@@ -844,8 +871,9 @@ function attachStepsEvents(wrap) {
     if (e.touches.length === 0) { stepsDrag = null; stepsDragStart = null; touchId = null; }
   }, { passive:true });
 
+  attachMousePan(wrap, 'steps', drawStepsCanvas);   // ПКМ — перемещение плана
   wrap.addEventListener('mousedown', e => {
-    if (!stepsActive()) return;
+    if (e.button !== 0 || !stepsActive()) return;   // ЛКМ — инструмент, ПКМ — pan
     const {x,y,W} = getWorld(e.clientX, e.clientY);
     const hit = hitStepsHandle(x,y,W);
     if (hit) {
@@ -1255,8 +1283,10 @@ function attachTerraceEvents(wrap) {
   }, { passive: true });
 
   // ── МЫШЬ ──
+  attachMousePan(wrap, 'terrace', drawTerraceCanvas);   // ПКМ — перемещение плана
   wrap.addEventListener('mousedown', e => {
     // Реагируем только когда открыт редактор террасы (слушатель на wrap живёт всегда).
+    if (e.button !== 0) return;                          // ЛКМ — инструмент, ПКМ — pan
     if (!CV['terrace'] || !document.getElementById('d-canvas-terrace')?.classList.contains('active')) return;
     const {x, y, W} = getWorld(e.clientX, e.clientY);
     if (startDrag(x, y, W)) {
@@ -1594,8 +1624,9 @@ function attachBedsEvents(wrap) {
   }, { passive: true });
 
   // ── МЫШЬ ──
+  attachMousePan(wrap, 'beds', drawBedsCanvas);   // ПКМ — перемещение плана
   wrap.addEventListener('mousedown', e => {
-    if (!bedsActive()) return;
+    if (e.button !== 0 || !bedsActive()) return;  // ЛКМ — инструмент, ПКМ — pan
     const { x, y, W } = getWorld(e.clientX, e.clientY);
     if (startDrag(x, y, W)) wrap.style.cursor = 'move';
   });

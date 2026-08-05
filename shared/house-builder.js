@@ -1824,12 +1824,16 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
   }
 
   if (desc.features.downpipe) {
-    // Downpipe идёт ОТ ЗЕМЛИ (Y=0) ДО ВЕРХА СТЕН (wallTopY).
+    // Downpipe идёт ОТ ВЕРХА ФУНДАМЕНТА (baseY) ДО КАРНИЗА (wallTopY).
     // GLB содержит 3 объекта: downpipe_top (раструб + хомут вверху), downpipe_center
-    // (длинная цилиндрическая часть, масштабируется по Y), downpipe_bottom (колено-выпуск
-    // + хомут внизу). top и bottom НЕ масштабируются, чтобы пропорции рaструба/колена
-    // оставались правильными.
-    const fullH = wallTopY;
+    // (цилиндрическая часть), downpipe_bottom (колено-выпуск + хомут внизу).
+    // top/bottom НЕ масштабируются (пропорции раструба и колена сохраняются) и жёстко
+    // привязаны: низ колена — на отмостке фундамента, верх раструба — на уровне карниза.
+    // Разницу добирает center МАСШТАБОМ по своей оси. Раньше center тиражировался целыми
+    // копиями (floor), а вся труба поднималась на фиксированные 0.20 м — при изменении
+    // высоты фундамента/этажа труба протыкала фундамент снизу или крышу сверху.
+    const pipeBotY = baseY;                       // верх фундамента (низ трубы)
+    const spanH    = Math.max(0.3, wallTopY - pipeBotY);   // фундамент → карниз
     const psHalf = ((desc.constraints && desc.constraints.pillar_size) || 0.20) / 2;
 
     for (let i = 0; i < outline.items.length; i++) {
@@ -1896,27 +1900,23 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
         const topH = bbTopInit['size' + axCap];
         const botH = bbBotInit['size' + axCap];
         const centerSize = bbCenterInit['size' + axCap];
-        // Сколько копий center нужно, чтобы заполнить fullH - top - bot.
-        // floor (не round) — гарантирует что труба НЕ ВЫЙДЕТ за fullH (= уровень карниза)
-        // и не упрётся в скат крутой мансардной крыши.
-        const fillH = Math.max(0, fullH - botH - topH);
-        const nCenters = Math.max(1, Math.floor(fillH / Math.max(0.001, centerSize)));
+        // Center растягивается ровно на остаток пролёта (фундамент→карниз минус
+        // неизменяемые колено и раструб). Труба всегда точно вписана: при низком
+        // фундаменте/этаже не торчит выше карниза, при высоком — не оставляет разрыв.
+        const fillH = Math.max(0.02, spanH - botH - topH);
 
-        // Размещение через position.setComponent (без scale).
-        // bot: его минимум по upAxis на 0 в d-space
-        partBottom.position.setComponent(axIdx, 0 - bbBotInit.min[upAxis]);
-        // center (original): минимум на botH
-        partCenter.position.setComponent(axIdx, botH - bbCenterInit.min[upAxis]);
-        // Дополнительные клоны center
-        const extraCenters = [];
-        for (let k = 1; k < nCenters; k++) {
-          const c = partCenter.clone();
-          c.position.setComponent(axIdx, (botH + k * centerSize) - bbCenterInit.min[upAxis]);
-          d.add(c);
-          extraCenters.push(c);
-        }
-        // top: минимум на botH + nCenters * centerSize
-        partTop.position.setComponent(axIdx, (botH + nCenters * centerSize) - bbTopInit.min[upAxis]);
+        // Ставим часть так, чтобы её минимум по оси совпал с target (в d-space).
+        // Считаем от ТЕКУЩЕГО bbox (после возможного scale) и двигаем position на дельту —
+        // корректно и для частей, у которых своя ненулевая позиция внутри GLB.
+        const alignMin = (obj, target) => {
+          d.updateMatrixWorld(true);
+          const bb = _bboxOfObject(obj);
+          obj.position.setComponent(axIdx, obj.position.getComponent(axIdx) + (target - bb.min[upAxis]));
+        };
+        alignMin(partBottom, 0);                       // колено — на верху фундамента
+        partCenter.scale.setComponent(axIdx, fillH / Math.max(0.001, centerSize));
+        alignMin(partCenter, botH);                    // сразу над коленом
+        alignMin(partTop, botH + fillH);               // раструб — под карнизом
 
         // Rotation вокруг Y: native -Z (направление колена/раструба, "длинная ось" в плане)
         // должен указывать в exterior направление (наружу под 45° от обеих стен).
@@ -1930,8 +1930,6 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
 
         // Расстояние раструба от угла дома по диагонали (eave - приближение к углу).
         const pipeAttachOffset = ROOF_EAVE - 0.15; // 0.30 - 0.15 = 0.15 м от угла
-        // Подъём всей трубы — чтобы колено не утопало в фундамент/тротуар.
-        const pipeYLift = 0.20;
 
         // Поворачиваем native top centroid вокруг Y на ry, чтобы получить world offset.
         const cosR = Math.cos(ry), sinR = Math.sin(ry);
@@ -1941,7 +1939,7 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
         // d.position такое, чтобы world top centroid = corner + attach * exterior_unit.
         d.position.set(
           item.x + pipeAttachOffset * exUnitX - rotTopCx,
-          pipeYLift,
+          pipeBotY,                                   // низ трубы = верх фундамента
           item.z + pipeAttachOffset * exUnitZ - rotTopCz,
         );
         d.rotation.y = ry;
@@ -1951,21 +1949,23 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
         if (!_downpipeFinalDumped) {
           _downpipeFinalDumped = true;
           console.log(`[downpipe] native sizes: top(${bbTopInit.sizeX.toFixed(2)},${bbTopInit.sizeY.toFixed(2)},${bbTopInit.sizeZ.toFixed(2)}) center(${bbCenterInit.sizeX.toFixed(2)},${bbCenterInit.sizeY.toFixed(2)},${bbCenterInit.sizeZ.toFixed(2)}) bot(${bbBotInit.sizeX.toFixed(2)},${bbBotInit.sizeY.toFixed(2)},${bbBotInit.sizeZ.toFixed(2)})`);
-          console.log(`[downpipe] upAxis=${upAxis}, topH=${topH.toFixed(2)}, botH=${botH.toFixed(2)}, centerSize=${centerSize.toFixed(2)}, nCenters=${nCenters}, fullH=${fullH.toFixed(2)}, ry=${(ry*180/Math.PI).toFixed(1)}°, topCentroid_local=(${topCxNative.toFixed(2)},${topCzNative.toFixed(2)})`);
+          console.log(`[downpipe] upAxis=${upAxis}, topH=${topH.toFixed(2)}, botH=${botH.toFixed(2)}, centerSize=${centerSize.toFixed(2)}, fillH=${fillH.toFixed(2)}, spanH=${spanH.toFixed(2)} (baseY=${pipeBotY.toFixed(2)}→wallTop=${wallTopY.toFixed(2)}), ry=${(ry*180/Math.PI).toFixed(1)}°, topCentroid_local=(${topCxNative.toFixed(2)},${topCzNative.toFixed(2)})`);
         }
       } else {
         console.warn(`[downpipe] 3-part structure NOT found (top=${partTop?.name||'∅'}, center=${partCenter?.name||'∅'}, bottom=${partBottom?.name||'∅'}). Fallback с auto-detect оси.`);
-        // Fallback с auto-detect: ищем самую длинную ось всего GLB.
+        // Fallback с auto-detect: ищем самую длинную ось всего GLB и тянем её на весь
+        // пролёт фундамент→карниз (posX/posZ здесь раньше были НЕОПРЕДЕЛЕНЫ — ReferenceError
+        // при отсутствии 3-частной структуры; берём угол дома, как в основной ветке).
         const bb = _bboxOfObject(d);
         const sx = bb.sizeX, sy = bb.sizeY, sz = bb.sizeZ;
         const upAxis = (sy >= sx && sy >= sz) ? 'y' : (sz >= sx ? 'z' : 'x');
         const axCap = upAxis.toUpperCase();
         const nativeH = bb['size' + axCap];
-        d.scale[upAxis] = fullH / Math.max(0.1, nativeH);
-        // После scale нужно пересчитать позицию: min[upAxis] был bb.min[upAxis] в native;
-        // после scale становится bb.min[upAxis] * scale.
-        d.position.set(posX, 0, posZ);
-        d.position[upAxis] = -bb.min[upAxis] * d.scale[upAxis];
+        d.scale[upAxis] = spanH / Math.max(0.1, nativeH);
+        // После scale пересчитываем позицию: min[upAxis] был bb.min[upAxis] в native.
+        d.position.set(item.x + (ROOF_EAVE - 0.15) * exUnitX, pipeBotY,
+                       item.z + (ROOF_EAVE - 0.15) * exUnitZ);
+        d.position[upAxis] = pipeBotY - bb.min[upAxis] * d.scale[upAxis];
         if (upAxis === 'z')      d.rotation.x = Math.PI / 2;
         else if (upAxis === 'x') d.rotation.z = Math.PI / 2;
         log(`[downpipe] fallback: upAxis=${upAxis}, sizes=(${sx.toFixed(2)},${sy.toFixed(2)},${sz.toFixed(2)})`, 'dim');

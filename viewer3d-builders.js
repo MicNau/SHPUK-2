@@ -23,7 +23,7 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
   const bm = mesh(box(length+.2, bh, width+.2), M.base);
   bm.position.set(length/2, bh/2, width/2);
   parent.add(bm);
-  _applyBoxUV(bm, 1.0);
+  _applyBoxUV(bm, UV_TILE);
 
   const WWIN=0.9, HWIN=1.2, YWIN=1.0, WDOOR=1.0, HDOOR=2.2;
 
@@ -108,7 +108,7 @@ function buildHouseMeshes(parent, M, length, width, wh, bh, wt) {
     };
     grp.children.forEach(child => {
       if (child.isMesh && child.material === M.wall) {
-        _applyBoxUV(child, 2.0, thisOff);
+        _applyBoxUV(child, UV_TILE, thisOff);
       }
       if (child.isGroup) _wallUVHelper(child, thisOff);
     });
@@ -322,7 +322,8 @@ let _railingCache = null;       // { post, rails, baluShort, baluFloor }
 let _railingLoadPromise = null;
 const RAIL_BALU_PITCH = 0.1;    // нативный шаг балясин (центр-центр), м
 const RAIL_BALU_INSET = 0.1;    // отступ крайней балясины от оси столба, м
-const RAIL_SECTION_W  = 1.0;    // целевая ширина секции (одинакова на всех сегментах), м
+const RAIL_SECTION_W  = 1.5;    // ширина секции ПО ОСЯМ СТОЛБОВ (одинакова везде), м
+const RAIL_POST_H     = 1.0;    // высота столба ограждения (от настила до верха), м
 const RAIL_POST_MERGE = 0.28;   // столбы ближе этого расстояния считаем одним (дедуп на стыках rect-ов)
 let _railPostReg = null;        // общий реестр поставленных столбов [{x,z,tall,mesh}] на проход buildScene3d
 
@@ -345,6 +346,13 @@ function ensureRailingLoaded() {
           else if (n.includes('balu_short')) c.baluShort = g;
           else if (n.includes('rail')) c.rails = g;
         });
+        // Нативные высоты модуля (для приведения к RAIL_POST_H). Меряем по геометрии,
+        // а не хардкодим — переэкспорт GLB не потребует правки кода.
+        const topY = g => { if (!g) return 0; g.computeBoundingBox(); return g.boundingBox.max.y; };
+        c.nativePostH = topY(c.post) || 1.2;              // верх столба в родном базисе
+        c.nativeBaluH = topY(c.baluFloor) || c.nativePostH; // верх балясины (= низ поручня)
+        c.ky = RAIL_POST_H / c.nativePostH;               // общий масштаб модуля по высоте
+        c.baluTopH = c.nativeBaluH * c.ky;                // высота низа поручня над настилом
         _railingCache = c; resolve(c);
       },
       undefined,
@@ -845,6 +853,10 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       const stairRailMat = new THREE.MeshStandardMaterial({ color: PORCH_COLUMN_COLOR, roughness: 0.72, metalness: 0.04 });
       stairRailMat.name = 'mat_railing';
       const up = new THREE.Vector3(0, 1, 0);
+      // Тот же масштаб по высоте, что у ограждения террасы (столб → RAIL_POST_H),
+      // и та же высота низа поручня — перила лестницы стыкуются с террасными.
+      const ky = RC.ky || 1;
+      const railTopH = RC.baluTopH || (RC.nativeBaluH || 1.055) * ky;
       const placeGeo = (geo, m4) => {
         const g = geo.clone(); g.applyMatrix4(m4);
         const mm = mesh(g, stairRailMat); stairGroup.add(mm); threeState.railingMeshes.push(mm);
@@ -887,12 +899,13 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         const zAxis = new THREE.Vector3().crossVectors(xAxis, up).normalize();
         const mRail = new THREE.Matrix4().makeBasis(xAxis, up, zAxis);
         mRail.setPosition(A.x, A.y, A.z);
-        mRail.multiply(new THREE.Matrix4().makeScale(L, 1, 1));        // тянем по длине ската
+        mRail.multiply(new THREE.Matrix4().makeScale(L, ky, 1));       // длина ската × высота модуля
         placeGeo(RC.rails, mRail);
 
         // ── Нижний столб-ньюэл (post), вертикальный, на последней проступи ──
         const mPost = new THREE.Matrix4().makeBasis(headX, up, crossH);
         mPost.setPosition(B.x, B.y, B.z);
+        mPost.multiply(new THREE.Matrix4().makeScale(1, ky, 1));
         placeGeo(RC.post, mPost);
 
         // ── Балясины по видимым проступям (i=0..n-2): вертикальные, нативное сечение,
@@ -904,7 +917,7 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
           const bz = topPz + (botPz - topPz) * t;
           const surfY = bh - (i + 1) * realRise;            // верх проступи i
           const baseLineY = bh + (realRise - bh) * t;       // линия ската на этой проступи
-          const baluH = (baseLineY + 1.055) - surfY;        // до низа поручня (как в секции террасы)
+          const baluH = (baseLineY + railTopH) - surfY;     // до низа поручня (как в секции террасы)
           if (baluH < 0.1) continue;
           const mBal = new THREE.Matrix4().makeBasis(headX, up, crossH);
           mBal.setPosition(bx, surfY, bz);

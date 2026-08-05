@@ -187,8 +187,6 @@ function init3dCanvas(targetSlotId) {
   const controls = _setupControls(camera, renderer.domElement);
   controls.target.set(4, 2, 2.5);
 
-  // Пикинг сегментов фасада (активен только в S.facadeMode; см. «Отделка фасада»)
-  _initFacadePicking(renderer.domElement);
 
   // ── Процедурное небо (до загрузки HDRI) ───────
   const skyMesh = _buildProceduralSky();
@@ -623,9 +621,12 @@ function _applyBoxUV(mesh, tileSize, groupOffset) {
   });
 }
 
-// Размер одного тайла deck-текстуры (метров). Общий масштаб для террасы, крыльца
-// и ступеней. deck_diff.jpg содержит ~11 досок по высоте → доска ≈ DECK_TILE/11.
-const DECK_TILE = 1.5;
+// Ребро кубической UV-проекции (метров) — ЕДИНОЕ для всей сцены: текстура
+// повторяется ровно раз в метр на любой поверхности, поэтому масштаб рисунка
+// одинаков у дома, террасы, дорожек и грядок.
+const UV_TILE = 1.0;
+// Тайл deck-текстуры (терраса/крыльцо/ступени/дорожки/грядки) — тот же 1 м.
+const DECK_TILE = UV_TILE;
 
 // Кубическая deck-UV проекция с ориентацией досок вдоль нужной оси.
 // Текстура: грувы (стыки досок) — горизонтальные линии (const V). После _applyBoxUV
@@ -682,9 +683,11 @@ function _resolveDeckMat(baseDeck, el) {
 // ══════════════════════════════════════════════
 // МАТЕРИАЛЫ ДОМА (выбор на шаге «Параметры дома»)
 // ══════════════════════════════════════════════
-const HOUSE_ROOF_TILE  = 2.0;      // метров на тайл текстуры крыши
-const HOUSE_WALL_TILE  = 1.5;      // стен
-const HOUSE_BASE_TILE  = 1.0;      // цоколя
+// Тайлы материалов дома — тоже 1 м (единое ребро UV_TILE). Крыша использует
+// проекцию по скату (_applyRoofUV), шаг тот же.
+const HOUSE_ROOF_TILE  = UV_TILE;
+const HOUSE_WALL_TILE  = UV_TILE;
+const HOUSE_BASE_TILE  = UV_TILE;
 const HOUSE_WOOD_COLOR = 0x4a2f18; // коричневый для деревянных частей (рамы/двери/перила)
 
 // Текстурный набор для материала дома: {color, map, normalMap, roughnessMap}.
@@ -1279,18 +1282,17 @@ function clearGroup(group, disposeMaterials) {
 
 
 // ══════════════════════════════════════════════
-// ОТДЕЛКА ФАСАДА — выбор вертикальных сегментов стен в 3D
+// ОТДЕЛКА ФАСАДА — применение панелей на выбранные элементы
 // Сегменты — wall_segment'ы с userData.segId/segW/segH (см. buildEdgeWall в
-// shared/house-builder.js). Выбор — S.wallZones (segId → true); материал панелей —
-// S.elementMat.facade. Пустой выбор при заданном материале = «весь фасад».
-// Клик в 3D в режиме S.facadeMode тоглит сегмент (drag/orbit кликом не считается).
+// shared/house-builder.js). ВЫБОР ведётся на ПЛАНЕ (редактор «Отделка фасада»,
+// initFacadeCanvas в canvas.js); здесь только применение: S.wallZones (segId → true)
+// + материал S.elementMat.facade. Пустой выбор при заданном материале = «весь фасад».
 // Оконные колонки (стена над/под проёмом) — два меша с ОБЩИМ segId (`:o{n}`).
 // Угловые столбы (userData.facadePillar) не выбираются сами — отделываются
 // АВТОМАТИЧЕСКИ «под ближайшую вставку»: если любой примыкающий (bbox-касание)
 // элемент фасада выбран под панели, столб красится вместе с ним.
 // Фронтоны/мансардные стены segId не имеют и под отделку не выбираются.
 // ══════════════════════════════════════════════
-const FACADE_SELECT_EMISSIVE = 0x2f6fd8;   // подсветка выбранных сегментов в режиме фасада
 
 function _collectFacadeSegments(root) {
   const segs = [], pillars = [];
@@ -1335,25 +1337,20 @@ function _facadePanelMaterial() {
 }
 
 // Применяет выбор/материал к сегментам БЕЗ пересборки сцены (дёшево — вызывается
-// на каждый клик). Родной материал меша (после _applyHouseMaterials) кэшируется в
-// userData._baseMat и возвращается при снятии выбора. Мировой box-UV ставится мешу
-// один раз (userData._facadeUV) — текстура панелей не растягивается масштабом сегмента.
+// на каждый клик на плане). Родной материал меша (после _applyHouseMaterials)
+// кэшируется в userData._baseMat и возвращается при снятии выбора. Мировой box-UV
+// ставится мешу один раз (userData._facadeUV) — текстура панелей не растягивается
+// масштабом сегмента. Подсветки выбора в 3D нет: выбор виден на плане, в 3D —
+// результат (панели). Материал не выбран → сцена не меняется.
 function _applyFacadeSelection() {
   if (!threeState || !threeState.facadeSegs || !threeState.facadeSegs.length) return;
   const zones = (typeof S !== 'undefined' && S.wallZones) ? S.wallZones : {};
   const selCount = Object.keys(zones).length;
-  const facadeMode = !!(typeof S !== 'undefined' && S.facadeMode);
   if (threeState._facadePanelMat) threeState._facadePanelMat.dispose();
   const panel = _facadePanelMaterial();          // ОБЩИЙ на все панельные сегменты
   threeState._facadePanelMat = panel;
-  if (panel && facadeMode && selCount > 0) {
-    // Панель стоит только на выбранных → подсветку можно дать общему материалу.
-    panel.emissive = new THREE.Color(FACADE_SELECT_EMISSIVE);
-    panel.emissiveIntensity = 0.35;
-  }
-  // Общий раскрасчик: панель (с одноразовым мировым UV) либо родной материал
-  // (+ подсветка на его собственном материале — cloneModule клонирует per-mesh).
-  const paint = (rootObj, usePanel, highlight) => {
+  // Общий раскрасчик: панель (с одноразовым мировым UV) либо родной материал.
+  const paint = (rootObj, usePanel) => {
     rootObj.traverse(o => {
       if (!o.isMesh || !o.material) return;
       if (!o.userData._baseMat) o.userData._baseMat = o.material;
@@ -1362,17 +1359,13 @@ function _applyFacadeSelection() {
         o.material = panel;
       } else {
         o.material = o.userData._baseMat;
-        if (o.material.emissive !== undefined) {
-          o.material.emissive.setHex(highlight ? FACADE_SELECT_EMISSIVE : 0x000000);
-          o.material.emissiveIntensity = 0.35;
-        }
       }
     });
   };
 
   for (const seg of threeState.facadeSegs) {
     const selected = !!zones[seg.userData.segId];
-    paint(seg, !!panel && (selected || selCount === 0), facadeMode && selected);
+    paint(seg, !!panel && (selected || selCount === 0));
   }
 
   // Угловые столбы — «под ближайшую вставку»: включён, если пустой выбор
@@ -1381,7 +1374,7 @@ function _applyFacadeSelection() {
   for (const p of (threeState.facadePillars || [])) {
     const on = selCount === 0 || (p.userData._adjIds || []).some(id => zones[id]);
     p.userData._facadeOn = on;
-    paint(p, !!panel && on, facadeMode && selCount > 0 && on);
+    paint(p, !!panel && on);
   }
 }
 
@@ -1402,44 +1395,9 @@ function facadeSelectedAreaM2() {
   return a;
 }
 
-// ── Пикинг сегментов кликом в 3D ──
-let _fpDown = null;
-function _initFacadePicking(dom) {
-  dom.addEventListener('pointerdown', e => {
-    if (e.button === 0) _fpDown = { x: e.clientX, y: e.clientY, t: performance.now() };
-  });
-  dom.addEventListener('pointerup', e => {
-    const d = _fpDown; _fpDown = null;
-    if (!d || e.button !== 0) return;
-    // Отличаем клик от orbit-drag: малое смещение и короткое время удержания.
-    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6 || performance.now() - d.t > 500) return;
-    if (!threeState || typeof S === 'undefined' || !S.facadeMode) return;
-    _pickFacadeSegment(e.clientX, e.clientY);
-  });
-}
-
-function _pickFacadeSegment(cx, cy) {
-  const { renderer, camera, houseGroup } = threeState;
-  const r = renderer.domElement.getBoundingClientRect();
-  const ndc = new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
-  const rc = new THREE.Raycaster();
-  rc.setFromCamera(ndc, camera);
-  for (const h of rc.intersectObjects(houseGroup.children, true)) {
-    if (h.object.material && h.object.material.transparent) continue;  // стекло — смотрим дальше
-    let o = h.object, segId = null;
-    while (o && o !== houseGroup) {
-      if (o.userData && o.userData.segId) { segId = o.userData.segId; break; }
-      o = o.parent;
-    }
-    if (segId) {
-      if (S.wallZones[segId]) delete S.wallZones[segId];
-      else S.wallZones[segId] = true;
-      _applyFacadeSelection();
-      if (typeof _dUpdateFacadeBar === 'function') _dUpdateFacadeBar();
-    }
-    return;   // первый непрозрачный хит решает — сквозь дом не выбираем
-  }
-}
+// (Пикинг сегментов кликом в 3D удалён — выбор ведётся ТОЛЬКО на плане
+// в редакторе «Отделка фасада», см. initFacadeCanvas в canvas.js. В 3D остаётся
+// результат: панели на выбранных элементах.)
 
 // ══════════════════════════════════════════════
 // MATERIAL APPLICATION (примерка образцов)

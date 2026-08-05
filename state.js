@@ -237,7 +237,6 @@ const S = {
   // формат 'f{этаж}:e{ребро}:s{сегмент}' → true). Пустой выбор при заданном
   // материале (S.elementMat.facade) = «весь фасад». Материал панелей — S.elementMat.facade.
   wallZones: {},
-  facadeMode: false,   // режим выбора сегментов в 3D (активен элемент «Отделка фасада»)
   // Материалы дома (шаг «Параметры дома»).
   roofMat: 'tile',     // tile | metal_green | metal_red
   baseMat: 'concrete', // concrete | stone
