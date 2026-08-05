@@ -1914,7 +1914,20 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
           obj.position.setComponent(axIdx, obj.position.getComponent(axIdx) + (target - bb.min[upAxis]));
         };
         alignMin(partBottom, 0);                       // колено — на верху фундамента
-        partCenter.scale.setComponent(axIdx, fillH / Math.max(0.001, centerSize));
+
+        // Растяжение center на fillH. Две тонкости, на которых легко ошибиться:
+        //  1) масштаб применяется ДО поворота (M = T·R·S), а у меша center собственный
+        //     поворот: длина трубы лежит вдоль ЛОКАЛЬНОЙ оси X, хотя в системе модуля
+        //     секция вертикальна. Тянуть надо ту локальную ось, которая после поворота
+        //     смотрит вдоль upAxis, иначе растягивается сечение, а длина не меняется;
+        //  2) масштаб ДОМНОЖАЕМ на собственный из GLB (у center он (2,2,2)), т.к.
+        //     centerSize измерен уже с ним.
+        const upVec = new THREE.Vector3(); upVec.setComponent(axIdx, 1);
+        upVec.applyQuaternion(partCenter.quaternion.clone().invert());
+        const comps = [Math.abs(upVec.x), Math.abs(upVec.y), Math.abs(upVec.z)];
+        const stretchIdx = comps.indexOf(Math.max(...comps));
+        partCenter.scale.setComponent(stretchIdx,
+          partCenter.scale.getComponent(stretchIdx) * fillH / Math.max(0.001, centerSize));
         alignMin(partCenter, botH);                    // сразу над коленом
         alignMin(partTop, botH + fillH);               // раструб — под карнизом
 
