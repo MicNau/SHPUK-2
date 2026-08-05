@@ -1832,8 +1832,11 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
     // Разницу добирает center МАСШТАБОМ по своей оси. Раньше center тиражировался целыми
     // копиями (floor), а вся труба поднималась на фиксированные 0.20 м — при изменении
     // высоты фундамента/этажа труба протыкала фундамент снизу или крышу сверху.
-    const pipeBotY = baseY;                       // верх фундамента (низ трубы)
-    const spanH    = Math.max(0.3, wallTopY - pipeBotY);   // фундамент → карниз
+    // DOWNPIPE_DROP — вся труба целиком опущена на 40 см (длина не меняется): выпуск
+    // колена уходит ниже верха фундамента, ближе к отмостке.
+    const DOWNPIPE_DROP = 0.40;
+    const spanH    = Math.max(0.3, wallTopY - baseY);      // длина: фундамент → карниз
+    const pipeBotY = baseY - DOWNPIPE_DROP;                // положение низа трубы
     const psHalf = ((desc.constraints && desc.constraints.pillar_size) || 0.20) / 2;
 
     for (let i = 0; i < outline.items.length; i++) {

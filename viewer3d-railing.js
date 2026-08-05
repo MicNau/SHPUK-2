@@ -388,11 +388,14 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopy
       // Перила (верх/низ) тянем по длине секции.
       placeGeo(_railingCache.rails, mat(s.ax + ux * t0, s.az + uz * t0, ux, uz, gap));
       // Балясины: НЕ тянем — ставим нативного сечения, число подгоняем по шагу ~0.1 м,
-      // узор «2/5/8 от пола» (0-base j%3===1) перезапускается в каждом пролёте.
+      // но НЕ БОЛЕЕ RAIL_BALU_MAX на секцию (9 штук ровно ложатся на узор «2/5/8 от пола»);
+      // при упоре в лимит шаг просто увеличивается. Узор (0-base j%3===1) перезапускается
+      // в каждом пролёте.
       const bg = _railingCache;
       if (bg.baluShort && bg.baluFloor) {
         const usable = gap - 2 * RAIL_BALU_INSET;
-        const n = usable <= 0 ? 1 : Math.max(1, Math.round(usable / RAIL_BALU_PITCH) + 1);
+        const n = usable <= 0 ? 1
+          : Math.min(RAIL_BALU_MAX, Math.max(1, Math.round(usable / RAIL_BALU_PITCH) + 1));
         for (let j = 0; j < n; j++) {
           const local = n === 1 ? gap / 2 : RAIL_BALU_INSET + usable * j / (n - 1);
           const t = t0 + local;

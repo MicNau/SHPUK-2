@@ -322,6 +322,7 @@ let _railingCache = null;       // { post, rails, baluShort, baluFloor }
 let _railingLoadPromise = null;
 const RAIL_BALU_PITCH = 0.1;    // нативный шаг балясин (центр-центр), м
 const RAIL_BALU_INSET = 0.1;    // отступ крайней балясины от оси столба, м
+const RAIL_BALU_MAX   = 9;      // максимум балясин на секцию (9 = ровный узор «2/5/8 от пола»)
 const RAIL_SECTION_W  = 1.5;    // ширина секции ПО ОСЯМ СТОЛБОВ (одинакова везде), м
 const RAIL_POST_H     = 1.0;    // высота столба ограждения (от настила до верха), м
 const RAIL_POST_MERGE = 0.28;   // столбы ближе этого расстояния считаем одним (дедуп на стыках rect-ов)
