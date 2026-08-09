@@ -1,40 +1,52 @@
 {
-  "id": "type_simple_gable_white",
-  "name": "Простой дом с двускатной крышей",
-  "description": "Одноэтажный дом со светлыми стенами, каменным фундаментом и двускатной крышей",
+  "id": "type_cabin_wood",
+  "name": "Двор с мансардой и верхней крышей",
+  "description": "Стильный деревянный дом с крутой губной крышей, мансардным окном и порчем",
   "constraints": {
-    "base_h": { "min": 80, "max": 150, "step": 10, "default": 100, "unit": "cm" },
-    "roof_angle": { "min": 30, "max": 50, "step": 5, "default": 40, "unit": "deg" },
+    "base_h": {
+      "min": 50,
+      "max": 120,
+      "step": 10,
+      "default": 80,
+      "unit": "cm"
+    },
+    "roof_angle": {
+      "min": 45,
+      "max": 75,
+      "step": 5,
+      "default": 60,
+      "unit": "deg"
+    },
     "wall_thickness": 0.20,
     "pillar_size": 0.20
   },
   "roof_type": "gable",
   "modules": {
     "window_single": {
-      "w": { "min": 0.60, "max": 1.40, "default": 0.90 },
-      "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
-      "y": { "min": 0.30, "max": 1.50, "default": 0.90 },
+      "w": { "min": 0.80, "max": 1.40, "default": 1.00 },
+      "h": { "min": 1.20, "max": 2.00, "default": 1.50 },
+      "y": { "min": 0.30, "max": 1.50, "default": 0.80 },
       "frame_profile": 0.05,
       "sill_overhang": 0.03,
       "glb": "mod_window_single.glb"
     },
-    "window_double": {
-      "w": { "min": 1.00, "max": 2.00, "default": 1.40 },
-      "h": { "min": 0.60, "max": 1.80, "default": 1.20 },
-      "y": { "min": 0.30, "max": 1.50, "default": 0.90 },
-      "frame_profile": 0.05,
-      "sill_overhang": 0.03,
-      "mullions": ["v"],
-      "glb": "mod_window_double.glb"
-    },
-    "door_single": {
-      "w": { "min": 0.80, "max": 1.00, "default": 0.90 },
+    "door_double": {
+      "w": { "min": 1.20, "max": 1.80, "default": 1.40 },
       "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
       "y": 0.00,
-      "leaves": 1,
+      "leaves": 2,
       "mechanism": "swing",
       "frame_profile": 0.05,
-      "glb": "mod_door_single.glb"
+      "glb": "mod_door_double.glb"
+    },
+    "door_slide": {
+      "w": { "min": 1.40, "max": 2.00, "default": 1.80 },
+      "h": { "min": 2.00, "max": 2.40, "default": 2.10 },
+      "y": 0.00,
+      "leaves": 2,
+      "mechanism": "slide",
+      "frame_profile": 0.05,
+      "glb": "mod_door_slide_double.glb"
     }
   },
   "floors": [
@@ -42,8 +54,8 @@
       "id": "floor_1",
       "label": "Первый этаж",
       "constraints": {
-        "area": { "min": 60, "max": 120, "step": 5, "default": 90, "unit": "m2" },
-        "floor_h": { "min": 280, "max": 320, "step": 10, "default": 300, "unit": "cm" }
+        "area": { "min": 40, "max": 90, "step": 5, "default": 60, "unit": "m2" },
+        "floor_h": { "min": 270, "max": 350, "step": 10, "default": 300, "unit": "cm" }
       },
       "vars": {
         "L": "sqrt(area * 1.6)",
@@ -53,7 +65,10 @@
         {
           "run": "L",
           "facade": [
-            { "wall": "fill" }
+            { "wall": "fill" },
+            { "window": "single" },
+            { "wall": "fill" },
+            { "window": "single" }
           ]
         },
         { "turn": 90 },
@@ -61,7 +76,7 @@
           "run": "W",
           "facade": [
             { "wall": "fill" },
-            { "window": "double" },
+            { "door": "double", "main": true },
             { "wall": "fill" }
           ]
         },
@@ -70,9 +85,7 @@
           "run": "L",
           "facade": [
             { "wall": "fill" },
-            { "window": "double" },
-            { "wall": "fill" },
-            { "door": "single", "main": true },
+            { "window": "single" },
             { "wall": "fill" }
           ]
         },
@@ -81,9 +94,7 @@
           "run": "W",
           "facade": [
             { "wall": "fill" },
-            { "window": "double" },
-            { "wall": "fill" },
-            { "window": "double" },
+            { "window": "single" },
             { "wall": "fill" }
           ]
         },
@@ -91,16 +102,51 @@
       ]
     }
   ],
-  "roof_windows": [],
+  "roof_windows": [
+    {
+      "module": "dormer",
+      "slope": "north",
+      "position_along": 0.5,
+      "position_up": 0.3,
+      "w": 1.20,
+      "h": 1.00,
+      "depth": 0.80,
+      "window": {
+        "type": "single",
+        "w": 0.75,
+        "h": 0.60
+      }
+    },
+    {
+      "module": "window_velux",
+      "slope": "south",
+      "position_along": 0.4,
+      "position_up": 0.2,
+      "w": 0.85,
+      "h": 1.00,
+      "count": 2,
+      "spacing": 1.5
+    }
+  ],
   "features": {
+    "porch": {
+      "width": 3.0,
+      "depth": 1.8,
+      "step_rise": 0.20,
+      "step_run": 0.40,
+      "has_canopy": true,
+      "canopy_height": 2.50,
+      "canopy_slope": 0.15,
+      "has_railing": true,
+      "railing_height": 0.95
+    },
     "gutters": true,
     "cornice": true
   },
   "materials_map": {
-    "mat_wall": { "label": "Белые стены", "swappable": true },
-    "mat_base": { "label": "Серый фундамент", "swappable": true },
-    "mat_roof": { "label": "Коричневая кровля", "swappable": true },
-    "mat_frame": { "label": "Деревянные рамы", "swappable": true },
-    "mat_door": { "label": "Деревянная дверь", "swappable": true }
+    "mat_wall": { "label": "Стены", "swappable": true },
+    "mat_base": { "label": "Цоколь", "swappable": true },
+    "mat_roof": { "label": "Крыша", "swappable": true },
+    "mat_frame": { "label": "Рамы окон", "swappable": true }
   }
 }
