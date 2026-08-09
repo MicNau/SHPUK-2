@@ -61,6 +61,9 @@ class ProductResource {
         this.previewText = data.preview_text;
         this.previewTextType = data.preview_text_type;
         this.color = data.color || '';   // имя цвета товара (появилось в API 2026-07-29)
+        // URL 3D-модели товара (садовая мебель). Бэкенд поля пока НЕ отдаёт —
+        // проверяем оба ожидаемых варианта, чтобы подхватить без правок кода.
+        this.modelUrl = data.model_url || (data.texture_urls && data.texture_urls.model_glb) || '';
         
         this.previewPicture = data.preview_picture;
         this.detailPicture = data.detail_picture;
@@ -90,6 +93,8 @@ class ProductResource {
         this.previewText = productData.preview_text || this.previewText;
         this.previewTextType = productData.preview_text_type || this.previewTextType;
         this.color = productData.color || this.color;
+        this.modelUrl = productData.model_url
+          || (productData.texture_urls && productData.texture_urls.model_glb) || this.modelUrl;
         this.previewPicture = productData.preview_picture || this.previewPicture;         
         this.detailPicture = productData.detail_picture || this.detailPicture;
         this.prices = productData.prices || this.prices;

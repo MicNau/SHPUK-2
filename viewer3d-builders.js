@@ -312,6 +312,89 @@ function ensurePlanterLoaded() {
   return _planterLoadPromise;
 }
 
+// ══════════════════════════════════════════════
+// САДОВАЯ МЕБЕЛЬ — GLB-модели по точкам плана (S.furniture)
+// Точка = место установки; товар назначается ей из каталога (по порядку номеров).
+// Источник модели (`furnitureModelUrl`): поле товара из API, когда бэкенд его
+// добавит, иначе локальный фолбэк. На 2026-08-02 API моделей НЕ отдаёт: у товаров
+// нет полей model/glb, разделы мебели (2442/2448) пусты, /static/models|glb — 404.
+// Как только появится (ожидаем `model_url` или `texture_urls.model_glb`) —
+// ResourceManager прокидывает его в ProductResource.modelUrl и код подхватит.
+// ══════════════════════════════════════════════
+const FURNITURE_FALLBACK = {
+  lamp:  'assets/houses/modules/site/mod_lamp_a.glb',
+  bench: 'assets/houses/modules/site/mod_bench_a.glb',
+};
+const _furnCache = {};          // url → THREE.Group (прототип для клонирования)
+const _furnLoading = {};        // url → Promise
+
+function furnitureModelUrl(product) {
+  const direct = product && product.modelUrl;
+  if (direct) return direct;
+  const n = ((product && product.name) || '').toLowerCase();
+  if (/лампа|светильник|фонар|торшер/.test(n)) return FURNITURE_FALLBACK.lamp;
+  return FURNITURE_FALLBACK.bench;   // диваны/скамьи/столы — пока одна модель
+}
+
+function ensureFurnitureModel(url) {
+  if (_furnCache[url]) return Promise.resolve(_furnCache[url]);
+  if (_furnLoading[url]) return _furnLoading[url];
+  _furnLoading[url] = new Promise(resolve => {
+    if (typeof THREE === 'undefined' || !THREE.GLTFLoader) { resolve(null); return; }
+    new THREE.GLTFLoader().load(url,
+      gltf => { _furnCache[url] = gltf.scene; _furnLoading[url] = null; resolve(gltf.scene); },
+      undefined,
+      err => { console.warn('[furniture] не загрузилась модель', url, err);
+               _furnCache[url] = null; _furnLoading[url] = null; resolve(null); });
+  });
+  return _furnLoading[url];
+}
+
+// Расставляет мебель по точкам. surfaceYAt(x,z) → отметка поверхности (настил
+// террасы/причала или земля) — точка на террасе ставит мебель НА настил.
+// Модель садится основанием на эту отметку и центрируется по точке в плане.
+// Пустые точки (товар не выбран) показываются полупрозрачным маркером-подставкой,
+// чтобы место было видно в 3D до выбора товара.
+function buildFurniture3d(parent, M, points, houseL, houseW, surfaceYAt) {
+  if (!points || !points.length) return;
+  let needRebuild = false;
+  points.forEach((pt, i) => {
+    const w = canvasToWorld([{ x: pt.x, y: pt.y }], houseL, houseW)[0];
+    const y = surfaceYAt ? surfaceYAt(w.x, w.z) : 0;
+    if (!pt.product) {
+      const geo = new THREE.CylinderGeometry(0.28, 0.28, 0.04, 20);
+      const mat = new THREE.MeshStandardMaterial({ color: 0x9a9a9a, roughness: 0.9,
+                                                   transparent: true, opacity: 0.5 });
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(w.x, y + 0.02, w.z);
+      m.receiveShadow = true;
+      parent.add(m); threeState.furnitureMeshes.push(m);
+      return;
+    }
+    const url = furnitureModelUrl(pt.product);
+    const proto = _furnCache[url];
+    if (proto === undefined) { ensureFurnitureModel(url).then(() => { if (threeState) buildScene3d(); }); needRebuild = true; return; }
+    if (!proto) return;                       // модель не загрузилась — молча пропускаем
+    const obj = proto.clone(true);
+    obj.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(obj);
+    const c = bb.getCenter(new THREE.Vector3());
+    // Центрируем в плане по точке, основание — на поверхности.
+    obj.position.set(w.x - c.x, y - bb.min.y, w.z - c.z);
+    if (pt.rot) obj.rotation.y = pt.rot;
+    obj.traverse(o => {
+      if (!o.isMesh) return;
+      o.castShadow = true; o.receiveShadow = true;
+      // Материалы КЛОНИРУЕМ: Object3D.clone() шарит их с прототипом в кэше, а
+      // clearGroup(houseGroup, true) диспозит материалы — иначе следующая
+      // пересборка получила бы «убитый» прототип (та же грабля, что с vegGroup).
+      o.material = Array.isArray(o.material) ? o.material.map(m => m.clone()) : o.material.clone();
+    });
+    parent.add(obj); threeState.furnitureMeshes.push(obj);
+  });
+  if (needRebuild) return;   // сцена пересоберётся после загрузки моделей
+}
+
 // ── Ограждение террасы: GLB-модуль mod_railing (post / rails / balu_short / balu_floor) ──
 // Геометрии запекаются в родном базисе модуля: post центрирован на x=0 (h 0..1.2),
 // rails x[0..1]; Y=высота, Z=поперёк. Секция = 1.0 м между осями.

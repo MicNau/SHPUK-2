@@ -17,7 +17,7 @@ const D_SIDEBAR_ITEMS = [
   { id: 'fence',         lbl: 'Забор',               hasEditor: true  },
   { id: 'facade',        lbl: 'Отделка фасада',      hasEditor: true  },
   { id: 'beds',          lbl: 'Грядки',              hasEditor: true  },
-  { id: 'furniture',     lbl: 'Садовая мебель',      hasEditor: false },
+  { id: 'furniture',     lbl: 'Садовая мебель',      hasEditor: true  },
   { id: 'pool_terrace',  lbl: 'Терраса у бассейна',  hasEditor: true  },
   { id: 'pier',          lbl: 'Причал',              hasEditor: true  },
 ];
@@ -32,6 +32,7 @@ const D_CANVAS_INIT = {
   fence:        () => { initSnapCanvas('fence'); _dSyncFenceHeight(); },
   beds:         () => initBedsCanvas(),
   facade:       () => initFacadeCanvas(),
+  furniture:    () => initFurnitureCanvas(),
 };
 
 // ══════════════════════════════════════════════
@@ -229,6 +230,8 @@ function _dResetAllConfigurations() {
   S.activeBed = null;
   S.bedH = 0.20;
   S.fenceH = 1.5;
+  S.furniture = [];
+  S.activeFurniture = null;
   S.wallZones = {};   // выбор сегментов фасада привязан к контуру дома
   S.mats = {};
   S.elementMat = {};
@@ -634,6 +637,7 @@ function dDeleteItem(secId) {
   if (secId === 'steps')   { S.steps = { ...DEFAULT_STEPS_RECT }; }
   if (secId === 'beds')    { S.beds = []; S.activeBed = null; }
   if (secId === 'facade')  { S.wallZones = {}; }
+  if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
   S.sections = S.sections.filter(s => s !== secId);
   if (S.mats && S.mats[secId]) delete S.mats[secId];
   if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
@@ -846,6 +850,10 @@ function _applySampleToActive(sample) {
     S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures }
                               : (sample.color ? { color: sample.color } : null);
     if (typeof buildScene3d === 'function') buildScene3d();
+  } else if (dActiveItem === 'furniture') {
+    // Мебель: товар назначается ТОЧКЕ плана — выбранной, иначе первой свободной
+    // «по порядку номеров». Модель встаёт в эту точку при пересборке сцены.
+    _assignFurnitureProduct(sample);
   } else if (dActiveItem === 'facade') {
     // Фасад: материал панелей ложится на выбранные сегменты (S.wallZones) без
     // пересборки сцены; пустой выбор = весь фасад.
@@ -858,6 +866,28 @@ function _applySampleToActive(sample) {
     applyMaterialToScene(sample.color);    // забор/ограждение — цвет
   }
   dRenderSwatches();
+}
+
+// Назначает товар точке мебели: активной, иначе первой без товара (по номерам),
+// иначе — последней (перезаписываем, чтобы «Применить» всегда давал результат).
+// Возвращает индекс точки или -1, если точек нет.
+function _assignFurnitureProduct(sample) {
+  const pts = S.furniture || [];
+  if (!pts.length) {
+    alert('Сначала поставьте точку на плане: «Садовая мебель» → карандаш ✏ → клик по плану.');
+    return -1;
+  }
+  let idx = (S.activeFurniture !== null && pts[S.activeFurniture]) ? S.activeFurniture : -1;
+  if (idx < 0) idx = pts.findIndex(p => !p.product);
+  if (idx < 0) idx = pts.length - 1;
+  pts[idx].product = { id: sample.id, name: sample.name, modelUrl: sample.modelUrl || '' };
+  S.activeFurniture = idx;
+  if (typeof buildScene3d === 'function') buildScene3d();
+  if (typeof drawFurnitureCanvas === 'function'
+      && document.getElementById('d-canvas-furniture')?.classList.contains('active')) {
+    drawFurnitureCanvas();
+  }
+  return idx;
 }
 
 function dApplySwatch(idx) {
@@ -1215,7 +1245,9 @@ async function dApplyRealMat(e, pid) {
     S.samples.push({ id: product.id, name: product.name, color: '#C8A96E', textures: product.textures });
     idx = S.samples.length - 1;
   }
-  _applySampleToActive({ id: product.id, name: product.name, color: null, textures: product.textures, _idx: idx });
+  // modelUrl нужен мебели (GLB-модель товара); для прочих элементов он просто пуст.
+  _applySampleToActive({ id: product.id, name: product.name, color: null,
+                         textures: product.textures, modelUrl: product.modelUrl || '', _idx: idx });
 
   btn.textContent = '✓'; btn.style.background = '#444';
   setTimeout(() => { btn.textContent = orig; btn.style.background = '#000'; }, 700);
@@ -1321,6 +1353,11 @@ function _elementMetric(el) {
   if (el === 'pier')    { const a = _polyAreaM2(S.pts.pier); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'fence')   { const len = _polyLenM(S.pts.fence); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
   if (el === 'beds')    { const n = (S.beds || []).length; return n > 0 ? { kind: 'piece', value: n, text: n + ' шт' } : null; }
+  if (el === 'furniture') {
+    // Считаем только точки с выбранным товаром (пустые — просто места под мебель).
+    const n = (S.furniture || []).filter(p => p.product).length;
+    return n > 0 ? { kind: 'piece', value: n, text: n + ' шт' } : null;
+  }
   if (el === 'facade')  {
     // Площадь выбранных сегментов стен (пустой выбор = весь фасад) — из viewer3d.
     const a = (typeof facadeSelectedAreaM2 === 'function') ? facadeSelectedAreaM2() : 0;
@@ -1334,7 +1371,7 @@ function _elementMetric(el) {
 //   linear — длина × 1.05 × цена/м.пог;
 //   piece  — количество × цена/шт.
 function _computeEstimate() {
-  const order = ['terrace', 'steps', 'paths', 'pool_terrace', 'pier', 'fence', 'beds', 'facade'];
+  const order = ['terrace', 'steps', 'paths', 'pool_terrace', 'pier', 'fence', 'beds', 'facade', 'furniture'];
   const rows = [];
   for (const el of order) {
     if (!S.sections.includes(el)) continue;

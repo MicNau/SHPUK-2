@@ -611,6 +611,172 @@ function addBreak(n) {
 function initPathsCanvas() { initSnapCanvas('paths'); }
 
 // ══════════════════════════════════════════════
+// САДОВАЯ МЕБЕЛЬ: план-редактор точек размещения
+// Точка = место, куда встанет модель из каталога. Номер точки (1..N) — её
+// порядок в S.furniture: товары из каталога назначаются точкам по этому порядку.
+// ЛКМ по пустому месту — поставить точку и сразу тащить; ЛКМ по точке — выбрать
+// и тащить; ПКМ — перемещение плана. Высоту (терраса/земля) определяет 3D.
+// ══════════════════════════════════════════════
+const FURN_HIT_R = 16;      // радиус захвата точки (экранные px при scale=1)
+
+let furnDrag = false, furnDragIdx = -1;
+
+function initFurnitureCanvas() {
+  const wrap = document.getElementById('cw-furniture');
+  const cv   = document.getElementById('cv-furniture');
+  const dpr = window.devicePixelRatio || 1, sz = wrap.offsetWidth;
+  cv.width = sz * dpr; cv.height = sz * dpr;
+  cv.style.width = sz + 'px'; cv.style.height = sz + 'px';
+  CV['furniture'] = mkCvState();
+  if (!S.furniture) S.furniture = [];
+  if (S.activeFurniture !== null && S.activeFurniture >= S.furniture.length) S.activeFurniture = null;
+
+  drawFurnitureCanvas();
+
+  if (wrap._furnBound) return;   // слушатели — один раз (см. initSnapCanvas)
+  wrap._furnBound = true;
+
+  attachPanZoom(wrap, 'furniture', () => drawFurnitureCanvas());
+
+  const getWorld = (clientX, clientY) => {
+    const cx = CV['furniture'] || { ox: 0, oy: 0, scale: 1 };
+    const cvEl = document.getElementById('cv-furniture');
+    const r = wrap.getBoundingClientRect(), dpr2 = window.devicePixelRatio || 1;
+    return {
+      x: ((clientX - r.left) * dpr2 - cx.ox) / cx.scale,
+      y: ((clientY - r.top ) * dpr2 - cx.oy) / cx.scale,
+      W: cvEl.width,
+    };
+  };
+  const active = () => CV['furniture']
+    && document.getElementById('d-canvas-furniture')?.classList.contains('active');
+
+  wrap.addEventListener('mousedown', e => {
+    if (e.button !== 0 || !active()) return;      // ЛКМ — инструмент, ПКМ — pan
+    const { x, y, W } = getWorld(e.clientX, e.clientY);
+    const hit = _furnitureHit(x / W, y / W, W);
+    if (hit >= 0) {
+      S.activeFurniture = hit;
+    } else {
+      // Пустое место — ставим новую точку и сразу берём её в перетаскивание.
+      S.furniture.push({ x: snapNorm(x / W), y: snapNorm(y / W), product: null });
+      S.activeFurniture = S.furniture.length - 1;
+      if (typeof onParamChange === 'function') onParamChange();
+    }
+    furnDrag = true; furnDragIdx = S.activeFurniture;
+    wrap.style.cursor = 'move';
+    drawFurnitureCanvas();
+    _dSyncFurniturePanel();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!furnDrag || furnDragIdx < 0 || !S.furniture[furnDragIdx]) return;
+    const { x, y, W } = getWorld(e.clientX, e.clientY);
+    const p = S.furniture[furnDragIdx];
+    p.x = Math.max(0, Math.min(1, snapNorm(x / W)));
+    p.y = Math.max(0, Math.min(1, snapNorm(y / W)));
+    drawFurnitureCanvas();
+  });
+  document.addEventListener('mouseup', e => {
+    if (!furnDrag || e.button !== 0) return;
+    furnDrag = false; furnDragIdx = -1; wrap.style.cursor = 'default';
+    if (typeof onParamChange === 'function') onParamChange();   // пересборка 3D
+  });
+}
+
+// Индекс точки под курсором (нормализованные координаты) или -1.
+function _furnitureHit(nx, ny, W) {
+  const sc = (CV['furniture'] && CV['furniture'].scale) || 1;
+  const rNorm = (FURN_HIT_R / sc) / W;
+  let best = -1, bestD = rNorm;
+  (S.furniture || []).forEach((p, i) => {
+    const d = Math.hypot(nx - p.x, ny - p.y);
+    if (d < bestD) { bestD = d; best = i; }
+  });
+  return best;
+}
+
+function addFurniturePoint() {
+  if (!S.furniture) S.furniture = [];
+  // Рядом с активной точкой либо в центре плана.
+  const a = (S.activeFurniture !== null) ? S.furniture[S.activeFurniture] : null;
+  const nx = a ? Math.min(1, a.x + 1.5 / GRID) : 0.5;
+  const ny = a ? a.y : 0.5;
+  S.furniture.push({ x: snapNorm(nx), y: snapNorm(ny), product: null });
+  S.activeFurniture = S.furniture.length - 1;
+  drawFurnitureCanvas();
+  _dSyncFurniturePanel();
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
+function delActiveFurniture() {
+  if (!S.furniture || S.activeFurniture === null) return;
+  S.furniture.splice(S.activeFurniture, 1);
+  S.activeFurniture = S.furniture.length ? Math.min(S.activeFurniture, S.furniture.length - 1) : null;
+  drawFurnitureCanvas();
+  _dSyncFurniturePanel();
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
+// Подпись в футере редактора (что назначено точкам).
+function _dSyncFurniturePanel() {
+  const el = document.getElementById('d-furniture-info');
+  if (!el) return;
+  const pts = S.furniture || [];
+  if (!pts.length) { el.textContent = 'Кликните по плану, чтобы поставить точку'; return; }
+  const filled = pts.filter(p => p.product).length;
+  const act = (S.activeFurniture !== null) ? ` · выбрана №${S.activeFurniture + 1}` : '';
+  el.textContent = `Точек: ${pts.length}, с мебелью: ${filled}${act}`;
+}
+
+function drawFurnitureCanvas() {
+  const cvEl = document.getElementById('cv-furniture'); if (!cvEl) return;
+  const ctx = cvEl.getContext('2d'), W = cvEl.width, H = cvEl.height;
+  const cx = CV['furniture'] || { scale: 1, ox: 0, oy: 0 };
+  applyTransform(ctx, cx, W, H);
+
+  ctx.fillStyle = '#d9d9d9'; ctx.fillRect(0, 0, W, H);
+  const step = W / CELLS;
+  for (let r = 0; r <= CELLS; r++) for (let c = 0; c <= CELLS; c++) {
+    const isMajor = (r * SNAP) % 1 === 0 && (c * SNAP) % 1 === 0;
+    ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
+    ctx.beginPath(); ctx.arc(c * step, r * step, (isMajor ? 2 : 1.2) / cx.scale, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.fillStyle = '#999'; ctx.font = `${9 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+  for (let m = 5; m <= GRID; m += 5) { const px = m / GRID * W; ctx.fillText(m + 'м', px, H - 3 / cx.scale); }
+
+  drawPreviousLayers(ctx, W, H, cx, 'furniture');   // дом, терраса, дорожки — фоном
+
+  const pts = S.furniture || [];
+  pts.forEach((p, i) => {
+    const px = p.x * W, py = p.y * H;
+    const isActive = (i === S.activeFurniture);
+    const R = 11 / cx.scale;
+    // Заполненная точка (с товаром) — коричневая, пустая — серая.
+    ctx.beginPath(); ctx.arc(px, py, R, 0, Math.PI * 2);
+    ctx.fillStyle = p.product ? 'rgba(122,75,35,.85)' : 'rgba(255,255,255,.95)';
+    ctx.fill();
+    ctx.strokeStyle = isActive ? '#0064DC' : '#7a4b23';
+    ctx.lineWidth = (isActive ? 3 : 2) / cx.scale;
+    ctx.stroke();
+    ctx.fillStyle = p.product ? '#fff' : '#7a4b23';
+    ctx.font = `bold ${11 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+    ctx.fillText(String(i + 1), px, py + 4 / cx.scale);
+    // Подпись товара у активной точки
+    if (isActive && p.product) {
+      ctx.fillStyle = '#333'; ctx.font = `${10 / cx.scale}px Roboto`;
+      ctx.fillText(p.product.name.slice(0, 34), px, py - R - 5 / cx.scale);
+    }
+  });
+
+  if (!pts.length) {
+    ctx.fillStyle = '#aaa'; ctx.font = `${13 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+    ctx.fillText('Кликните по плану, чтобы поставить точку для мебели', W / 2, H * 0.92);
+  }
+  ctx.restore();
+  _dSyncFurniturePanel();
+}
+
+// ══════════════════════════════════════════════
 // ОТДЕЛКА ФАСАДА: план-редактор выбора сегментов стен
 // Кликабельные полосы-сегменты по рёбрам 1-го этажа (segId как в 3D);
 // выбор пишется в S.wallZones и сразу подхватывается 3D (_applyFacadeSelection).

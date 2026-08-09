@@ -913,6 +913,7 @@ function buildScene3d() {
   threeState.railingMeshes = [];
   threeState.canopyMeshes  = [];
   threeState.bedMeshes     = [];
+  threeState.furnitureMeshes = [];    // садовая мебель (GLB по точкам S.furniture)
   threeState.facadeSegs    = [];      // элементы фасада (segId) — соберём после сборки дома
   threeState.facadePillars = [];      // угловые столбы (facadePillar) — отделка «под ближайшую вставку»
   threeState._facadePanelMat = null;  // материал панелей уже диспознут clearGroup'ом выше
@@ -1169,6 +1170,40 @@ function buildScene3d() {
       minZ: Math.min(...w.map(p=>p.z)), maxZ: Math.max(...w.map(p=>p.z)),
     };
   });
+
+  // Садовая мебель — модели по точкам плана (S.furniture). Отметка поверхности под
+  // точкой: настил террасы, если точка внутри террасного блока (или причала/зоны
+  // бассейна), иначе земля — мебель на террасе не проваливается под настил.
+  if (S.sections.includes('furniture') && S.furniture && S.furniture.length) {
+    const deckY = (isNoHouse ? 0.35 : bh) - 0.01;
+    const inPoly = (x, z, pts) => {                 // pts — мировые {x,z}
+      let inside = false;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        if ((pts[i].z > z) !== (pts[j].z > z)
+            && x < (pts[j].x - pts[i].x) * (z - pts[i].z) / (pts[j].z - pts[i].z + 1e-12) + pts[i].x) {
+          inside = !inside;
+        }
+      }
+      return inside;
+    };
+    const poolPts = (S.sections.includes('pool_terrace') && S.pts.pool_terrace.length >= 3)
+      ? canvasToWorld(S.pts.pool_terrace, houseL, houseW) : null;
+    const pierPts = (S.sections.includes('pier') && S.pts.pier.length >= 3)
+      ? canvasToWorld(S.pts.pier, houseL, houseW) : null;
+    const surfaceYAt = (x, z) => {
+      if (S.sections.includes('terrace')) {
+        for (const r of allRectsWorld) {
+          if (x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ) return deckY;
+        }
+      }
+      if (poolPts && inPoly(x, z, poolPts)) return deckY;
+      if (pierPts && inPoly(x, z, pierPts)) return 0.5;   // причал — своя отметка
+      return 0;                                           // земля
+    };
+    try {
+      buildFurniture3d(houseGroup, M, S.furniture, houseL, houseW, surfaceYAt);
+    } catch (e) { console.error('[buildFurniture3d]', e); }
+  }
 
   // Навес строим ДО перил: высоту высоких столбов перила берут рейкастом по готовым плитам навеса.
   const terraceCanopyOn = tgOn('terrace-roof');
