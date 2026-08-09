@@ -329,7 +329,9 @@ const _furnCache = {};          // url → THREE.Group (прототип для 
 const _furnLoading = {};        // url → Promise
 
 function furnitureModelUrl(product) {
-  const direct = product && product.modelUrl;
+  // glbFileUrl — поле каталога (glb_file_url в ответе API, с 2026-08-02);
+  // modelUrl — то же значение, прокинутое в образец при «Применить».
+  const direct = product && (product.glbFileUrl || product.modelUrl);
   if (direct) return direct;
   const n = ((product && product.name) || '').toLowerCase();
   if (/лампа|светильник|фонар|торшер/.test(n)) return FURNITURE_FALLBACK.lamp;

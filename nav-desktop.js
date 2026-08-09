@@ -924,6 +924,12 @@ function _elementColors(elId, subMode) {
 function _dRenderColorGrid() {
   const grid = document.getElementById('d-color-grid');
   if (!grid) return;
+  // Мебель: у товаров каталога поле color пустое (проверено 2026-08-02) — любой
+  // выбранный чип обнулил бы выдачу. Прячем блок, пока бэкенд не заполнит цвета.
+  const sect = document.getElementById('d-color-section');
+  const isFurniture = (dActiveItem === 'furniture');
+  if (sect) sect.style.display = isFurniture ? 'none' : '';
+  if (isFurniture) { S.catColors = new Set(); grid.innerHTML = ''; return; }
   grid.innerHTML = _elementColors(dActiveItem, S.matSubMode).map(c =>
     `<div class="d-color-dot ${S.catColors.has(c.id) ? 'selected' : ''}"
           title="${c.label}" style="background:${c.hex};"
@@ -934,6 +940,12 @@ function _dRenderColorGrid() {
 function _dRenderPriceGrid() {
   const grid = document.getElementById('d-price-grid');
   if (!grid) return;
+  // Мебель: цена за изделие (десятки тысяч ₽), а тиры заданы в ₽/м.пог для доски —
+  // фильтр по ним бессмыслен, прячем блок целиком и сбрасываем выбор.
+  const sect = document.getElementById('d-price-section');
+  const isFurniture = (dActiveItem === 'furniture');
+  if (sect) sect.style.display = isFurniture ? 'none' : '';
+  if (isFurniture) { S.catPrice = null; grid.innerHTML = ''; return; }
   grid.innerHTML = PRICE_TIERS.map(t =>
     `<button class="d-price-btn ${S.catPrice === t.id ? 'selected' : ''}"
              onclick="dSelectPrice('${t.id}')">
@@ -1047,8 +1059,11 @@ async function _ensureCatalogSection(sectionId) {
   try {
     // Текстурированные товары (с texture_urls для превью/3D) бэкенд отдаёт только под тегом
     // раздела (SECTION_TAGS). Без тега вернулись бы товары без текстур → превью не приходят.
-    const filters = [new Filter(FilterType.SECTION_ID, sectionId)];
     const tag = (typeof SECTION_TAGS !== 'undefined') ? SECTION_TAGS[sectionId] : null;
+    // Наборы из SECTION_TAG_ONLY (мебель) тянем ТОЛЬКО по тегу: их товары лежат в
+    // разных разделах, section_id отрезал бы часть выдачи.
+    const tagOnly = (typeof SECTION_TAG_ONLY !== 'undefined') && SECTION_TAG_ONLY.has(sectionId) && tag;
+    const filters = tagOnly ? [] : [new Filter(FilterType.SECTION_ID, sectionId)];
     if (tag) filters.push(new Filter(FilterType.TAGS, [tag]));
     filters.push(new Filter(FilterType.LIMIT, 50));
     const res = await rm.getResources(...filters);
