@@ -1832,11 +1832,15 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
     // Разницу добирает center МАСШТАБОМ по своей оси. Раньше center тиражировался целыми
     // копиями (floor), а вся труба поднималась на фиксированные 0.20 м — при изменении
     // высоты фундамента/этажа труба протыкала фундамент снизу или крышу сверху.
-    // DOWNPIPE_DROP — вся труба целиком опущена на 40 см (длина не меняется): выпуск
-    // колена уходит ниже верха фундамента, ближе к отмостке.
-    const DOWNPIPE_DROP = 0.40;
-    const spanH    = Math.max(0.3, wallTopY - baseY);      // длина: фундамент → карниз
-    const pipeBotY = baseY - DOWNPIPE_DROP;                // положение низа трубы
+    // Концы трубы заданы отступами от опорных уровней (оба «вниз» — положительные):
+    //   низ колена  = верх фундамента − BOT_DROP (0.70 → ближе к отмостке);
+    //   верх раструба = карниз − TOP_DROP (0.10 → чуть ниже жёлоба).
+    // Длина = расстояние между ними, разницу добирает center масштабом.
+    const DOWNPIPE_BOT_DROP = 0.70;
+    const DOWNPIPE_TOP_DROP = 0.10;
+    const pipeBotY = baseY - DOWNPIPE_BOT_DROP;            // низ трубы
+    const pipeTopY = wallTopY - DOWNPIPE_TOP_DROP;         // верх трубы
+    const spanH    = Math.max(0.3, pipeTopY - pipeBotY);
     const psHalf = ((desc.constraints && desc.constraints.pillar_size) || 0.20) / 2;
 
     for (let i = 0; i < outline.items.length; i++) {
@@ -1955,7 +1959,7 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
         // d.position такое, чтобы world top centroid = corner + attach * exterior_unit.
         d.position.set(
           item.x + pipeAttachOffset * exUnitX - rotTopCx,
-          pipeBotY,                                   // низ трубы = верх фундамента
+          pipeBotY,                                   // низ трубы (фундамент − BOT_DROP)
           item.z + pipeAttachOffset * exUnitZ - rotTopCz,
         );
         d.rotation.y = ry;
@@ -1965,7 +1969,7 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
         if (!_downpipeFinalDumped) {
           _downpipeFinalDumped = true;
           console.log(`[downpipe] native sizes: top(${bbTopInit.sizeX.toFixed(2)},${bbTopInit.sizeY.toFixed(2)},${bbTopInit.sizeZ.toFixed(2)}) center(${bbCenterInit.sizeX.toFixed(2)},${bbCenterInit.sizeY.toFixed(2)},${bbCenterInit.sizeZ.toFixed(2)}) bot(${bbBotInit.sizeX.toFixed(2)},${bbBotInit.sizeY.toFixed(2)},${bbBotInit.sizeZ.toFixed(2)})`);
-          console.log(`[downpipe] upAxis=${upAxis}, topH=${topH.toFixed(2)}, botH=${botH.toFixed(2)}, centerSize=${centerSize.toFixed(2)}, fillH=${fillH.toFixed(2)}, spanH=${spanH.toFixed(2)} (baseY=${pipeBotY.toFixed(2)}→wallTop=${wallTopY.toFixed(2)}), ry=${(ry*180/Math.PI).toFixed(1)}°, topCentroid_local=(${topCxNative.toFixed(2)},${topCzNative.toFixed(2)})`);
+          console.log(`[downpipe] upAxis=${upAxis}, topH=${topH.toFixed(2)}, botH=${botH.toFixed(2)}, centerSize=${centerSize.toFixed(2)}, fillH=${fillH.toFixed(2)}, spanH=${spanH.toFixed(2)} (низ=${pipeBotY.toFixed(2)}→верх=${pipeTopY.toFixed(2)}; фундамент=${baseY.toFixed(2)}, карниз=${wallTopY.toFixed(2)}), ry=${(ry*180/Math.PI).toFixed(1)}°, topCentroid_local=(${topCxNative.toFixed(2)},${topCzNative.toFixed(2)})`);
         }
       } else {
         console.warn(`[downpipe] 3-part structure NOT found (top=${partTop?.name||'∅'}, center=${partCenter?.name||'∅'}, bottom=${partBottom?.name||'∅'}). Fallback с auto-detect оси.`);
