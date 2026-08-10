@@ -1,0 +1,531 @@
+From f85d0265989263e477d0dd5278a9d27e84942146 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 10 Aug 2026 10:39:48 +0000
+Subject: [PATCH] =?UTF-8?q?=D0=9C=D0=B5=D0=B1=D0=B5=D0=BB=D1=8C:=20=D0=B8?=
+ =?UTF-8?q?=D0=BD=D0=B4=D0=B8=D0=BA=D0=B0=D1=82=D0=BE=D1=80=20=D0=B7=D0=B0?=
+ =?UTF-8?q?=D0=B3=D1=80=D1=83=D0=B7=D0=BA=D0=B8,=20=D0=BF=D0=BE=D0=B2?=
+ =?UTF-8?q?=D0=BE=D1=80=D0=BE=D1=82=20=D1=82=D0=BE=D1=87=D0=B5=D0=BA=20?=
+ =?UTF-8?q?=D0=BD=D0=B0=2090=C2=B0,=20=D1=80=D0=B0=D0=B7=D0=B4=D0=B0=D1=87?=
+ =?UTF-8?q?=D0=B0=20=D0=BF=D0=BE=20=D0=B2=D1=81=D0=B5=D0=BC=20=D1=82=D0=BE?=
+ =?UTF-8?q?=D1=87=D0=BA=D0=B0=D0=BC=20(v=3D128)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Индикатор загрузки GLB (#d-3d-loading + d3dLoadingSet/Clear): прогресс
+  GLTFLoader над сценой, пока едут модели каталога (4–12 МБ, 3–10 с);
+  без Content-Length — бегущая полоса. Точка на время загрузки показана
+  маркером, а не исчезает.
+- Поворот точки на 90° (pt.rot): кнопка и клавиша R (Shift+R — назад),
+  стрелка «переда» на плане (локальный +X модели). В 3D модель вращается
+  в группе-пивоте в точке плана — иначе клон уезжал бы с точки по дуге.
+- _assignFurnitureProduct: после назначения выбор переходит на следующую
+  свободную точку. Раньше назначенная точка оставалась активной и
+  следующее «Применить» перезаписывало её же — вся мебель на одном месте.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013c9N76tZZnqcQLUUSc5okD
+---
+ ARCHITECTURE.md      | 50 +++++++++++++++++++++++----
+ canvas.js            | 49 ++++++++++++++++++++++++--
+ index.html           | 21 ++++++++----
+ nav-desktop.js       | 43 ++++++++++++++++++++++-
+ state.js             |  2 ++
+ styles-desktop.css   | 16 +++++++++
+ viewer3d-builders.js | 82 +++++++++++++++++++++++++++++++-------------
+ 7 files changed, 222 insertions(+), 41 deletions(-)
+
+diff --git a/ARCHITECTURE.md b/ARCHITECTURE.md
+index 83fb20b..a121b86 100644
+--- a/ARCHITECTURE.md
++++ b/ARCHITECTURE.md
+@@ -4,7 +4,7 @@
+ - **Фронтенд** разбит на файлы, PBR-визуализация работает; десктоп-UI создан и отлажен (sidebar-кнопки, snap-сетка 0.5 м, multi-line, collision avoidance). UI без скруглений; кнопки действий редакторов — в правом нижнем углу.
+ - **Конструкции:** терраса/крыльцо (multi-rect) с **ограждением** (GLB-модуль `mod_railing`, единый контур объединения блоков) и навесом, ступени, дорожки (монолитная лента), забор (стандартные секции 2 м, высота полотна 1.5/1.9 м — `S.fenceH`), **грядки** (GLB-плантер 3×1, дискретная высота). Растительность сейчас **отключена** (легко вернуть — см. ниже).
+ - **Материалы:** каждый деко-элемент (терраса/ступени/дорожки/грядки/бассейн/причал) красится **независимо** (`S.elementMat`). PBR-текстуры товара ложатся на deck-материал с кубическим UV (ребро 1 м, `UV_TILE` — единое для всей сцены).
+-- **Садовая мебель:** точки размещения на плане (поставить/подвинуть/удалить, нумерованные); товар из каталога назначается точке (выбранной или первой свободной по номерам) и спавнится в 3D — на настиле террасы, если точка на ней, иначе на земле. Модель берётся из каталога (`glb_file_url`, тег `furniture`); локальный фолбэк — для товаров без модели. См. «Садовая мебель» ниже.
++- **Садовая мебель:** точки размещения на плане (поставить/подвинуть/повернуть на 90°/удалить, нумерованные); товар из каталога назначается точке (выбранной или первой свободной по номерам, дальше выбор сам переходит на следующую свободную) и спавнится в 3D — на настиле террасы, если точка на ней, иначе на земле. Модель берётся из каталога (`glb_file_url`, тег `furniture`); локальный фолбэк — для товаров без модели. Загрузка моделей (4–12 МБ) показывается индикатором прогресса над сценой. См. «Садовая мебель» ниже.
+ - **Отделка фасада:** выбор элементов стен (сегменты между проёмами + «оконные колонки» — стена над/под проёмом) на ПЛАНЕ 1-го этажа в редакторе; углы отделываются автоматически «под ближайшую вставку»; пустой выбор = весь фасад. В 3D виден результат (`S.wallZones` + `S.elementMat.facade`).
+ - **Материалы дома:** на шаге «Параметры дома» — выбор квадратными образцами (крыша: черепица/металл зелёный/металл красный; фундамент: бетон/камень; стены: штукатурка/кирпич/сайдинг). Накладываются по имени материала меша (`_applyHouseMaterials`): крыша — per-slope UV (полосы вниз по скату), цоколь/труба исправлены (труба = металл водостоков), откосы окон белые, рамы/двери коричневые, стекло 50%, шторы (`mat_curtain`) — белые с картой нормалей `assets/curtain_norm.jpg`. Текстуры — варианты `roof/wall/base_*_0N` в `assets/`.
+ - **Каталог:** подключён боевой REST-API `sollersdev.ru` через клиент `ResourceManager.js`. Реальные разделы/товары/цены/текстуры; материал привязан к разделу каталога по элементу (`CONSTRUCTION_TO_SECTION`). **Превью и 3D-текстуры (`texture_urls`, картинки `/static/DPK/...`) бэкенд отдаёт только у товаров, помеченных тегом** — поэтому запрос товаров идёт с тег-фильтром по разделу (`SECTION_TAGS` в `state.js`; ревизия 2026-07-29/31: 2314/2315→`dpk`, 2329→`mpk`, 2680/2681→`walls`, 2348→`fences` — старые `dpk_steps` и walls-на-2683 бэкенд больше не отдаёт); без тега раздел вернул бы товары без текстур. Разделы без товаров на бэкенде (ступени 2330, грядки 2357, ограждения 2331, фасады/ступени МПК 2345/2668, мебель) показывают заглушки. Локально работает через dev-прокси `devserver.py` (обход отсутствия CORS + ретраи к нестабильному апстриму). **Фильтр по цвету**: приоритетно по полю `color` товара (появилось в API 2026-07-29, имена совпадают с COLORS.md), затем детекция в названии как отдельного слова, длинные имена в приоритете («тёмно-серый» ≠ «Серый»). **Смета** считается по геометрии × цена из каталога.
+@@ -193,7 +193,8 @@ const S = {
+   catColors:    Set,               // выбранные ЦВЕТА каталога (имена из COLORS.md) — фильтр работает
+   catPrice:     null,
+   catShowResults: false,
+-  furniture:    [{ x, y, product }], // точки садовой мебели (номер = индекс+1), product | null
++  furniture:    [{ x, y, rot, product }], // точки садовой мебели (номер = индекс+1), product | null
++                                   // rot — поворот, рад, кратно π/2 (0 = «перёд» модели вдоль +X)
+   activeFurniture: null,           // индекс выбранной точки
+   toggles:      {},                // тумблеры редакторов (data-id → bool); 3D читает через tgOn(id)
+   pathWidth:    120,               // ширина дорожки, см (инпут v-paths-width зеркалится сюда)
+@@ -338,23 +339,41 @@ const S = {
+ 
+ ### Садовая мебель — точки размещения и GLB-модели из каталога
+ 
+-**Поток данных.** Пользователь ставит на плане точки (`S.furniture = [{x, y, product}]`,
++**Поток данных.** Пользователь ставит на плане точки (`S.furniture = [{x, y, rot, product}]`,
+ номер точки = индекс+1), затем назначает им товары из каталога. Одна точка — один
+ предмет мебели.
+ 
+ | Слой | Что делает | Где |
+ |------|-----------|-----|
+-| План-редактор | постановка/выбор/перетаскивание/удаление точек, снап 0.5 м | `initFurnitureCanvas` / `drawFurnitureCanvas`, canvas.js |
+-| Назначение товара | «Применить» → выбранная точка, иначе первая свободная ПО ПОРЯДКУ НОМЕРОВ | `_assignFurnitureProduct`, nav-desktop.js |
++| План-редактор | постановка/выбор/перетаскивание/поворот/удаление точек, снап 0.5 м | `initFurnitureCanvas` / `drawFurnitureCanvas` / `rotateActiveFurniture`, canvas.js |
++| Назначение товара | «Применить» → выбранная точка, иначе первая свободная ПО ПОРЯДКУ НОМЕРОВ; после назначения выбор переходит на следующую свободную | `_assignFurnitureProduct`, nav-desktop.js |
+ | Источник модели | поле товара → локальный фолбэк | `furnitureModelUrl`, viewer3d-builders.js |
+-| Загрузка/кэш | GLTFLoader, кэш по URL, пересборка сцены по готовности | `ensureFurnitureModel`, viewer3d-builders.js |
+-| Расстановка | центр по точке, основание на отметку поверхности | `buildFurniture3d` + `surfaceYAt` в `buildScene3d` |
++| Загрузка/кэш | GLTFLoader, кэш по URL, прогресс в индикатор, пересборка сцены по готовности | `ensureFurnitureModel`, viewer3d-builders.js |
++| Индикатор загрузки | плашка с прогрессом над 3D/редактором | `d3dLoadingSet` / `d3dLoadingClear`, nav-desktop.js + `#d-3d-loading` |
++| Расстановка | центр по точке, основание на отметку поверхности, поворот вокруг точки | `buildFurniture3d` + `surfaceYAt` в `buildScene3d` |
+ | Смета | поштучно (точки с товаром) | `_elementMetric('furniture')` |
+ 
+ **Отметка поверхности** (`surfaceYAt(x, z)` в buildScene3d): точка внутри террасного
+ блока или зоны бассейна → настил (`bh − 0.01`); внутри причала → 0.5 м; иначе земля (0).
+ Мебель на террасе не проваливается под настил.
+ 
++**Поворот точки** (`pt.rot`, радианы, кратно π/2). «Перёд» предмета — **локальная ось +X
++модели**; при `rot = 0` он смотрит вдоль мирового +X, т.е. вправо на плане (`canvasToWorld`:
++x плана → X мира, y плана → Z мира). Поворот идёт вокруг оси Y, поэтому на плане стрелка
++вращается против часовой стрелки, а экранное направление стрелки = `(cos rot, −sin rot)`.
++Новая точка наследует поворот у выбранной — расстановка «в ряд» без лишних кликов.
++В 3D клон модели кладётся в **группу-пивот** в точке плана: вращать сам клон нельзя —
++его origin не совпадает с центром bbox, и предмет уезжал бы с точки по дуге.
++Точка без модели (товар не выбран, модель грузится или не загрузилась) показана
++маркером-подставкой со стрелкой «переда» — место в сцене видно всегда.
++
++**Индикатор загрузки моделей.** Файлы каталога — 4–12 МБ, 3–10 с на модель. `ensureFurnitureModel`
++шлёт прогресс GLTFLoader в `d3dLoadingSet(url, название, %)`; плашка `#d-3d-loading` лежит
++в `.d-center-view` поверх и 3D, и открытого canvas-редактора. Ключ — URL модели, поэтому
++две точки с одним товаром дают одну запись; при нескольких моделях показывается их число и
++средний процент. Если сервер не отдал `Content-Length`, процент неизвестен → бегущая полоса.
++API общего назначения: годится для любой долгой 3D-загрузки, не только мебели.
++
+ **Контракт с бэкендом (работает с 2026-08-02).** Мебель отдаётся по **тегу `furniture`**
+ (`GET /api/v1/products/?tags=furniture` — 20 позиций), URL модели в поле **`glb_file_url`**.
+ Клиент: `ProductResource.glbFileUrl` (+ `modelUrl` как алиас, туда же падают запасные
+@@ -552,6 +571,23 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
+ Полная история — в `git log`; здесь только свежие итерации, чтобы видеть,
+ что менялось в актуальном коде.
+ 
++Сделано в итерации v=128 (мебель: индикатор загрузки, поворот точек, раздача по всем точкам):
++
++- **Индикатор загрузки моделей** (`#d-3d-loading` + `d3dLoadingSet`/`d3dLoadingClear` в nav-desktop.js):
++  плашка с прогрессом над сценой, пока грузится GLB (4–12 МБ, 3–10 с). Прогресс — из onProgress
++  GLTFLoader; без `Content-Length` — бегущая полоса. Ключ = URL, поэтому один товар в двух точках
++  = одна запись. Пока модель едет, точка показана маркером-подставкой (раньше исчезала).
++- **Поворот точки на 90°** (`pt.rot`): кнопка «⟲ Повернуть 90°» и клавиша R (Shift+R — назад) в
++  редакторе; на плане у точки нарисована стрелка «переда» = локальная ось +X модели (при `rot = 0`
++  вправо по плану). Новая точка наследует поворот у выбранной. В 3D модель вращается в
++  **группе-пивоте** в точке плана — вращение самого клона уводило бы предмет с точки по дуге
++  (origin GLB ≠ центр bbox). Маркер пустой точки тоже развёрнут и показывает «перёд».
++- **Товары раздаются по всем точкам подряд.** `_assignFurnitureProduct` оставлял назначенную точку
++  выбранной, поэтому следующее «Применить» било в неё же — вся мебель садилась на одно место.
++  Теперь после назначения выбор переходит на следующую свободную точку (по кругу), а если
++  свободных нет — сбрасывается в null (тогда «Применить» перезапишет последнюю точку).
++- Cache-bust: `styles-desktop.css?v=7`, `state.js?v=33`, `canvas.js?v=32`, `viewer3d-builders.js?v=7`, `nav-desktop.js?v=54`.
++
+ Сделано в итерации v=127 (мебель: подключены реальные модели каталога):
+ 
+ - **Модели пришли с бэкенда**: тег `furniture` (20 позиций), URL в поле `glb_file_url` → `ProductResource.glbFileUrl` (+ алиас `modelUrl`). Резолвер `furnitureModelUrl` берёт его первым, локальный фолбэк остаётся для товаров без модели.
+diff --git a/canvas.js b/canvas.js
+index 7677692..1a934da 100644
+--- a/canvas.js
++++ b/canvas.js
+@@ -616,6 +616,10 @@ function initPathsCanvas() { initSnapCanvas('paths'); }
+ // порядок в S.furniture: товары из каталога назначаются точкам по этому порядку.
+ // ЛКМ по пустому месту — поставить точку и сразу тащить; ЛКМ по точке — выбрать
+ // и тащить; ПКМ — перемещение плана. Высоту (терраса/земля) определяет 3D.
++// У точки есть ПОВОРОТ (p.rot, радианы, кратно π/2): «перёд» мебели — локальная
++// ось +X модели, при rot = 0 она смотрит вдоль мирового +X = вправо на плане
++// (canvasToWorld: x плана → X мира, y плана → Z мира). Поворот в 3D идёт вокруг
++// оси Y, т.е. на плане стрелка вращается ПРОТИВ часовой стрелки.
+ // ══════════════════════════════════════════════
+ const FURN_HIT_R = 16;      // радиус захвата точки (экранные px при scale=1)
+ 
+@@ -659,7 +663,10 @@ function initFurnitureCanvas() {
+       S.activeFurniture = hit;
+     } else {
+       // Пустое место — ставим новую точку и сразу берём её в перетаскивание.
+-      S.furniture.push({ x: snapNorm(x / W), y: snapNorm(y / W), product: null });
++      // Поворот наследуем у активной точки — расстановка «в ряд» без лишних кликов.
++      const prev = (S.activeFurniture !== null) ? S.furniture[S.activeFurniture] : null;
++      S.furniture.push({ x: snapNorm(x / W), y: snapNorm(y / W),
++                         rot: prev ? (prev.rot || 0) : 0, product: null });
+       S.activeFurniture = S.furniture.length - 1;
+       if (typeof onParamChange === 'function') onParamChange();
+     }
+@@ -681,6 +688,29 @@ function initFurnitureCanvas() {
+     furnDrag = false; furnDragIdx = -1; wrap.style.cursor = 'default';
+     if (typeof onParamChange === 'function') onParamChange();   // пересборка 3D
+   });
++
++  // R — повернуть выбранную точку на 90° (Shift+R — назад). Работает только при
++  // открытом редакторе мебели и вне полей ввода.
++  document.addEventListener('keydown', e => {
++    if (!active() || e.ctrlKey || e.altKey || e.metaKey) return;
++    const t = e.target;
++    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
++    if (e.key !== 'r' && e.key !== 'R' && e.key !== 'к' && e.key !== 'К') return;   // рус. раскладка
++    e.preventDefault();
++    rotateActiveFurniture(e.shiftKey ? -1 : 1);
++  });
++}
++
++// Поворот выбранной точки на ±90°. dir: 1 — против часовой на плане (+Y в 3D).
++function rotateActiveFurniture(dir) {
++  const pts = S.furniture || [];
++  const p = (S.activeFurniture !== null) ? pts[S.activeFurniture] : null;
++  if (!p) return;
++  const TAU = Math.PI * 2;
++  p.rot = (((p.rot || 0) + (dir < 0 ? -1 : 1) * Math.PI / 2) % TAU + TAU) % TAU;
++  drawFurnitureCanvas();
++  _dSyncFurniturePanel();
++  if (typeof onParamChange === 'function') onParamChange();   // пересборка 3D
+ }
+ 
+ // Индекс точки под курсором (нормализованные координаты) или -1.
+@@ -701,7 +731,7 @@ function addFurniturePoint() {
+   const a = (S.activeFurniture !== null) ? S.furniture[S.activeFurniture] : null;
+   const nx = a ? Math.min(1, a.x + 1.5 / GRID) : 0.5;
+   const ny = a ? a.y : 0.5;
+-  S.furniture.push({ x: snapNorm(nx), y: snapNorm(ny), product: null });
++  S.furniture.push({ x: snapNorm(nx), y: snapNorm(ny), rot: a ? (a.rot || 0) : 0, product: null });
+   S.activeFurniture = S.furniture.length - 1;
+   drawFurnitureCanvas();
+   _dSyncFurniturePanel();
+@@ -724,7 +754,9 @@ function _dSyncFurniturePanel() {
+   const pts = S.furniture || [];
+   if (!pts.length) { el.textContent = 'Кликните по плану, чтобы поставить точку'; return; }
+   const filled = pts.filter(p => p.product).length;
+-  const act = (S.activeFurniture !== null) ? ` · выбрана №${S.activeFurniture + 1}` : '';
++  const a = (S.activeFurniture !== null) ? pts[S.activeFurniture] : null;
++  const deg = a ? Math.round(((a.rot || 0) * 180 / Math.PI)) % 360 : 0;
++  const act = a ? ` · выбрана №${S.activeFurniture + 1} (поворот ${deg}°)` : '';
+   el.textContent = `Точек: ${pts.length}, с мебелью: ${filled}${act}`;
+ }
+ 
+@@ -751,6 +783,17 @@ function drawFurnitureCanvas() {
+     const px = p.x * W, py = p.y * H;
+     const isActive = (i === S.activeFurniture);
+     const R = 11 / cx.scale;
++    // Стрелка «переда»: локальный +X модели. Ось Y в 3D крутит против часовой,
++    // а y плана растёт вниз → экранное направление = (cos rot, −sin rot).
++    const rot = p.rot || 0, dx = Math.cos(rot), dy = -Math.sin(rot);
++    const a0 = R + 3 / cx.scale, a1 = R + 15 / cx.scale, aw = 5 / cx.scale;
++    ctx.beginPath();
++    ctx.moveTo(px + dx * a1, py + dy * a1);                      // остриё
++    ctx.lineTo(px + dx * a0 - dy * aw, py + dy * a0 + dx * aw);
++    ctx.lineTo(px + dx * a0 + dy * aw, py + dy * a0 - dx * aw);
++    ctx.closePath();
++    ctx.fillStyle = isActive ? '#0064DC' : '#7a4b23';
++    ctx.fill();
+     // Заполненная точка (с товаром) — коричневая, пустая — серая.
+     ctx.beginPath(); ctx.arc(px, py, R, 0, Math.PI * 2);
+     ctx.fillStyle = p.product ? 'rgba(122,75,35,.85)' : 'rgba(255,255,255,.95)';
+diff --git a/index.html b/index.html
+index edcc4e9..29b3652 100644
+--- a/index.html
++++ b/index.html
+@@ -4,7 +4,7 @@
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ <title>Конфигуратор дома — Десктоп</title>
+-<link rel="stylesheet" href="styles-desktop.css?v=6">
++<link rel="stylesheet" href="styles-desktop.css?v=7">
+ </head>
+ <body>
+ 
+@@ -238,7 +238,7 @@
+           <div class="d-canvas-header">
+             <div>
+               <div class="d-canvas-title">Садовая мебель — точки размещения</div>
+-              <div class="d-canvas-hint">Клик по плану — новая точка (сразу можно тащить). Клик по точке — выбрать и перетащить. Товар из каталога встаёт в выбранную точку, иначе в первую свободную по номерам. Точка на террасе — мебель встанет на настил.</div>
++              <div class="d-canvas-hint">Клик по плану — новая точка (сразу можно тащить). Клик по точке — выбрать и перетащить. Стрелка у точки — «перёд» мебели, поворот кнопкой или клавишей R (Shift+R — назад). Товар из каталога встаёт в выбранную точку, иначе в первую свободную по номерам. Точка на террасе — мебель встанет на настил.</div>
+             </div>
+           </div>
+           <div class="d-canvas-area" id="cw-furniture" style="cursor:default;"><canvas id="cv-furniture"></canvas></div>
+@@ -246,6 +246,7 @@
+             <span class="d-facade-count" id="d-furniture-info"></span>
+             <div class="d-canvas-actions">
+               <button class="d-canvas-btn" onclick="addFurniturePoint()">＋ Точка</button>
++              <button class="d-canvas-btn" onclick="rotateActiveFurniture(1)">⟲ Повернуть 90°</button>
+               <button class="d-canvas-btn" onclick="delActiveFurniture()">✕ Удалить точку</button>
+               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('furniture')">✓ Готово</button>
+             </div>
+@@ -296,6 +297,14 @@
+           </div>
+         </div>
+ 
++        <!-- Индикатор загрузки 3D-моделей (мебель из каталога — 4–12 МБ, 3–10 с).
++             Лежит поверх и 3D-вида, и открытого canvas-редактора; управляется
++             d3dLoadingSet/d3dLoadingClear в nav-desktop.js. -->
++        <div class="d-3d-loading" id="d-3d-loading">
++          <div class="d-3d-loading-bar" id="d-3d-loading-bar"><div class="d-3d-loading-fill" id="d-3d-loading-fill"></div></div>
++          <div class="d-3d-loading-txt" id="d-3d-loading-txt">Загрузка модели…</div>
++        </div>
++
+       </div>
+     </div>
+ 
+@@ -363,8 +372,8 @@
+ <script src="vendor/three/EXRLoader.js"></script>
+ <script src="vendor/three/GLTFLoader.js"></script>
+ <!-- Shared state, canvas engine -->
+-<script src="state.js?v=32"></script>
+-<script src="canvas.js?v=31"></script>
++<script src="state.js?v=33"></script>
++<script src="canvas.js?v=32"></script>
+ <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
+ <script src="shared/house-builder.js?v=81"></script>
+ <!-- Каталожный API: домен выбирается по хосту.
+@@ -382,10 +391,10 @@
+ <!-- 3D viewer: core (сцена/материалы/оркестратор) → builders (конструкции) →
+      railing (ограждение/навесы). Общая глобальная область, порядок важен. -->
+ <script src="viewer3d-core.js?v=120"></script>
+-<script src="viewer3d-builders.js?v=6"></script>
++<script src="viewer3d-builders.js?v=7"></script>
+ <script src="viewer3d-railing.js?v=3"></script>
+ <script src="viewer3d-entourage.js?v=14"></script>
+ <!-- Desktop navigation & UI -->
+-<script src="nav-desktop.js?v=53"></script>
++<script src="nav-desktop.js?v=54"></script>
+ </body>
+ </html>
+diff --git a/nav-desktop.js b/nav-desktop.js
+index 7c33b70..cb2b6af 100644
+--- a/nav-desktop.js
++++ b/nav-desktop.js
+@@ -870,6 +870,10 @@ function _applySampleToActive(sample) {
+ 
+ // Назначает товар точке мебели: активной, иначе первой без товара (по номерам),
+ // иначе — последней (перезаписываем, чтобы «Применить» всегда давал результат).
++// После назначения выбор ПЕРЕВОДИТСЯ на следующую свободную точку — иначе повторное
++// «Применить» било бы в ту же точку (она осталась активной) и вся мебель садилась
++// бы на одно место. Явный выбор точки кликом на плане при этом сохраняет смысл
++// «заменить товар в этой точке».
+ // Возвращает индекс точки или -1, если точек нет.
+ function _assignFurnitureProduct(sample) {
+   const pts = S.furniture || [];
+@@ -881,7 +885,14 @@ function _assignFurnitureProduct(sample) {
+   if (idx < 0) idx = pts.findIndex(p => !p.product);
+   if (idx < 0) idx = pts.length - 1;
+   pts[idx].product = { id: sample.id, name: sample.name, modelUrl: sample.modelUrl || '' };
+-  S.activeFurniture = idx;
++  // Следующая свободная — сначала после текущей, потом с начала; нет свободных — null
++  // (тогда следующее «Применить» перезапишет последнюю точку).
++  let next = -1;
++  for (let k = 1; k <= pts.length; k++) {
++    const j = (idx + k) % pts.length;
++    if (!pts[j].product) { next = j; break; }
++  }
++  S.activeFurniture = (next >= 0) ? next : null;
+   if (typeof buildScene3d === 'function') buildScene3d();
+   if (typeof drawFurnitureCanvas === 'function'
+       && document.getElementById('d-canvas-furniture')?.classList.contains('active')) {
+@@ -890,6 +901,36 @@ function _assignFurnitureProduct(sample) {
+   return idx;
+ }
+ 
++// ── Индикатор загрузки 3D-моделей ──────────────────────────────────────────
++// Модели мебели из каталога весят 4–12 МБ и грузятся 3–10 с; без индикатора
++// сцена просто «молчит». Ключ — обычно URL модели; label — что показать
++// пользователю; pct — 0..100 или null, если размер файла неизвестен.
++const _d3dLoads = new Map();          // key → { label, pct }
++
++function d3dLoadingSet(key, label, pct) {
++  _d3dLoads.set(key, { label: label || 'модель', pct: (typeof pct === 'number') ? pct : null });
++  _d3dLoadingRender();
++}
++function d3dLoadingClear(key) {
++  if (_d3dLoads.delete(key)) _d3dLoadingRender();
++}
++function _d3dLoadingRender() {
++  const box = document.getElementById('d-3d-loading');
++  const bar = document.getElementById('d-3d-loading-bar');
++  const fill = document.getElementById('d-3d-loading-fill');
++  const txt = document.getElementById('d-3d-loading-txt');
++  if (!box || !bar || !fill || !txt) return;
++  const items = [..._d3dLoads.values()];
++  if (!items.length) { box.classList.remove('on'); return; }
++  const known = items.filter(i => i.pct !== null);
++  const pct = known.length ? Math.round(known.reduce((s, i) => s + i.pct, 0) / known.length) : null;
++  const head = (items.length === 1) ? `Загрузка модели «${items[0].label}»` : `Загрузка моделей (${items.length})`;
++  txt.textContent = head + (pct !== null ? ` — ${pct}%` : '…');
++  bar.classList.toggle('indet', pct === null);
++  fill.style.width = (pct !== null ? pct : 40) + '%';
++  box.classList.add('on');
++}
++
+ function dApplySwatch(idx) {
+   const s = S.samples[idx];
+   if (!s) return;
+diff --git a/state.js b/state.js
+index 0884cf1..0d40faf 100644
+--- a/state.js
++++ b/state.js
+@@ -241,6 +241,8 @@ const S = {
+   pathWidth: 120,      // ширина дорожки, см (инпут v-paths-width зеркалится сюда)
+   // Садовая мебель: точки размещения на плане. Индекс+1 = номер точки на плане.
+   // { x, y } — нормализованные 0..1 (как остальная разметка);
++  // rot — поворот вокруг вертикали, радианы, кратно π/2 (0 = «перёд» модели,
++  //       её локальная ось +X, смотрит вдоль мирового +X = вправо на плане);
+   // product — назначенный из каталога товар { id, name, modelUrl } или null (точка пустая).
+   furniture: [],
+   activeFurniture: null,   // индекс выбранной точки или null
+diff --git a/styles-desktop.css b/styles-desktop.css
+index 03be9f1..9e4358a 100644
+--- a/styles-desktop.css
++++ b/styles-desktop.css
+@@ -286,6 +286,22 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
+ .d-center-3d {
+   position: absolute; inset: 0; cursor: grab; touch-action: none;
+ }
++/* Индикатор загрузки 3D-моделей (мебель из каталога — файлы 4–12 МБ).
++   Поверх 3D-вида и открытого редактора; показывается через d3dLoadingSet(). */
++.d-3d-loading {
++  position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);
++  display: none; flex-direction: column; align-items: center; gap: 8px;
++  padding: 12px 18px; background: rgba(255,255,255,.94);
++  border: 1px solid #e0e0e0; box-shadow: 0 4px 16px rgba(0,0,0,.12);
++  z-index: 30; pointer-events: none;
++}
++.d-3d-loading.on { display: flex; }
++.d-3d-loading-bar { width: 200px; height: 3px; background: #e3e3e3; position: relative; overflow: hidden; }
++.d-3d-loading-fill { position: absolute; top: 0; left: 0; height: 100%; width: 0; background: #555; transition: width .15s linear; }
++/* Размер файла неизвестен (нет Content-Length) — бегущая полоса вместо процентов. */
++.d-3d-loading-bar.indet .d-3d-loading-fill { width: 40%; animation: dcatbar 1s linear infinite; transition: none; }
++.d-3d-loading-txt { font-size: 12px; color: #555; white-space: nowrap; }
++
+ /* Canvas editor overlay (hidden by default) */
+ .d-center-canvas {
+   position: absolute; inset: 0; display: none;
+diff --git a/viewer3d-builders.js b/viewer3d-builders.js
+index 0723705..4a7c69a 100644
+--- a/viewer3d-builders.js
++++ b/viewer3d-builders.js
+@@ -338,52 +338,83 @@ function furnitureModelUrl(product) {
+   return FURNITURE_FALLBACK.bench;   // диваны/скамьи/столы — пока одна модель
+ }
+ 
+-function ensureFurnitureModel(url) {
++// Загрузка модели с индикатором прогресса: файлы каталога — 4–12 МБ (3–10 с),
++// поэтому прогресс отдаётся в d3dLoadingSet (nav-desktop.js). Если сервер не шлёт
++// Content-Length, pct = null → индикатор показывает бегущую полосу без процентов.
++function ensureFurnitureModel(url, label) {
+   if (_furnCache[url]) return Promise.resolve(_furnCache[url]);
+   if (_furnLoading[url]) return _furnLoading[url];
++  const done = () => { if (typeof d3dLoadingClear === 'function') d3dLoadingClear(url); };
++  const show = pct => { if (typeof d3dLoadingSet === 'function') d3dLoadingSet(url, label || 'модель', pct); };
+   _furnLoading[url] = new Promise(resolve => {
+     if (typeof THREE === 'undefined' || !THREE.GLTFLoader) { resolve(null); return; }
++    show(null);
+     new THREE.GLTFLoader().load(url,
+-      gltf => { _furnCache[url] = gltf.scene; _furnLoading[url] = null; resolve(gltf.scene); },
+-      undefined,
++      gltf => { _furnCache[url] = gltf.scene; _furnLoading[url] = null; done(); resolve(gltf.scene); },
++      ev => { show(ev && ev.total > 0 ? Math.min(100, Math.round(ev.loaded / ev.total * 100)) : null); },
+       err => { console.warn('[furniture] не загрузилась модель', url, err);
+-               _furnCache[url] = null; _furnLoading[url] = null; resolve(null); });
++               _furnCache[url] = null; _furnLoading[url] = null; done(); resolve(null); });
+   });
+   return _furnLoading[url];
+ }
+ 
++// Маркер места под мебель: полупрозрачный диск + треугольник-стрелка, показывающий
++// «перёд» (локальный +X группы). Ставится под пустой точкой, а также пока модель
++// грузится или если она не загрузилась — место в сцене видно всегда.
++function _furnitureMarker() {
++  const g = new THREE.Group();
++  const mat = new THREE.MeshStandardMaterial({ color: 0x9a9a9a, roughness: 0.9,
++                                               transparent: true, opacity: 0.5 });
++  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.04, 20), mat);
++  disc.position.y = 0.02; disc.receiveShadow = true;
++  g.add(disc);
++  const triGeo = new THREE.BufferGeometry();
++  triGeo.setAttribute('position', new THREE.Float32BufferAttribute([
++    0.44, 0, 0,   0.24, 0, -0.12,   0.24, 0, 0.12,      // обход даёт нормаль +Y
++  ], 3));
++  triGeo.computeVertexNormals();
++  const tip = new THREE.Mesh(triGeo, mat);
++  tip.position.y = 0.045;
++  g.add(tip);
++  return g;
++}
++
+ // Расставляет мебель по точкам. surfaceYAt(x,z) → отметка поверхности (настил
+ // террасы/причала или земля) — точка на террасе ставит мебель НА настил.
+ // Модель садится основанием на эту отметку и центрируется по точке в плане.
+-// Пустые точки (товар не выбран) показываются полупрозрачным маркером-подставкой,
+-// чтобы место было видно в 3D до выбора товара.
++// Точки без модели (товар не выбран, модель ещё грузится или не загрузилась)
++// показываются маркером-подставкой — место в 3D видно всегда.
++//
++// ПОВОРОТ (pt.rot, радианы, кратно π/2). «Перёд» мебели — локальная ось +X модели;
++// при rot = 0 он смотрит вдоль мирового +X (вправо на плане). Модель кладётся в
++// группу-пивот, центрированную по точке: вращать сам клон нельзя — его origin не
++// совпадает с центром bbox, и предмет уезжал бы с точки по дуге.
+ function buildFurniture3d(parent, M, points, houseL, houseW, surfaceYAt) {
+   if (!points || !points.length) return;
+-  let needRebuild = false;
+   points.forEach((pt, i) => {
+     const w = canvasToWorld([{ x: pt.x, y: pt.y }], houseL, houseW)[0];
+     const y = surfaceYAt ? surfaceYAt(w.x, w.z) : 0;
+-    if (!pt.product) {
+-      const geo = new THREE.CylinderGeometry(0.28, 0.28, 0.04, 20);
+-      const mat = new THREE.MeshStandardMaterial({ color: 0x9a9a9a, roughness: 0.9,
+-                                                   transparent: true, opacity: 0.5 });
+-      const m = new THREE.Mesh(geo, mat);
+-      m.position.set(w.x, y + 0.02, w.z);
+-      m.receiveShadow = true;
+-      parent.add(m); threeState.furnitureMeshes.push(m);
+-      return;
+-    }
++    const rot = pt.rot || 0;
++    const marker = () => {
++      const g = _furnitureMarker();
++      g.position.set(w.x, y, w.z);
++      g.rotation.y = rot;
++      parent.add(g); threeState.furnitureMeshes.push(g);
++    };
++    if (!pt.product) { marker(); return; }
+     const url = furnitureModelUrl(pt.product);
+     const proto = _furnCache[url];
+-    if (proto === undefined) { ensureFurnitureModel(url).then(() => { if (threeState) buildScene3d(); }); needRebuild = true; return; }
+-    if (!proto) return;                       // модель не загрузилась — молча пропускаем
++    if (proto === undefined) {
++      ensureFurnitureModel(url, pt.product.name).then(() => { if (threeState) buildScene3d(); });
++      marker(); return;                       // пока грузится — место видно маркером
++    }
++    if (!proto) { marker(); return; }         // модель не загрузилась — остаётся маркер
+     const obj = proto.clone(true);
+     obj.updateMatrixWorld(true);
+     const bb = new THREE.Box3().setFromObject(obj);
+     const c = bb.getCenter(new THREE.Vector3());
+-    // Центрируем в плане по точке, основание — на поверхности.
+-    obj.position.set(w.x - c.x, y - bb.min.y, w.z - c.z);
+-    if (pt.rot) obj.rotation.y = pt.rot;
++    // В пивоте: центр модели в плане — в начале координат, основание — на y=0.
++    obj.position.set(-c.x, -bb.min.y, -c.z);
+     obj.traverse(o => {
+       if (!o.isMesh) return;
+       o.castShadow = true; o.receiveShadow = true;
+@@ -392,9 +423,12 @@ function buildFurniture3d(parent, M, points, houseL, houseW, surfaceYAt) {
+       // пересборка получила бы «убитый» прототип (та же грабля, что с vegGroup).
+       o.material = Array.isArray(o.material) ? o.material.map(m => m.clone()) : o.material.clone();
+     });
+-    parent.add(obj); threeState.furnitureMeshes.push(obj);
++    const pivot = new THREE.Group();
++    pivot.add(obj);
++    pivot.position.set(w.x, y, w.z);           // точка плана + отметка поверхности
++    pivot.rotation.y = rot;
++    parent.add(pivot); threeState.furnitureMeshes.push(pivot);
+   });
+-  if (needRebuild) return;   // сцена пересоберётся после загрузки моделей
+ }
+ 
+ // ── Ограждение террасы: GLB-модуль mod_railing (post / rails / balu_short / balu_floor) ──
+-- 
+2.43.0
+
