@@ -1,0 +1,107 @@
+{
+  "source": "3d_sources/furniture/List.docx",
+  "site": "https://outdoor-mebel.ru",
+  "note": "The heading in List.docx reads 'Tagliaento'; the actual brand on the product pages is 'Tagliamento', which is what the folder names use.",
+  "items": [
+    {
+      "brand": "Deckwood",
+      "slug": "pletenyy_komplekt_nest_deckwood",
+      "url": "https://outdoor-mebel.ru/komplekty-sadovoy-mebeli/pletenyy_komplekt_nest_deckwood/"
+    },
+    {
+      "brand": "Deckwood",
+      "slug": "pletenyy_komplekt_nova_v1_deckwood_nest",
+      "url": "https://outdoor-mebel.ru/komplekty-sadovoy-mebeli/pletenyy_komplekt_nova_v1_deckwood_nest/"
+    },
+    {
+      "brand": "Deckwood",
+      "slug": "stol_deckwood_dual_d_78cm_h_45sm_",
+      "url": "https://outdoor-mebel.ru/pletenaya-mebel-iz-iskusstvennoy-lozy/stol_deckwood_dual_d_78cm_h_45sm_/"
+    },
+    {
+      "brand": "Deckwood",
+      "slug": "pletenoe_podvesnoe_kreslo_kokon_deckwood",
+      "url": "https://outdoor-mebel.ru/dvuhmestnye-kresla-kokony/pletenoe_podvesnoe_kreslo_kokon_deckwood/"
+    },
+    {
+      "brand": "Deckwood",
+      "slug": "pletenoe_podvesnoe_kreslo_kokon_1550_kh_820_kh_1400mm_deckwood",
+      "url": "https://outdoor-mebel.ru/odnomestnye-kresla-kokony/pletenoe_podvesnoe_kreslo_kokon_1550_kh_820_kh_1400mm_deckwood/"
+    },
+    {
+      "brand": "Deckwood",
+      "slug": "pletenyy_podvesnoy_divan_deckwood_sky_bed_lite",
+      "url": "https://outdoor-mebel.ru/dvuhmestnye-kresla-kokony/pletenyy_podvesnoy_divan_deckwood_sky_bed_lite/"
+    },
+    {
+      "brand": "Deckwood",
+      "slug": "shezlong_napolnyy_deckwood_sun_pool_2060kh910kh300mm",
+      "url": "https://outdoor-mebel.ru/shezlongi-iz-rotanga/shezlong_napolnyy_deckwood_sun_pool_2060kh910kh300mm/"
+    },
+    {
+      "brand": "Deckwood",
+      "slug": "divan_grand_nest_d_v_sh_144kh130kh136sm",
+      "url": "https://outdoor-mebel.ru/odnomestnye-kresla-kokony/divan_grand_nest_d_v_sh_144kh130kh136sm/"
+    },
+    {
+      "brand": "Deckwood",
+      "slug": "kreslo_patio_vine",
+      "url": "https://outdoor-mebel.ru/odnomestnye-kresla-kokony/kreslo_patio_vine/"
+    },
+    {
+      "brand": "Deckwood",
+      "slug": "vazon_bochonok_deckwood",
+      "url": "https://outdoor-mebel.ru/ulichnye-amfory-vazony/vazon_bochonok_deckwood/"
+    },
+    {
+      "brand": "Tagliamento",
+      "slug": "komplekt_derevyannoy_pletenoy_mebeli_tagliamento_talara",
+      "url": "https://outdoor-mebel.ru/sadovaya-mebel/komplekt_derevyannoy_pletenoy_mebeli_tagliamento_talara/"
+    },
+    {
+      "brand": "Tagliamento",
+      "slug": "komplekt-derevyannoy-mebeli-tagliamento-ravona-kd-1857573239",
+      "url": "https://outdoor-mebel.ru/sadovaya-mebel/komplekt-derevyannoy-mebeli-tagliamento-ravona-kd-1857573239/"
+    },
+    {
+      "brand": "Tagliamento",
+      "slug": "komplekt-derevyannoy-pletenoy-mebeli-tagliamento-talara",
+      "url": "https://outdoor-mebel.ru/sadovaya-mebel/komplekt-derevyannoy-pletenoy-mebeli-tagliamento-talara/"
+    },
+    {
+      "brand": "Tagliamento",
+      "slug": "komplekt_derevyannoy_mebeli_tagliamento_ravona_kd",
+      "url": "https://outdoor-mebel.ru/sadovaya-mebel/komplekt_derevyannoy_mebeli_tagliamento_ravona_kd/"
+    },
+    {
+      "brand": "Tagliamento",
+      "slug": "komplekt-derevyannoy-mebeli-tagliamento-mali-1766194802",
+      "url": "https://outdoor-mebel.ru/sadovaya-mebel/komplekt-derevyannoy-mebeli-tagliamento-mali-1766194802/"
+    },
+    {
+      "brand": "Tagliamento",
+      "slug": "komplekt_derevyannoy_mebeli_tagliamento_mali",
+      "url": "https://outdoor-mebel.ru/sadovaya-mebel/komplekt_derevyannoy_mebeli_tagliamento_mali/"
+    },
+    {
+      "brand": "Tagliamento",
+      "slug": "komplekt_derevyannoy_mebeli_tagliamento_woodland",
+      "url": "https://outdoor-mebel.ru/sadovaya-mebel/komplekt_derevyannoy_mebeli_tagliamento_woodland/"
+    },
+    {
+      "brand": "Tagliamento",
+      "slug": "komplekt-derevyannoy-mebeli-tagliamento-mali-64108605",
+      "url": "https://outdoor-mebel.ru/sadovaya-mebel/komplekt-derevyannoy-mebeli-tagliamento-mali-64108605/"
+    },
+    {
+      "brand": "Tagliamento",
+      "slug": "launzh_kreslo_pletenoe_s_vysokoy_spinkoy_i_pufom_tagliamento_mali",
+      "url": "https://outdoor-mebel.ru/pletenaya-mebel-iz-polimernoy-lozy/launzh_kreslo_pletenoe_s_vysokoy_spinkoy_i_pufom_tagliamento_mali/"
+    },
+    {
+      "brand": "Tagliamento",
+      "slug": "kreslo_derevyannoe_s_podushkami_tagliamento_ravona_kd",
+      "url": "https://outdoor-mebel.ru/sadovaya-mebel/kreslo_derevyannoe_s_podushkami_tagliamento_ravona_kd/"
+    }
+  ]
+}
