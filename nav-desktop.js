@@ -1775,7 +1775,15 @@ function dShowSummary() {
   // Блок расчёта террасы бэкендом — заполняется асинхронно (_dRenderTerraceCalc).
   document.getElementById('d-sum-body').innerHTML =
     infoHTML + estHTML + '<div id="d-terrace-calc"></div>';
-  _ensureTerraceCalc();
+  // Расчёт не должен ломать «Итог»: исключение при сборке запроса раньше обрывало
+  // dShowSummary до _dRenderTerraceCalc, и блок оставался пустым — без заголовка и
+  // без сообщения, то есть неотличимо от «фичи вообще нет в этой сборке».
+  try {
+    _ensureTerraceCalc();
+  } catch (e) {
+    console.error('[terrace calc] не удалось собрать запрос', e);
+    _terraceCalc = { key: 'x', state: 'err', error: 'Не удалось собрать запрос: ' + e.message };
+  }
   _dRenderTerraceCalc();
   document.getElementById('d-summary-overlay').classList.add('active');
 }
