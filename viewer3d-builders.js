@@ -338,52 +338,83 @@ function furnitureModelUrl(product) {
   return FURNITURE_FALLBACK.bench;   // диваны/скамьи/столы — пока одна модель
 }
 
-function ensureFurnitureModel(url) {
+// Загрузка модели с индикатором прогресса: файлы каталога — 4–12 МБ (3–10 с),
+// поэтому прогресс отдаётся в d3dLoadingSet (nav-desktop.js). Если сервер не шлёт
+// Content-Length, pct = null → индикатор показывает бегущую полосу без процентов.
+function ensureFurnitureModel(url, label) {
   if (_furnCache[url]) return Promise.resolve(_furnCache[url]);
   if (_furnLoading[url]) return _furnLoading[url];
+  const done = () => { if (typeof d3dLoadingClear === 'function') d3dLoadingClear(url); };
+  const show = pct => { if (typeof d3dLoadingSet === 'function') d3dLoadingSet(url, label || 'модель', pct); };
   _furnLoading[url] = new Promise(resolve => {
     if (typeof THREE === 'undefined' || !THREE.GLTFLoader) { resolve(null); return; }
+    show(null);
     new THREE.GLTFLoader().load(url,
-      gltf => { _furnCache[url] = gltf.scene; _furnLoading[url] = null; resolve(gltf.scene); },
-      undefined,
+      gltf => { _furnCache[url] = gltf.scene; _furnLoading[url] = null; done(); resolve(gltf.scene); },
+      ev => { show(ev && ev.total > 0 ? Math.min(100, Math.round(ev.loaded / ev.total * 100)) : null); },
       err => { console.warn('[furniture] не загрузилась модель', url, err);
-               _furnCache[url] = null; _furnLoading[url] = null; resolve(null); });
+               _furnCache[url] = null; _furnLoading[url] = null; done(); resolve(null); });
   });
   return _furnLoading[url];
+}
+
+// Маркер места под мебель: полупрозрачный диск + треугольник-стрелка, показывающий
+// «перёд» (локальный +X группы). Ставится под пустой точкой, а также пока модель
+// грузится или если она не загрузилась — место в сцене видно всегда.
+function _furnitureMarker() {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x9a9a9a, roughness: 0.9,
+                                               transparent: true, opacity: 0.5 });
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.04, 20), mat);
+  disc.position.y = 0.02; disc.receiveShadow = true;
+  g.add(disc);
+  const triGeo = new THREE.BufferGeometry();
+  triGeo.setAttribute('position', new THREE.Float32BufferAttribute([
+    0.44, 0, 0,   0.24, 0, -0.12,   0.24, 0, 0.12,      // обход даёт нормаль +Y
+  ], 3));
+  triGeo.computeVertexNormals();
+  const tip = new THREE.Mesh(triGeo, mat);
+  tip.position.y = 0.045;
+  g.add(tip);
+  return g;
 }
 
 // Расставляет мебель по точкам. surfaceYAt(x,z) → отметка поверхности (настил
 // террасы/причала или земля) — точка на террасе ставит мебель НА настил.
 // Модель садится основанием на эту отметку и центрируется по точке в плане.
-// Пустые точки (товар не выбран) показываются полупрозрачным маркером-подставкой,
-// чтобы место было видно в 3D до выбора товара.
+// Точки без модели (товар не выбран, модель ещё грузится или не загрузилась)
+// показываются маркером-подставкой — место в 3D видно всегда.
+//
+// ПОВОРОТ (pt.rot, радианы, кратно π/2). «Перёд» мебели — локальная ось +X модели;
+// при rot = 0 он смотрит вдоль мирового +X (вправо на плане). Модель кладётся в
+// группу-пивот, центрированную по точке: вращать сам клон нельзя — его origin не
+// совпадает с центром bbox, и предмет уезжал бы с точки по дуге.
 function buildFurniture3d(parent, M, points, houseL, houseW, surfaceYAt) {
   if (!points || !points.length) return;
-  let needRebuild = false;
   points.forEach((pt, i) => {
     const w = canvasToWorld([{ x: pt.x, y: pt.y }], houseL, houseW)[0];
     const y = surfaceYAt ? surfaceYAt(w.x, w.z) : 0;
-    if (!pt.product) {
-      const geo = new THREE.CylinderGeometry(0.28, 0.28, 0.04, 20);
-      const mat = new THREE.MeshStandardMaterial({ color: 0x9a9a9a, roughness: 0.9,
-                                                   transparent: true, opacity: 0.5 });
-      const m = new THREE.Mesh(geo, mat);
-      m.position.set(w.x, y + 0.02, w.z);
-      m.receiveShadow = true;
-      parent.add(m); threeState.furnitureMeshes.push(m);
-      return;
-    }
+    const rot = pt.rot || 0;
+    const marker = () => {
+      const g = _furnitureMarker();
+      g.position.set(w.x, y, w.z);
+      g.rotation.y = rot;
+      parent.add(g); threeState.furnitureMeshes.push(g);
+    };
+    if (!pt.product) { marker(); return; }
     const url = furnitureModelUrl(pt.product);
     const proto = _furnCache[url];
-    if (proto === undefined) { ensureFurnitureModel(url).then(() => { if (threeState) buildScene3d(); }); needRebuild = true; return; }
-    if (!proto) return;                       // модель не загрузилась — молча пропускаем
+    if (proto === undefined) {
+      ensureFurnitureModel(url, pt.product.name).then(() => { if (threeState) buildScene3d(); });
+      marker(); return;                       // пока грузится — место видно маркером
+    }
+    if (!proto) { marker(); return; }         // модель не загрузилась — остаётся маркер
     const obj = proto.clone(true);
     obj.updateMatrixWorld(true);
     const bb = new THREE.Box3().setFromObject(obj);
     const c = bb.getCenter(new THREE.Vector3());
-    // Центрируем в плане по точке, основание — на поверхности.
-    obj.position.set(w.x - c.x, y - bb.min.y, w.z - c.z);
-    if (pt.rot) obj.rotation.y = pt.rot;
+    // В пивоте: центр модели в плане — в начале координат, основание — на y=0.
+    obj.position.set(-c.x, -bb.min.y, -c.z);
     obj.traverse(o => {
       if (!o.isMesh) return;
       o.castShadow = true; o.receiveShadow = true;
@@ -392,9 +423,12 @@ function buildFurniture3d(parent, M, points, houseL, houseW, surfaceYAt) {
       // пересборка получила бы «убитый» прототип (та же грабля, что с vegGroup).
       o.material = Array.isArray(o.material) ? o.material.map(m => m.clone()) : o.material.clone();
     });
-    parent.add(obj); threeState.furnitureMeshes.push(obj);
+    const pivot = new THREE.Group();
+    pivot.add(obj);
+    pivot.position.set(w.x, y, w.z);           // точка плана + отметка поверхности
+    pivot.rotation.y = rot;
+    parent.add(pivot); threeState.furnitureMeshes.push(pivot);
   });
-  if (needRebuild) return;   // сцена пересоберётся после загрузки моделей
 }
 
 // ── Ограждение террасы: GLB-модуль mod_railing (post / rails / balu_short / balu_floor) ──

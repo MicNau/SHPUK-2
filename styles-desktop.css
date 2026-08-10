@@ -286,6 +286,22 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
 .d-center-3d {
   position: absolute; inset: 0; cursor: grab; touch-action: none;
 }
+/* Индикатор загрузки 3D-моделей (мебель из каталога — файлы 4–12 МБ).
+   Поверх 3D-вида и открытого редактора; показывается через d3dLoadingSet(). */
+.d-3d-loading {
+  position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);
+  display: none; flex-direction: column; align-items: center; gap: 8px;
+  padding: 12px 18px; background: rgba(255,255,255,.94);
+  border: 1px solid #e0e0e0; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  z-index: 30; pointer-events: none;
+}
+.d-3d-loading.on { display: flex; }
+.d-3d-loading-bar { width: 200px; height: 3px; background: #e3e3e3; position: relative; overflow: hidden; }
+.d-3d-loading-fill { position: absolute; top: 0; left: 0; height: 100%; width: 0; background: #555; transition: width .15s linear; }
+/* Размер файла неизвестен (нет Content-Length) — бегущая полоса вместо процентов. */
+.d-3d-loading-bar.indet .d-3d-loading-fill { width: 40%; animation: dcatbar 1s linear infinite; transition: none; }
+.d-3d-loading-txt { font-size: 12px; color: #555; white-space: nowrap; }
+
 /* Canvas editor overlay (hidden by default) */
 .d-center-canvas {
   position: absolute; inset: 0; display: none;

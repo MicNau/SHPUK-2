@@ -870,6 +870,10 @@ function _applySampleToActive(sample) {
 
 // Назначает товар точке мебели: активной, иначе первой без товара (по номерам),
 // иначе — последней (перезаписываем, чтобы «Применить» всегда давал результат).
+// После назначения выбор ПЕРЕВОДИТСЯ на следующую свободную точку — иначе повторное
+// «Применить» било бы в ту же точку (она осталась активной) и вся мебель садилась
+// бы на одно место. Явный выбор точки кликом на плане при этом сохраняет смысл
+// «заменить товар в этой точке».
 // Возвращает индекс точки или -1, если точек нет.
 function _assignFurnitureProduct(sample) {
   const pts = S.furniture || [];
@@ -881,13 +885,50 @@ function _assignFurnitureProduct(sample) {
   if (idx < 0) idx = pts.findIndex(p => !p.product);
   if (idx < 0) idx = pts.length - 1;
   pts[idx].product = { id: sample.id, name: sample.name, modelUrl: sample.modelUrl || '' };
-  S.activeFurniture = idx;
+  // Следующая свободная — сначала после текущей, потом с начала; нет свободных — null
+  // (тогда следующее «Применить» перезапишет последнюю точку).
+  let next = -1;
+  for (let k = 1; k <= pts.length; k++) {
+    const j = (idx + k) % pts.length;
+    if (!pts[j].product) { next = j; break; }
+  }
+  S.activeFurniture = (next >= 0) ? next : null;
   if (typeof buildScene3d === 'function') buildScene3d();
   if (typeof drawFurnitureCanvas === 'function'
       && document.getElementById('d-canvas-furniture')?.classList.contains('active')) {
     drawFurnitureCanvas();
   }
   return idx;
+}
+
+// ── Индикатор загрузки 3D-моделей ──────────────────────────────────────────
+// Модели мебели из каталога весят 4–12 МБ и грузятся 3–10 с; без индикатора
+// сцена просто «молчит». Ключ — обычно URL модели; label — что показать
+// пользователю; pct — 0..100 или null, если размер файла неизвестен.
+const _d3dLoads = new Map();          // key → { label, pct }
+
+function d3dLoadingSet(key, label, pct) {
+  _d3dLoads.set(key, { label: label || 'модель', pct: (typeof pct === 'number') ? pct : null });
+  _d3dLoadingRender();
+}
+function d3dLoadingClear(key) {
+  if (_d3dLoads.delete(key)) _d3dLoadingRender();
+}
+function _d3dLoadingRender() {
+  const box = document.getElementById('d-3d-loading');
+  const bar = document.getElementById('d-3d-loading-bar');
+  const fill = document.getElementById('d-3d-loading-fill');
+  const txt = document.getElementById('d-3d-loading-txt');
+  if (!box || !bar || !fill || !txt) return;
+  const items = [..._d3dLoads.values()];
+  if (!items.length) { box.classList.remove('on'); return; }
+  const known = items.filter(i => i.pct !== null);
+  const pct = known.length ? Math.round(known.reduce((s, i) => s + i.pct, 0) / known.length) : null;
+  const head = (items.length === 1) ? `Загрузка модели «${items[0].label}»` : `Загрузка моделей (${items.length})`;
+  txt.textContent = head + (pct !== null ? ` — ${pct}%` : '…');
+  bar.classList.toggle('indet', pct === null);
+  fill.style.width = (pct !== null ? pct : 40) + '%';
+  box.classList.add('on');
 }
 
 function dApplySwatch(idx) {
