@@ -1418,10 +1418,24 @@ function _polyAreaM2(pts) {
   }
   return Math.abs(a) / 2;
 }
-// Ширина доски из названия товара ("140х22мм" → 0.14 м), иначе 0.14 м.
+// Ширина доски из названия товара в метрах; не распознали — 0.14 м.
+//
+// Порядок размеров в каталоге НЕ единый: «доска 20*140*2900» (толщина×ширина×длина),
+// но «ступень узкая 150*25*3000» (ширина×толщина×длина). Поэтому не полагаемся на
+// позицию: из группы размеров выбрасываем длину (≥ 1000 мм), из оставшихся ширина —
+// БОЛЬШЕЕ (толщина доски ДПК — 12–25 мм, ширина — от 80 мм).
+// Прежняя версия брала первое число пары и почти всегда падала на фолбэк 0.14: у
+// террасной доски он совпадал с реальными 140 мм и ошибку не было видно, а ступени
+// (320 мм) и фасадные панели (177 мм) считались с завышением погонажа в 1.3–2.3 раза.
+const BOARD_MIN_W_MM = 80, BOARD_MAX_W_MM = 400;
+
 function _boardWidthM(name) {
-  const m = /(\d{2,3})\s*[*хxX×]\s*(\d{1,3})/.exec(name || '');
-  if (m) { const w = parseInt(m[1], 10); if (w >= 80 && w <= 300) return w / 1000; }
+  const m = /(\d{1,4})\s*[*хxX×]\s*(\d{1,4})(?:\s*[*хxX×]\s*(\d{1,4}))?/.exec(name || '');
+  if (m) {
+    const dims = [m[1], m[2], m[3]].filter(Boolean).map(Number).filter(v => v < 1000);
+    const w = dims.length ? Math.max(...dims) : 0;
+    if (w >= BOARD_MIN_W_MM && w <= BOARD_MAX_W_MM) return w / 1000;
+  }
   return 0.14;
 }
 
@@ -1761,7 +1775,15 @@ function dShowSummary() {
   // Блок расчёта террасы бэкендом — заполняется асинхронно (_dRenderTerraceCalc).
   document.getElementById('d-sum-body').innerHTML =
     infoHTML + estHTML + '<div id="d-terrace-calc"></div>';
-  _ensureTerraceCalc();
+  // Расчёт не должен ломать «Итог»: исключение при сборке запроса раньше обрывало
+  // dShowSummary до _dRenderTerraceCalc, и блок оставался пустым — без заголовка и
+  // без сообщения, то есть неотличимо от «фичи вообще нет в этой сборке».
+  try {
+    _ensureTerraceCalc();
+  } catch (e) {
+    console.error('[terrace calc] не удалось собрать запрос', e);
+    _terraceCalc = { key: 'x', state: 'err', error: 'Не удалось собрать запрос: ' + e.message };
+  }
   _dRenderTerraceCalc();
   document.getElementById('d-summary-overlay').classList.add('active');
 }
