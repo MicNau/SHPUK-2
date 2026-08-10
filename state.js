@@ -156,7 +156,21 @@ const HOUSE_MATERIALS = {
       { id: 'siding', img: 'assets/wall_diff_02.jpg' },      // сайдинг
     ],
   },
+  // Рамы окон и полотна дверей (меши с материалами mat_frame*/mat_door). Текстур нет,
+  // только цвет; те же значения продублированы в _houseTexSet (viewer3d-core.js) —
+  // менять синхронно, иначе образец в UI разойдётся с цветом в 3D.
+  frame: {
+    label: 'Материал рам',
+    items: [
+      { id: 'wood',  color: '#4a2f18' },                     // текущий (дерево)
+      { id: 'white', color: '#f2f2f0' },                     // белый
+      { id: 'dark',  color: '#2b1a0d' },                     // тёмно-коричневый
+    ],
+  },
 };
+// Ключ группы HOUSE_MATERIALS ↔ поле состояния: '<kind>Mat' (roofMat, baseMat,
+// wallMat, frameMat). На этом соглашении держатся _dRenderHouseMaterials и
+// dSetHouseMat — новая группа материалов не требует правок в них.
 
 // Позиции из каталога outdoor-mebel.ru — Доска ДПК универсальная
 const STUB_RESULTS = [
@@ -241,6 +255,8 @@ const S = {
   pathWidth: 120,      // ширина дорожки, см (инпут v-paths-width зеркалится сюда)
   // Садовая мебель: точки размещения на плане. Индекс+1 = номер точки на плане.
   // { x, y } — нормализованные 0..1 (как остальная разметка);
+  // rot — поворот вокруг вертикали, радианы, кратно π/2 (0 = «перёд» модели,
+  //       её локальная ось +X, смотрит вдоль мирового +X = вправо на плане);
   // product — назначенный из каталога товар { id, name, modelUrl } или null (точка пустая).
   furniture: [],
   activeFurniture: null,   // индекс выбранной точки или null
@@ -252,6 +268,7 @@ const S = {
   roofMat: 'tile',     // tile | metal_green | metal_red
   baseMat: 'concrete', // concrete | stone
   wallMat: 'stucco',   // stucco | brick | siding
+  frameMat: 'wood',    // wood | white | dark — рамы окон и двери
 };
 // (TOTAL и глобальный step удалены — прогресс-бар мобильного wizard'а.)
 

@@ -321,17 +321,20 @@ function _dInitParamsView() {
   }, 80);
 }
 
-// Материалы дома (крыша/фундамент/стены) — квадратные образцы без подписей.
+// Материалы дома (крыша/фундамент/стены/рамы) — квадратные образцы без подписей.
+// Группы и их порядок берутся из HOUSE_MATERIALS; выбранное значение лежит в
+// S['<kind>Mat'] (см. соглашение в state.js), поэтому новая группа материалов
+// подхватывается здесь без правок.
 function _dRenderHouseMaterials() {
   const host = document.getElementById('d-house-mats');
   if (!host || typeof HOUSE_MATERIALS === 'undefined') return;
-  const sel = { roof: S.roofMat, base: S.baseMat, wall: S.wallMat };
-  host.innerHTML = ['roof', 'base', 'wall'].map(kind => {
+  host.innerHTML = Object.keys(HOUSE_MATERIALS).map(kind => {
     const grp = HOUSE_MATERIALS[kind];
+    const cur = S[kind + 'Mat'];
     const sw = grp.items.map(it => {
       const bg = it.img ? `background-image:url('${it.img}');background-size:cover;background-position:center;`
                         : `background:${it.color};`;
-      const active = (sel[kind] === it.id) ? ' active' : '';
+      const active = (cur === it.id) ? ' active' : '';
       return `<button class="d-hm-sw${active}" style="${bg}" onclick="dSetHouseMat('${kind}','${it.id}')" title="${it.id}"></button>`;
     }).join('');
     return `<div class="d-hm-group">
@@ -342,9 +345,8 @@ function _dRenderHouseMaterials() {
 }
 
 function dSetHouseMat(kind, id) {
-  if (kind === 'roof')      S.roofMat = id;
-  else if (kind === 'base') S.baseMat = id;
-  else if (kind === 'wall') S.wallMat = id;
+  if (typeof HOUSE_MATERIALS === 'undefined' || !HOUSE_MATERIALS[kind]) return;
+  S[kind + 'Mat'] = id;
   _dRenderHouseMaterials();
   if (typeof onParamChange === 'function') onParamChange(); // пересборка 3D (debounced)
 }
@@ -870,6 +872,10 @@ function _applySampleToActive(sample) {
 
 // Назначает товар точке мебели: активной, иначе первой без товара (по номерам),
 // иначе — последней (перезаписываем, чтобы «Применить» всегда давал результат).
+// После назначения выбор ПЕРЕВОДИТСЯ на следующую свободную точку — иначе повторное
+// «Применить» било бы в ту же точку (она осталась активной) и вся мебель садилась
+// бы на одно место. Явный выбор точки кликом на плане при этом сохраняет смысл
+// «заменить товар в этой точке».
 // Возвращает индекс точки или -1, если точек нет.
 function _assignFurnitureProduct(sample) {
   const pts = S.furniture || [];
@@ -881,13 +887,50 @@ function _assignFurnitureProduct(sample) {
   if (idx < 0) idx = pts.findIndex(p => !p.product);
   if (idx < 0) idx = pts.length - 1;
   pts[idx].product = { id: sample.id, name: sample.name, modelUrl: sample.modelUrl || '' };
-  S.activeFurniture = idx;
+  // Следующая свободная — сначала после текущей, потом с начала; нет свободных — null
+  // (тогда следующее «Применить» перезапишет последнюю точку).
+  let next = -1;
+  for (let k = 1; k <= pts.length; k++) {
+    const j = (idx + k) % pts.length;
+    if (!pts[j].product) { next = j; break; }
+  }
+  S.activeFurniture = (next >= 0) ? next : null;
   if (typeof buildScene3d === 'function') buildScene3d();
   if (typeof drawFurnitureCanvas === 'function'
       && document.getElementById('d-canvas-furniture')?.classList.contains('active')) {
     drawFurnitureCanvas();
   }
   return idx;
+}
+
+// ── Индикатор загрузки 3D-моделей ──────────────────────────────────────────
+// Модели мебели из каталога весят 4–12 МБ и грузятся 3–10 с; без индикатора
+// сцена просто «молчит». Ключ — обычно URL модели; label — что показать
+// пользователю; pct — 0..100 или null, если размер файла неизвестен.
+const _d3dLoads = new Map();          // key → { label, pct }
+
+function d3dLoadingSet(key, label, pct) {
+  _d3dLoads.set(key, { label: label || 'модель', pct: (typeof pct === 'number') ? pct : null });
+  _d3dLoadingRender();
+}
+function d3dLoadingClear(key) {
+  if (_d3dLoads.delete(key)) _d3dLoadingRender();
+}
+function _d3dLoadingRender() {
+  const box = document.getElementById('d-3d-loading');
+  const bar = document.getElementById('d-3d-loading-bar');
+  const fill = document.getElementById('d-3d-loading-fill');
+  const txt = document.getElementById('d-3d-loading-txt');
+  if (!box || !bar || !fill || !txt) return;
+  const items = [..._d3dLoads.values()];
+  if (!items.length) { box.classList.remove('on'); return; }
+  const known = items.filter(i => i.pct !== null);
+  const pct = known.length ? Math.round(known.reduce((s, i) => s + i.pct, 0) / known.length) : null;
+  const head = (items.length === 1) ? `Загрузка модели «${items[0].label}»` : `Загрузка моделей (${items.length})`;
+  txt.textContent = head + (pct !== null ? ` — ${pct}%` : '…');
+  bar.classList.toggle('indet', pct === null);
+  fill.style.width = (pct !== null ? pct : 40) + '%';
+  box.classList.add('on');
 }
 
 function dApplySwatch(idx) {
@@ -1144,6 +1187,29 @@ function dShowResults() {
   }
 }
 
+// URL картинки из поля каталога. Битрикс отдаёт такие поля по-разному: строкой-URL,
+// объектом ({src|url|path}) или числовым id файла — id адресом не является, его
+// отбрасываем. Кавычки вырезаем: URL подставляется внутрь style="…url('…')".
+function _pictureUrl(v) {
+  if (!v) return '';
+  if (typeof v === 'object') return _pictureUrl(v.src || v.url || v.path || v.SRC || '');
+  if (typeof v !== 'string') return '';
+  const s = v.trim().replace(/['"]/g, '');
+  return /^\d+$/.test(s) ? '' : s;
+}
+
+// Миниатюра карточки товара: у доски превью материала — сама DPK-текстура, у прочих
+// товаров (мебель) её нет, поэтому падаем на картинки каталога. Фото товара
+// показываем целиком (contain), текстуру — с заполнением (cover).
+function _productThumbStyle(p) {
+  const tex = (p.textureUrls && p.textureUrls.textures_dpc_diffusion) || '';
+  if (tex) return `background-image:url('${tex}');background-size:cover;background-position:center;`;
+  const pic = _pictureUrl(p.previewPicture) || _pictureUrl(p.detailPicture);
+  if (pic) return `background-image:url('${pic}');background-size:contain;background-repeat:no-repeat;`
+                + 'background-position:center;background-color:#fff;';
+  return 'background:#bbb;';
+}
+
 function _dRenderRealResults(allProducts) {
   const list = document.getElementById('d-mat-list');
   if (!list) return;
@@ -1157,10 +1223,7 @@ function _dRenderRealResults(allProducts) {
   }
   list.innerHTML = products.map(p => {
     const price = _productPrice(p);
-    const thumb = (p.textureUrls && p.textureUrls.textures_dpc_diffusion) || '';
-    const thumbStyle = thumb
-      ? `background-image:url('${thumb}');background-size:cover;background-position:center;`
-      : 'background:#bbb;';
+    const thumbStyle = _productThumbStyle(p);
     const desc = (p.previewText && p.previewTextType !== 'html') ? p.previewText : '';
     return `
     <div class="d-mat-card" id="dmc-${p.id}">
