@@ -688,7 +688,7 @@ function _resolveDeckMat(baseDeck, el) {
 const HOUSE_ROOF_TILE  = UV_TILE;
 const HOUSE_WALL_TILE  = UV_TILE;
 const HOUSE_BASE_TILE  = UV_TILE;
-const HOUSE_WOOD_COLOR = 0x4a2f18; // коричневый для деревянных частей (рамы/двери/перила)
+const HOUSE_WOOD_COLOR = 0x4a2f18; // «дерево» — вариант рам/дверей по умолчанию (S.frameMat = 'wood')
 
 // Текстурный набор для материала дома: {color, map, normalMap, roughnessMap}.
 // Для однотонных (штукатурка/бетон) карты = null. repeat=1 — тайлинг задаётся
@@ -708,6 +708,13 @@ function _houseTexSet(kind, variant) {
     base: {
       concrete: { c: 0x9a9a9a },
       stone:    { c: 0xffffff, d: 'base_diff_01', n: 'base_norm', r: 'base_roug_01' },
+    },
+    // Рамы окон и двери — только цвет. Дублируется в HOUSE_MATERIALS.frame (state.js),
+    // откуда рисуются образцы в UI; менять синхронно.
+    frame: {
+      wood:  { c: HOUSE_WOOD_COLOR },   // текущий (дерево)
+      white: { c: 0xf2f2f0 },
+      dark:  { c: 0x2b1a0d },
     },
   };
   const grp = D[kind] || {};
@@ -814,6 +821,7 @@ function _applyHouseMaterials(parent) {
   const roofT = _houseTexSet('roof', (typeof S !== 'undefined' && S.roofMat) || 'tile');
   const wallT = _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'stucco');
   const baseT = _houseTexSet('base', (typeof S !== 'undefined' && S.baseMat) || 'concrete');
+  const frameC = _houseTexSet('frame', (typeof S !== 'undefined' && S.frameMat) || 'wood').color;
   parent.traverse(o => {
     if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
     const nm = o.material.name || '';
@@ -852,8 +860,8 @@ function _applyHouseMaterials(parent) {
       o.material.roughness = 0.9;
       o.material.needsUpdate = true;
     } else if (nm === 'mat_door' || nm.indexOf('mat_frame') === 0) {
-      // Деревянные части (рамы/двери) — матовый коричневый.
-      o.material.color.set(HOUSE_WOOD_COLOR);
+      // Рамы окон и полотна дверей — матовый цвет из «Материала рам» (S.frameMat).
+      o.material.color.set(frameC);
       o.material.metalness = 0.0;
       o.material.roughness = 0.65;
       o.material.map = null;
