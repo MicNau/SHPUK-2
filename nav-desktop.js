@@ -848,6 +848,7 @@ function _activeIsDeck() {
 // — прежним способом (цвет live / глобально).
 function _applySampleToActive(sample) {
   S.activeSample = sample;                 // для подсветки образца
+  _setEstimateForActive(sample);           // смета обновляется вместе с материалом
   if (_activeIsDeck()) {
     // productId/name сохраняем рядом с текстурами: по ним расчёт террасы на бэкенде
     // узнаёт выбранную доску (_deckingBoardProductId), 3D-слой их игнорирует.
@@ -1242,7 +1243,6 @@ function _dRenderRealResults(allProducts) {
         <div class="d-mat-desc">${desc}</div>
         <div class="d-mat-actions">
           <button class="d-mat-btn d-mat-btn-apply" onclick="dApplyRealMat(event, ${p.id})">Применить</button>
-          <button class="d-mat-btn d-mat-btn-estimate" onclick="dEstimateRealMat(event, ${p.id})">В смету</button>
         </div>
       </div></div>
     </div>`;
@@ -1285,16 +1285,12 @@ function _dRenderStubResults() {
         <div class="d-mat-desc">${m.detail}</div>
         <div class="d-mat-actions">
           <button class="d-mat-btn d-mat-btn-apply"
-                  onclick="dApplyMat(event, ${m.id}, '${m.name.replace(/'/g, "\\'")}', '${m.color || '#C8A96E'}')">
+                  onclick="dApplyMat(event, ${m.id}, '${m.name.replace(/'/g, "\\'")}', '${m.color || '#C8A96E'}', '${m.price}')">
             Применить
           </button>
           <button class="d-mat-btn d-mat-btn-compare"
                   onclick="dCompareMat(event, ${m.id}, '${m.name.replace(/'/g, "\\'")}', '${m.color || '#C8A96E'}')">
             Сравнить
-          </button>
-          <button class="d-mat-btn d-mat-btn-estimate"
-                  onclick="dEstimateMat(event, ${m.id}, '${m.name.replace(/'/g, "\\'")}', '${m.price}')">
-            В смету
           </button>
         </div>
         <a href="${m.url}" target="_blank"
@@ -1323,12 +1319,16 @@ async function dApplyRealMat(e, pid) {
   // В образцы кладём с превью-цветом и текстурами (чтобы повторное применение работало).
   let idx = S.samples.findIndex(s => s.id === product.id);
   if (idx < 0) {
-    S.samples.push({ id: product.id, name: product.name, color: '#C8A96E', textures: product.textures });
+    // price кладём в образец, чтобы повторное применение свотча тоже обновляло смету.
+    S.samples.push({ id: product.id, name: product.name, color: '#C8A96E',
+                     textures: product.textures, price: _productPrice(product) });
     idx = S.samples.length - 1;
   }
   // modelUrl нужен мебели (GLB-модель товара); для прочих элементов он просто пуст.
+  // price — чтобы «Применить» сразу обновляло смету (_setEstimateForActive).
   _applySampleToActive({ id: product.id, name: product.name, color: null,
-                         textures: product.textures, modelUrl: product.modelUrl || '', _idx: idx });
+                         textures: product.textures, modelUrl: product.modelUrl || '',
+                         price: _productPrice(product), _idx: idx });
 
   btn.textContent = '✓'; btn.style.background = '#444';
   setTimeout(() => { btn.textContent = orig; btn.style.background = '#000'; }, 700);
@@ -1341,9 +1341,9 @@ function dToggleMatCard(mid) {
   if (!was) el.classList.add('open');
 }
 
-function dApplyMat(e, mid, name, color) {
-  S.samples.push({ id: mid, name, color });
-  _applySampleToActive({ id: mid, name, color, _idx: S.samples.length - 1 });
+function dApplyMat(e, mid, name, color, priceStr) {
+  S.samples.push({ id: mid, name, color, price: priceStr });
+  _applySampleToActive({ id: mid, name, color, price: priceStr, _idx: S.samples.length - 1 });
   const btn = e.currentTarget;
   const orig = btn.textContent;
   btn.textContent = '✓';
@@ -1358,12 +1358,6 @@ function dCompareMat(e, mid, name, color) {
   setTimeout(() => { btn.textContent = 'Сравнить'; btn.style.fontWeight = '700'; }, 1000);
 }
 
-function _estimateToast(btn) {
-  btn.textContent = '✓ В смете';
-  btn.style.fontWeight = '400';
-  setTimeout(() => { btn.textContent = 'В смету'; btn.style.fontWeight = '700'; }, 1000);
-}
-
 // Заглушки: цена приходит строкой ("от 2 400 ₽/м²") → вытаскиваем число.
 function _parsePriceNum(s) {
   if (typeof s === 'number') return s;
@@ -1372,22 +1366,15 @@ function _parsePriceNum(s) {
   return isNaN(v) ? null : v;
 }
 
-function dEstimateMat(e, mid, name, priceStr) {
-  if (dActiveItem) S.estimate[dActiveItem] = { id: mid, name, price: _parsePriceNum(priceStr) };
-  _estimateToast(e.currentTarget);
-}
-
-// Реальный товар «В смету»: записываем выбор для активного элемента проекта.
-function dEstimateRealMat(e, pid) {
-  let product = null;
-  for (const k in _catalogCache) {
-    const arr = _catalogCache[k];
-    if (Array.isArray(arr)) { const f = arr.find(p => p.id === pid); if (f) { product = f; break; } }
-  }
-  if (product && dActiveItem) {
-    S.estimate[dActiveItem] = { id: product.id, name: product.name, price: _productPrice(product) };
-  }
-  _estimateToast(e.currentTarget);
+// Записывает товар в смету активного элемента. Вызывается из «Применить»:
+// отдельной кнопки «В смету» больше нет — применённый материал И ЕСТЬ выбор
+// для сметы, а два действия на карточке путали (материал в 3D один, в смете другой).
+function _setEstimateForActive(sample) {
+  if (!dActiveItem) return;
+  if (!('price' in sample)) return;   // источник цены не передал — строку сметы не трогаем
+  const price = _parsePriceNum(sample.price);
+  if (price == null) { delete S.estimate[dActiveItem]; return; }
+  S.estimate[dActiveItem] = { id: sample.id, name: sample.name, price };
 }
 
 // ── Геометрические метрики элементов (для сметы) ──
