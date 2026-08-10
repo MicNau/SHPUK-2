@@ -64,7 +64,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "*")
         self.end_headers()
 
@@ -84,33 +84,50 @@ class Handler(SimpleHTTPRequestHandler):
         else:
             super().do_HEAD()
 
-    def _fetch_upstream(self, url, head):
+    def do_POST(self):
+        # POST всегда уходит на апстрим: локальной статике его отдавать нечему, а
+        # расчётные ручки каталога (/api/v1/calculate_terrace/) — только POST.
+        self._proxying = False
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(length) if length else b""
+        self._proxy(method="POST", body=body,
+                    ctype=self.headers.get("Content-Type", "application/json"))
+
+    def _fetch_upstream(self, url, head, method="GET", body=None, ctype=None):
         # Апстрим (sollersdev.ru) нестабилен: TLS-рукопожатие периодически виснет
         # (~1 из 3 запросов). Сбои независимы, поэтому делаем несколько попыток с
         # коротким таймаутом — это почти всегда даёт успех за 1-2 ретрая.
         last = None
         for attempt in range(ATTEMPTS):
             try:
-                req = urllib.request.Request(url, method="HEAD" if head else "GET")
+                req = urllib.request.Request(url, data=body,
+                                             method="HEAD" if head else method)
                 req.add_header("User-Agent", "Mozilla/5.0 (SHPUK-devproxy)")
                 req.add_header("Accept", "*/*")
                 req.add_header("Connection", "close")
+                if body is not None:
+                    req.add_header("Content-Type", ctype or "application/json")
                 with urllib.request.urlopen(req, timeout=ATTEMPT_TIMEOUT) as resp:
                     ctype = resp.headers.get("Content-Type", "application/octet-stream")
                     body = b"" if head else resp.read()
                     return resp.status, ctype, body, None
             except urllib.error.HTTPError as e:
-                # Реальный HTTP-код (404/500…) — не ретраим.
-                return e.code, "text/plain; charset=utf-8", b"", None
+                # Реальный HTTP-код (404/500…) — не ретраим. Тело отдаём как есть:
+                # у расчётных ручек в нём объяснение ошибки, оно нужно на клиенте.
+                try:
+                    err_body = e.read()
+                except Exception:
+                    err_body = b""
+                return e.code, e.headers.get("Content-Type", "text/plain; charset=utf-8"), err_body, None
             except Exception as e:
                 last = e
                 continue
         return None, None, None, last
 
-    def _proxy(self, head=False):
+    def _proxy(self, head=False, method="GET", body=None, ctype=None):
         self._proxying = True
         url = UPSTREAM + self.path
-        status, ctype, body, err = self._fetch_upstream(url, head)
+        status, ctype, body, err = self._fetch_upstream(url, head, method, body, ctype)
         if status is None:
             self.send_response(502)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
