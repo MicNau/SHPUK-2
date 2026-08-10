@@ -321,17 +321,20 @@ function _dInitParamsView() {
   }, 80);
 }
 
-// Материалы дома (крыша/фундамент/стены) — квадратные образцы без подписей.
+// Материалы дома (крыша/фундамент/стены/рамы) — квадратные образцы без подписей.
+// Группы и их порядок берутся из HOUSE_MATERIALS; выбранное значение лежит в
+// S['<kind>Mat'] (см. соглашение в state.js), поэтому новая группа материалов
+// подхватывается здесь без правок.
 function _dRenderHouseMaterials() {
   const host = document.getElementById('d-house-mats');
   if (!host || typeof HOUSE_MATERIALS === 'undefined') return;
-  const sel = { roof: S.roofMat, base: S.baseMat, wall: S.wallMat };
-  host.innerHTML = ['roof', 'base', 'wall'].map(kind => {
+  host.innerHTML = Object.keys(HOUSE_MATERIALS).map(kind => {
     const grp = HOUSE_MATERIALS[kind];
+    const cur = S[kind + 'Mat'];
     const sw = grp.items.map(it => {
       const bg = it.img ? `background-image:url('${it.img}');background-size:cover;background-position:center;`
                         : `background:${it.color};`;
-      const active = (sel[kind] === it.id) ? ' active' : '';
+      const active = (cur === it.id) ? ' active' : '';
       return `<button class="d-hm-sw${active}" style="${bg}" onclick="dSetHouseMat('${kind}','${it.id}')" title="${it.id}"></button>`;
     }).join('');
     return `<div class="d-hm-group">
@@ -342,9 +345,8 @@ function _dRenderHouseMaterials() {
 }
 
 function dSetHouseMat(kind, id) {
-  if (kind === 'roof')      S.roofMat = id;
-  else if (kind === 'base') S.baseMat = id;
-  else if (kind === 'wall') S.wallMat = id;
+  if (typeof HOUSE_MATERIALS === 'undefined' || !HOUSE_MATERIALS[kind]) return;
+  S[kind + 'Mat'] = id;
   _dRenderHouseMaterials();
   if (typeof onParamChange === 'function') onParamChange(); // пересборка 3D (debounced)
 }
@@ -846,9 +848,13 @@ function _activeIsDeck() {
 // — прежним способом (цвет live / глобально).
 function _applySampleToActive(sample) {
   S.activeSample = sample;                 // для подсветки образца
+  _setEstimateForActive(sample);           // смета обновляется вместе с материалом
   if (_activeIsDeck()) {
-    S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures }
-                              : (sample.color ? { color: sample.color } : null);
+    // productId/name сохраняем рядом с текстурами: по ним расчёт террасы на бэкенде
+    // узнаёт выбранную доску (_deckingBoardProductId), 3D-слой их игнорирует.
+    const meta = { productId: sample.id || null, name: sample.name || '' };
+    S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures, ...meta }
+                              : (sample.color ? { color: sample.color, ...meta } : null);
     if (typeof buildScene3d === 'function') buildScene3d();
   } else if (dActiveItem === 'furniture') {
     // Мебель: товар назначается ТОЧКЕ плана — выбранной, иначе первой свободной
@@ -1185,6 +1191,29 @@ function dShowResults() {
   }
 }
 
+// URL картинки из поля каталога. Битрикс отдаёт такие поля по-разному: строкой-URL,
+// объектом ({src|url|path}) или числовым id файла — id адресом не является, его
+// отбрасываем. Кавычки вырезаем: URL подставляется внутрь style="…url('…')".
+function _pictureUrl(v) {
+  if (!v) return '';
+  if (typeof v === 'object') return _pictureUrl(v.src || v.url || v.path || v.SRC || '');
+  if (typeof v !== 'string') return '';
+  const s = v.trim().replace(/['"]/g, '');
+  return /^\d+$/.test(s) ? '' : s;
+}
+
+// Миниатюра карточки товара: у доски превью материала — сама DPK-текстура, у прочих
+// товаров (мебель) её нет, поэтому падаем на картинки каталога. Фото товара
+// показываем целиком (contain), текстуру — с заполнением (cover).
+function _productThumbStyle(p) {
+  const tex = (p.textureUrls && p.textureUrls.textures_dpc_diffusion) || '';
+  if (tex) return `background-image:url('${tex}');background-size:cover;background-position:center;`;
+  const pic = _pictureUrl(p.previewPicture) || _pictureUrl(p.detailPicture);
+  if (pic) return `background-image:url('${pic}');background-size:contain;background-repeat:no-repeat;`
+                + 'background-position:center;background-color:#fff;';
+  return 'background:#bbb;';
+}
+
 function _dRenderRealResults(allProducts) {
   const list = document.getElementById('d-mat-list');
   if (!list) return;
@@ -1198,10 +1227,7 @@ function _dRenderRealResults(allProducts) {
   }
   list.innerHTML = products.map(p => {
     const price = _productPrice(p);
-    const thumb = (p.textureUrls && p.textureUrls.textures_dpc_diffusion) || '';
-    const thumbStyle = thumb
-      ? `background-image:url('${thumb}');background-size:cover;background-position:center;`
-      : 'background:#bbb;';
+    const thumbStyle = _productThumbStyle(p);
     const desc = (p.previewText && p.previewTextType !== 'html') ? p.previewText : '';
     return `
     <div class="d-mat-card" id="dmc-${p.id}">
@@ -1217,7 +1243,6 @@ function _dRenderRealResults(allProducts) {
         <div class="d-mat-desc">${desc}</div>
         <div class="d-mat-actions">
           <button class="d-mat-btn d-mat-btn-apply" onclick="dApplyRealMat(event, ${p.id})">Применить</button>
-          <button class="d-mat-btn d-mat-btn-estimate" onclick="dEstimateRealMat(event, ${p.id})">В смету</button>
         </div>
       </div></div>
     </div>`;
@@ -1260,16 +1285,12 @@ function _dRenderStubResults() {
         <div class="d-mat-desc">${m.detail}</div>
         <div class="d-mat-actions">
           <button class="d-mat-btn d-mat-btn-apply"
-                  onclick="dApplyMat(event, ${m.id}, '${m.name.replace(/'/g, "\\'")}', '${m.color || '#C8A96E'}')">
+                  onclick="dApplyMat(event, ${m.id}, '${m.name.replace(/'/g, "\\'")}', '${m.color || '#C8A96E'}', '${m.price}')">
             Применить
           </button>
           <button class="d-mat-btn d-mat-btn-compare"
                   onclick="dCompareMat(event, ${m.id}, '${m.name.replace(/'/g, "\\'")}', '${m.color || '#C8A96E'}')">
             Сравнить
-          </button>
-          <button class="d-mat-btn d-mat-btn-estimate"
-                  onclick="dEstimateMat(event, ${m.id}, '${m.name.replace(/'/g, "\\'")}', '${m.price}')">
-            В смету
           </button>
         </div>
         <a href="${m.url}" target="_blank"
@@ -1298,12 +1319,16 @@ async function dApplyRealMat(e, pid) {
   // В образцы кладём с превью-цветом и текстурами (чтобы повторное применение работало).
   let idx = S.samples.findIndex(s => s.id === product.id);
   if (idx < 0) {
-    S.samples.push({ id: product.id, name: product.name, color: '#C8A96E', textures: product.textures });
+    // price кладём в образец, чтобы повторное применение свотча тоже обновляло смету.
+    S.samples.push({ id: product.id, name: product.name, color: '#C8A96E',
+                     textures: product.textures, price: _productPrice(product) });
     idx = S.samples.length - 1;
   }
   // modelUrl нужен мебели (GLB-модель товара); для прочих элементов он просто пуст.
+  // price — чтобы «Применить» сразу обновляло смету (_setEstimateForActive).
   _applySampleToActive({ id: product.id, name: product.name, color: null,
-                         textures: product.textures, modelUrl: product.modelUrl || '', _idx: idx });
+                         textures: product.textures, modelUrl: product.modelUrl || '',
+                         price: _productPrice(product), _idx: idx });
 
   btn.textContent = '✓'; btn.style.background = '#444';
   setTimeout(() => { btn.textContent = orig; btn.style.background = '#000'; }, 700);
@@ -1316,9 +1341,9 @@ function dToggleMatCard(mid) {
   if (!was) el.classList.add('open');
 }
 
-function dApplyMat(e, mid, name, color) {
-  S.samples.push({ id: mid, name, color });
-  _applySampleToActive({ id: mid, name, color, _idx: S.samples.length - 1 });
+function dApplyMat(e, mid, name, color, priceStr) {
+  S.samples.push({ id: mid, name, color, price: priceStr });
+  _applySampleToActive({ id: mid, name, color, price: priceStr, _idx: S.samples.length - 1 });
   const btn = e.currentTarget;
   const orig = btn.textContent;
   btn.textContent = '✓';
@@ -1333,12 +1358,6 @@ function dCompareMat(e, mid, name, color) {
   setTimeout(() => { btn.textContent = 'Сравнить'; btn.style.fontWeight = '700'; }, 1000);
 }
 
-function _estimateToast(btn) {
-  btn.textContent = '✓ В смете';
-  btn.style.fontWeight = '400';
-  setTimeout(() => { btn.textContent = 'В смету'; btn.style.fontWeight = '700'; }, 1000);
-}
-
 // Заглушки: цена приходит строкой ("от 2 400 ₽/м²") → вытаскиваем число.
 function _parsePriceNum(s) {
   if (typeof s === 'number') return s;
@@ -1347,22 +1366,15 @@ function _parsePriceNum(s) {
   return isNaN(v) ? null : v;
 }
 
-function dEstimateMat(e, mid, name, priceStr) {
-  if (dActiveItem) S.estimate[dActiveItem] = { id: mid, name, price: _parsePriceNum(priceStr) };
-  _estimateToast(e.currentTarget);
-}
-
-// Реальный товар «В смету»: записываем выбор для активного элемента проекта.
-function dEstimateRealMat(e, pid) {
-  let product = null;
-  for (const k in _catalogCache) {
-    const arr = _catalogCache[k];
-    if (Array.isArray(arr)) { const f = arr.find(p => p.id === pid); if (f) { product = f; break; } }
-  }
-  if (product && dActiveItem) {
-    S.estimate[dActiveItem] = { id: product.id, name: product.name, price: _productPrice(product) };
-  }
-  _estimateToast(e.currentTarget);
+// Записывает товар в смету активного элемента. Вызывается из «Применить»:
+// отдельной кнопки «В смету» больше нет — применённый материал И ЕСТЬ выбор
+// для сметы, а два действия на карточке путали (материал в 3D один, в смете другой).
+function _setEstimateForActive(sample) {
+  if (!dActiveItem) return;
+  if (!('price' in sample)) return;   // источник цены не передал — строку сметы не трогаем
+  const price = _parsePriceNum(sample.price);
+  if (price == null) { delete S.estimate[dActiveItem]; return; }
+  S.estimate[dActiveItem] = { id: sample.id, name: sample.name, price };
 }
 
 // ── Геометрические метрики элементов (для сметы) ──
@@ -1393,10 +1405,24 @@ function _polyAreaM2(pts) {
   }
   return Math.abs(a) / 2;
 }
-// Ширина доски из названия товара ("140х22мм" → 0.14 м), иначе 0.14 м.
+// Ширина доски из названия товара в метрах; не распознали — 0.14 м.
+//
+// Порядок размеров в каталоге НЕ единый: «доска 20*140*2900» (толщина×ширина×длина),
+// но «ступень узкая 150*25*3000» (ширина×толщина×длина). Поэтому не полагаемся на
+// позицию: из группы размеров выбрасываем длину (≥ 1000 мм), из оставшихся ширина —
+// БОЛЬШЕЕ (толщина доски ДПК — 12–25 мм, ширина — от 80 мм).
+// Прежняя версия брала первое число пары и почти всегда падала на фолбэк 0.14: у
+// террасной доски он совпадал с реальными 140 мм и ошибку не было видно, а ступени
+// (320 мм) и фасадные панели (177 мм) считались с завышением погонажа в 1.3–2.3 раза.
+const BOARD_MIN_W_MM = 80, BOARD_MAX_W_MM = 400;
+
 function _boardWidthM(name) {
-  const m = /(\d{2,3})\s*[*хxX×]\s*(\d{1,3})/.exec(name || '');
-  if (m) { const w = parseInt(m[1], 10); if (w >= 80 && w <= 300) return w / 1000; }
+  const m = /(\d{1,4})\s*[*хxX×]\s*(\d{1,4})(?:\s*[*хxX×]\s*(\d{1,4}))?/.exec(name || '');
+  if (m) {
+    const dims = [m[1], m[2], m[3]].filter(Boolean).map(Number).filter(v => v < 1000);
+    const w = dims.length ? Math.max(...dims) : 0;
+    if (w >= BOARD_MIN_W_MM && w <= BOARD_MAX_W_MM) return w / 1000;
+  }
   return 0.14;
 }
 
@@ -1456,6 +1482,233 @@ function _computeEstimate() {
 function _fmtRub(n) { return Math.round(n).toLocaleString('ru-RU') + ' ₽'; }
 
 // ══════════════════════════════════════════════
+// РАСЧЁТ ТЕРРАСЫ НА БЭКЕНДЕ (POST /api/v1/calculate_terrace/)
+//
+// Бэкенд считает полную спецификацию: доска, лаги, кляймеры, уголки, саморезы,
+// подложки, полуступени + работы. Наш клиентский расчёт (_computeEstimate)
+// остаётся для остальных элементов — у них своей ручки пока нет.
+//
+// Запрос: { vertices, doorDirection, deckingBoardProductId, terraceHeight }
+//   vertices  — контур террасы в МИЛЛИМЕТРАХ, обход по порядку, у каждой вершины
+//               vertexType: 'house' (лежит на стене дома) | 'free';
+//   doorDirection — сторона света, см. TERRACE_CALC_NORTH ниже;
+//   terraceHeight — высота настила над землёй, мм (= высота фундамента).
+// ══════════════════════════════════════════════
+
+// Ось «север» на плане. План: x вправо, y вниз (как canvas и мировой Z).
+// Берём картографическое соглашение «север — вверх», т.е. N = −y.
+// doorDirection трактуем как СТОРОНУ, где стоит дом с главной дверью, если
+// смотреть с террасы: в примере бэкендера дом стоит по ребру y=0 (сверху), а
+// направление указано 'N'. NB: пример не различает эту трактовку и обратную
+// («куда смотрит дверь» при N = +y) — они дают одну и ту же ОСЬ и различаются
+// только знаком. Для приоритета лаг важна ось, поэтому риск мал; если бэкендер
+// подтвердит обратный знак — инвертировать здесь одной строкой.
+const TERRACE_CALC_NORTH = { x: 0, y: -1 };
+
+function _compassFromVec(vx, vy) {
+  // Доминантная ось; север = TERRACE_CALC_NORTH, восток — вправо от него.
+  const n = TERRACE_CALC_NORTH;
+  const north = vx * n.x + vy * n.y;              // проекция на север
+  const east  = vx * (-n.y) + vy * n.x;           // поворот севера на +90° по часовой
+  return (Math.abs(north) >= Math.abs(east))
+    ? (north >= 0 ? 'N' : 'S')
+    : (east  >= 0 ? 'E' : 'W');
+}
+
+// Контур террасы в метрах плана (x вправо, y вниз). Берём union-контур блоков —
+// тот же, по которому строится ограждение (_terraceUnionLoops из viewer3d-railing.js;
+// он работает с любыми координатами, лишь бы rect'ы были в одной системе).
+// Возвращает внешний контур (самый большой по площади) или null.
+function _terracePlanLoop() {
+  const rects = (S.terraceRects || []).filter(r => r && r.w > 0 && r.h > 0);
+  if (!rects.length || typeof _terraceUnionLoops !== 'function') return null;
+  const G = _GRIDm();
+  const loops = _terraceUnionLoops(rects.map(r => ({
+    minX: r.x * G, maxX: (r.x + r.w) * G,
+    minZ: r.y * G, maxZ: (r.y + r.h) * G,
+  })));
+  if (!loops.length) return null;
+  const area = loop => {
+    let a = 0;
+    for (let i = 0; i < loop.length; i++) {
+      const p = loop[i], q = loop[(i + 1) % loop.length];
+      a += p.x * q.z - q.x * p.z;
+    }
+    return Math.abs(a) / 2;
+  };
+  const outer = loops.reduce((best, l) => (area(l) > area(best) ? l : best), loops[0]);
+  return outer.map(p => ({ x: p.x, y: p.z }));   // z контура = y плана
+}
+
+// Вершина лежит на стене дома? Рёбра дома берём из getHousePolygonNorm (canvas.js),
+// нормированные 0..1 → метры плана. Допуск 0.15 м покрывает люфт снапа к стене.
+function _vertexOnHouse(pt, houseEdges, tol) {
+  for (const e of houseEdges) {
+    const dx = e.x2 - e.x1, dy = e.y2 - e.y1;
+    const L2 = dx * dx + dy * dy;
+    if (L2 < 1e-9) continue;
+    let t = ((pt.x - e.x1) * dx + (pt.y - e.y1) * dy) / L2;
+    t = Math.max(0, Math.min(1, t));
+    const d = Math.hypot(pt.x - (e.x1 + dx * t), pt.y - (e.y1 + dy * t));
+    if (d <= tol) return true;
+  }
+  return false;
+}
+
+// Направление главной двери. Берём раскладку фасада 1-го этажа (_houseWorldTransform
+// из canvas.js): дверь с флагом main, иначе первая попавшаяся. Сторону «наружу»
+// определяем пробой точки по нормали (как рисуется створка на плане).
+function _mainDoorDirection() {
+  if (typeof _houseWorldTransform !== 'function') return null;
+  const T = _houseWorldTransform();
+  if (!T || !T.layout || !T.layout.edges) return null;
+  let found = null;
+  for (const e of T.layout.edges) {
+    for (const it of e.items) {
+      if (it.type !== 'door') continue;
+      if (!found || it.main) found = { e, it };
+      if (it.main) break;
+    }
+    if (found && found.it.main) break;
+  }
+  if (!found) return null;
+  const { e, it } = found;
+  const mid = T.toNorm(e.x + e.dx * (it.start + it.width / 2),
+                       e.z + e.dz * (it.start + it.width / 2));
+  const len = Math.hypot(e.dx, e.dz) || 1;
+  let nx = -e.dz / len, ny = e.dx / len;          // нормаль к стене в плане
+  const probe = 0.5 / _GRIDm();                   // 0.5 м в нормированных единицах
+  if (_normPtInHouse(mid.x + nx * probe, mid.y + ny * probe)) { nx = -nx; ny = -ny; }
+  // Наружная нормаль показывает ОТ дома; doorDirection — сторона, где дом (см. выше).
+  return _compassFromVec(-nx, -ny);
+}
+
+// id террасной доски для расчёта: сначала явный выбор «В смету», затем применённый
+// к террасе товар (S.elementMat.terrace.productId пишется в _applySampleToActive).
+function _deckingBoardProductId() {
+  const est = S.estimate && S.estimate.terrace;
+  if (est && est.id) return est.id;
+  const mat = S.elementMat && S.elementMat.terrace;
+  if (mat && mat.productId) return mat.productId;
+  return null;
+}
+
+// Собирает тело запроса или причину, по которой расчёт невозможен.
+// { payload } | { error }
+function buildTerraceCalcRequest() {
+  if (!S.sections.includes('terrace')) return { error: 'Терраса не выбрана в проекте.' };
+  const loop = _terracePlanLoop();
+  if (!loop || loop.length < 3) return { error: 'Терраса не размечена на плане.' };
+  const productId = _deckingBoardProductId();
+  if (!productId) return { error: 'Выберите террасную доску в каталоге («Применить» или «В смету»).' };
+
+  const G = _GRIDm();
+  const houseEdges = (!isEmptyLot() && typeof getHousePolygonNorm === 'function')
+    ? getHousePolygonNorm().edges.map(e => ({
+        x1: e.x1 * G, y1: e.y1 * G, x2: e.x2 * G, y2: e.y2 * G,
+      }))
+    : [];
+  // Начало координат — в углу bbox контура, чтобы не гонять смещение сетки участка.
+  const ox = Math.min(...loop.map(p => p.x)), oy = Math.min(...loop.map(p => p.y));
+  const mm = v => Math.round(v * 1000);
+  const vertices = loop.map(p => ({
+    x: mm(p.x - ox), y: mm(p.y - oy),
+    vertexType: _vertexOnHouse(p, houseEdges, 0.15) ? 'house' : 'free',
+  }));
+  // Высота настила над землёй = высота фундамента (см → мм); без дома — 35 см, как в 3D.
+  const foundCm = parseFloat(document.getElementById('v-found')?.value || 80);
+  const terraceHeight = isEmptyLot() ? 350 : Math.round(foundCm * 10);
+  return {
+    payload: {
+      vertices,
+      doorDirection: _mainDoorDirection() || 'N',
+      deckingBoardProductId: productId,
+      terraceHeight,
+    },
+  };
+}
+
+// ── Запрос к бэкенду + кэш по телу запроса ──
+const TERRACE_CALC_PATH = '/api/v1/calculate_terrace/';
+let _terraceCalc = null;    // { key, state:'loading'|'ok'|'err', data, error }
+
+async function _fetchTerraceCalc(payload) {
+  const domain = (typeof RESOURCE_API_DOMAIN !== 'undefined') ? RESOURCE_API_DOMAIN : '';
+  const res = await fetch(domain + TERRACE_CALC_PATH, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// Запускает расчёт, если тело запроса изменилось; перерисовывает блок по готовности.
+function _ensureTerraceCalc() {
+  const req = buildTerraceCalcRequest();
+  if (req.error) { _terraceCalc = { key: 'x', state: 'err', error: req.error }; return; }
+  const key = JSON.stringify(req.payload);
+  if (_terraceCalc && _terraceCalc.key === key && _terraceCalc.state !== 'err') return;
+  _terraceCalc = { key, state: 'loading' };
+  _fetchTerraceCalc(req.payload)
+    .then(data => { _terraceCalc = { key, state: 'ok', data }; _dRenderTerraceCalc(); })
+    .catch(e => {
+      console.warn('[calculate_terrace]', e);
+      _terraceCalc = { key, state: 'err', error: 'Сервис расчёта недоступен (' + e.message + ').' };
+      _dRenderTerraceCalc();
+    });
+}
+
+function terraceCalcTotal(data) {
+  if (!data) return 0;
+  const mats = Object.values(data.materials || {}).reduce((s, m) => s + (m.totalCost || 0), 0);
+  const works = (data.works || []).reduce((s, w) => s + (w.cost || 0), 0);
+  return mats + works;
+}
+
+function _dRenderTerraceCalc() {
+  const host = document.getElementById('d-terrace-calc');
+  if (!host) return;
+  const c = _terraceCalc;
+  const head = '<div class="est-title">Терраса — расчёт по спецификации</div>';
+  if (!c || c.state === 'err') {
+    host.innerHTML = head + `<div class="est-empty">${(c && c.error) || 'Расчёт недоступен.'}</div>`;
+    return;
+  }
+  if (c.state === 'loading') {
+    host.innerHTML = head + '<div class="d-cat-loading"><div class="d-cat-spinner"></div>Считаем террасу…</div>';
+    return;
+  }
+  const mats = Object.values(c.data.materials || {});
+  const works = c.data.works || [];
+  if (!mats.length && !works.length) {
+    host.innerHTML = head + '<div class="est-empty">Бэкенд вернул пустой расчёт.</div>';
+    return;
+  }
+  const row = (name, tag, qty, unit, price, cost) => `
+    <tr>
+      <td>${tag || ''}</td>
+      <td class="est-mat">${name || ''}</td>
+      <td class="est-r">${qty != null ? qty : '—'} ${unit || ''}</td>
+      <td class="est-r">${price != null ? _fmtRub(price) : '—'}</td>
+      <td class="est-r">${cost != null ? _fmtRub(cost) : '—'}</td>
+    </tr>`;
+  host.innerHTML = head + `
+    <table class="est-table">
+      <thead><tr><th>Позиция</th><th>Наименование</th><th class="est-r">Кол-во</th><th class="est-r">Цена</th><th class="est-r">Сумма</th></tr></thead>
+      <tbody>
+        ${mats.map(m => row(m.name, m.ruTag, m.totalDimensionCount, m.dimension,
+                            m.pricePerDimension, m.totalCost)).join('')}
+        ${works.map(w => row(w.name, 'Работы', null, '', null, w.cost)).join('')}
+      </tbody>
+      <tfoot><tr><td colspan="4" class="est-r">Итого по террасе:</td><td class="est-r est-total">${_fmtRub(terraceCalcTotal(c.data))}</td></tr></tfoot>
+    </table>
+    <div class="est-note">Спецификация и работы посчитаны бэкендом по контуру террасы, высоте настила и выбранной
+    доске. Строка «Терраса» в таблице выше — стоимость «голой» доски по площади; здесь —
+    полная спецификация: подконструкция, крепёж и работы.</div>`;
+}
+
+// ══════════════════════════════════════════════
 // SUMMARY
 // ══════════════════════════════════════════════
 function dShowSummary() {
@@ -1507,7 +1760,19 @@ function dShowSummary() {
       <div class="est-note">Расчёт ориентировочный: цены из каталога; расход доски с запасом 10%, забора — 5%.</div>`;
   }
 
-  document.getElementById('d-sum-body').innerHTML = infoHTML + estHTML;
+  // Блок расчёта террасы бэкендом — заполняется асинхронно (_dRenderTerraceCalc).
+  document.getElementById('d-sum-body').innerHTML =
+    infoHTML + estHTML + '<div id="d-terrace-calc"></div>';
+  // Расчёт не должен ломать «Итог»: исключение при сборке запроса раньше обрывало
+  // dShowSummary до _dRenderTerraceCalc, и блок оставался пустым — без заголовка и
+  // без сообщения, то есть неотличимо от «фичи вообще нет в этой сборке».
+  try {
+    _ensureTerraceCalc();
+  } catch (e) {
+    console.error('[terrace calc] не удалось собрать запрос', e);
+    _terraceCalc = { key: 'x', state: 'err', error: 'Не удалось собрать запрос: ' + e.message };
+  }
+  _dRenderTerraceCalc();
   document.getElementById('d-summary-overlay').classList.add('active');
 }
 

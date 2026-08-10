@@ -156,7 +156,21 @@ const HOUSE_MATERIALS = {
       { id: 'siding', img: 'assets/wall_diff_02.jpg' },      // сайдинг
     ],
   },
+  // Рамы окон и полотна дверей (меши с материалами mat_frame*/mat_door). Текстур нет,
+  // только цвет; те же значения продублированы в _houseTexSet (viewer3d-core.js) —
+  // менять синхронно, иначе образец в UI разойдётся с цветом в 3D.
+  frame: {
+    label: 'Материал рам',
+    items: [
+      { id: 'wood',  color: '#4a2f18' },                     // текущий (дерево)
+      { id: 'white', color: '#f2f2f0' },                     // белый
+      { id: 'dark',  color: '#2b1a0d' },                     // тёмно-коричневый
+    ],
+  },
 };
+// Ключ группы HOUSE_MATERIALS ↔ поле состояния: '<kind>Mat' (roofMat, baseMat,
+// wallMat, frameMat). На этом соглашении держатся _dRenderHouseMaterials и
+// dSetHouseMat — новая группа материалов не требует правок в них.
 
 // Позиции из каталога outdoor-mebel.ru — Доска ДПК универсальная
 const STUB_RESULTS = [
@@ -254,6 +268,7 @@ const S = {
   roofMat: 'tile',     // tile | metal_green | metal_red
   baseMat: 'concrete', // concrete | stone
   wallMat: 'stucco',   // stucco | brick | siding
+  frameMat: 'wood',    // wood | white | dark — рамы окон и двери
 };
 // (TOTAL и глобальный step удалены — прогресс-бар мобильного wizard'а.)
 
