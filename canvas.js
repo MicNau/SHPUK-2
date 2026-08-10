@@ -616,6 +616,10 @@ function initPathsCanvas() { initSnapCanvas('paths'); }
 // порядок в S.furniture: товары из каталога назначаются точкам по этому порядку.
 // ЛКМ по пустому месту — поставить точку и сразу тащить; ЛКМ по точке — выбрать
 // и тащить; ПКМ — перемещение плана. Высоту (терраса/земля) определяет 3D.
+// У точки есть ПОВОРОТ (p.rot, радианы, кратно π/2): «перёд» мебели — локальная
+// ось +X модели, при rot = 0 она смотрит вдоль мирового +X = вправо на плане
+// (canvasToWorld: x плана → X мира, y плана → Z мира). Поворот в 3D идёт вокруг
+// оси Y, т.е. на плане стрелка вращается ПРОТИВ часовой стрелки.
 // ══════════════════════════════════════════════
 const FURN_HIT_R = 16;      // радиус захвата точки (экранные px при scale=1)
 
@@ -659,7 +663,10 @@ function initFurnitureCanvas() {
       S.activeFurniture = hit;
     } else {
       // Пустое место — ставим новую точку и сразу берём её в перетаскивание.
-      S.furniture.push({ x: snapNorm(x / W), y: snapNorm(y / W), product: null });
+      // Поворот наследуем у активной точки — расстановка «в ряд» без лишних кликов.
+      const prev = (S.activeFurniture !== null) ? S.furniture[S.activeFurniture] : null;
+      S.furniture.push({ x: snapNorm(x / W), y: snapNorm(y / W),
+                         rot: prev ? (prev.rot || 0) : 0, product: null });
       S.activeFurniture = S.furniture.length - 1;
       if (typeof onParamChange === 'function') onParamChange();
     }
@@ -681,6 +688,29 @@ function initFurnitureCanvas() {
     furnDrag = false; furnDragIdx = -1; wrap.style.cursor = 'default';
     if (typeof onParamChange === 'function') onParamChange();   // пересборка 3D
   });
+
+  // R — повернуть выбранную точку на 90° (Shift+R — назад). Работает только при
+  // открытом редакторе мебели и вне полей ввода.
+  document.addEventListener('keydown', e => {
+    if (!active() || e.ctrlKey || e.altKey || e.metaKey) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.key !== 'r' && e.key !== 'R' && e.key !== 'к' && e.key !== 'К') return;   // рус. раскладка
+    e.preventDefault();
+    rotateActiveFurniture(e.shiftKey ? -1 : 1);
+  });
+}
+
+// Поворот выбранной точки на ±90°. dir: 1 — против часовой на плане (+Y в 3D).
+function rotateActiveFurniture(dir) {
+  const pts = S.furniture || [];
+  const p = (S.activeFurniture !== null) ? pts[S.activeFurniture] : null;
+  if (!p) return;
+  const TAU = Math.PI * 2;
+  p.rot = (((p.rot || 0) + (dir < 0 ? -1 : 1) * Math.PI / 2) % TAU + TAU) % TAU;
+  drawFurnitureCanvas();
+  _dSyncFurniturePanel();
+  if (typeof onParamChange === 'function') onParamChange();   // пересборка 3D
 }
 
 // Индекс точки под курсором (нормализованные координаты) или -1.
@@ -701,7 +731,7 @@ function addFurniturePoint() {
   const a = (S.activeFurniture !== null) ? S.furniture[S.activeFurniture] : null;
   const nx = a ? Math.min(1, a.x + 1.5 / GRID) : 0.5;
   const ny = a ? a.y : 0.5;
-  S.furniture.push({ x: snapNorm(nx), y: snapNorm(ny), product: null });
+  S.furniture.push({ x: snapNorm(nx), y: snapNorm(ny), rot: a ? (a.rot || 0) : 0, product: null });
   S.activeFurniture = S.furniture.length - 1;
   drawFurnitureCanvas();
   _dSyncFurniturePanel();
@@ -724,7 +754,9 @@ function _dSyncFurniturePanel() {
   const pts = S.furniture || [];
   if (!pts.length) { el.textContent = 'Кликните по плану, чтобы поставить точку'; return; }
   const filled = pts.filter(p => p.product).length;
-  const act = (S.activeFurniture !== null) ? ` · выбрана №${S.activeFurniture + 1}` : '';
+  const a = (S.activeFurniture !== null) ? pts[S.activeFurniture] : null;
+  const deg = a ? Math.round(((a.rot || 0) * 180 / Math.PI)) % 360 : 0;
+  const act = a ? ` · выбрана №${S.activeFurniture + 1} (поворот ${deg}°)` : '';
   el.textContent = `Точек: ${pts.length}, с мебелью: ${filled}${act}`;
 }
 
@@ -751,6 +783,17 @@ function drawFurnitureCanvas() {
     const px = p.x * W, py = p.y * H;
     const isActive = (i === S.activeFurniture);
     const R = 11 / cx.scale;
+    // Стрелка «переда»: локальный +X модели. Ось Y в 3D крутит против часовой,
+    // а y плана растёт вниз → экранное направление = (cos rot, −sin rot).
+    const rot = p.rot || 0, dx = Math.cos(rot), dy = -Math.sin(rot);
+    const a0 = R + 3 / cx.scale, a1 = R + 15 / cx.scale, aw = 5 / cx.scale;
+    ctx.beginPath();
+    ctx.moveTo(px + dx * a1, py + dy * a1);                      // остриё
+    ctx.lineTo(px + dx * a0 - dy * aw, py + dy * a0 + dx * aw);
+    ctx.lineTo(px + dx * a0 + dy * aw, py + dy * a0 - dx * aw);
+    ctx.closePath();
+    ctx.fillStyle = isActive ? '#0064DC' : '#7a4b23';
+    ctx.fill();
     // Заполненная точка (с товаром) — коричневая, пустая — серая.
     ctx.beginPath(); ctx.arc(px, py, R, 0, Math.PI * 2);
     ctx.fillStyle = p.product ? 'rgba(122,75,35,.85)' : 'rgba(255,255,255,.95)';
