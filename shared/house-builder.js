@@ -3704,6 +3704,9 @@ function getHouseFacadeLayout(desc, params) {
         const hasLintel = wallH - (y + h) > 0.05;
         const hasSub = fill.type === 'window' && y > 0.05;
         if (hasLintel || hasSub) p.segId = `f0:e${edgeIdx}:o${openIdx}`;
+        // Главный вход (флаг "main" в дескрипторе) — по нему определяется
+        // doorDirection в расчёте террасы и привязка крыльца.
+        if (fill.main) p.main = true;
         openIdx++;
       }
       parts.push(p);
