@@ -1635,7 +1635,6 @@ function buildPaths3d(parent, M, pts, houseL, houseW) {
 // ══════════════════════════════════════════════
 const FENCE_SECTION_W  = 2.0;    // шаг секции по осям столбов (нативный для модулей), м
 const FENCE_NATIVE_H   = 1.9;    // высота столба в модуле, м — база для масштаба по S.fenceH
-const FENCE_MIN_SPAN   = 0.15;   // короче — добор не ставим, столбы и так рядом
 const FENCE_PANEL_NAME = 'Fence_panels';   // имя части с планками (регистр как в GLB)
 
 const FENCE_TYPES = ['001', '002', '003'];
@@ -1703,8 +1702,21 @@ function _fenceFrameColor(panelMat) {
   return FENCE_FRAME_FALLBACK;
 }
 
+// ⚠ У частей модуля СВОЙ поворот: вдоль пролёта (родительский +X) смотрит локальная
+// Z у планок и лаг, Y у среднего стояка и только у столба — X. Масштаб применяется ДО
+// поворота (M = T·R·S), поэтому тянуть надо ту локальную ось, которая ПОСЛЕ поворота
+// легла вдоль пролёта. Наивное o.scale.x сжимало планки по ВЫСОТЕ, а по длине они
+// оставались 2 м и вылезали за угол (та же грабля, что с центральной секцией водостока).
+const _FENCE_AXIS_X = new THREE.Vector3(1, 0, 0);
+function _localAxisAlongSpan(o) {
+  const v = _FENCE_AXIS_X.clone().applyQuaternion(o.quaternion.clone().conjugate());
+  const a = [Math.abs(v.x), Math.abs(v.y), Math.abs(v.z)];
+  return a.indexOf(Math.max(...a));
+}
+
 // Ставит одну секцию: клон модуля, повёрнутый локальным +X вдоль пролёта.
-// spanW < FENCE_SECTION_W → полотно и лаги ужимаются по X (столб не трогаем).
+// spanW < FENCE_SECTION_W → полотно и лаги ужимаются вдоль пролёта (столб и средний
+// стояк сохраняют сечение — им меняется только положение).
 function _placeFenceSection(proto, group, x, z, angle, spanW, sy, panelMat, frameMat, withPost) {
   const inst = proto.clone(true);
   inst.position.set(x, 0, z);
@@ -1717,9 +1729,12 @@ function _placeFenceSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
     if (nm === 'fence_post') {
       if (!withPost) { o.visible = false; return; }
     } else if (kx !== 1) {
-      // Части полотна тянутся по локальному X (они начинаются на x=0 → масштаб честный).
-      o.scale.x *= kx;
+      // position — в системе родителя, поэтому по X независимо от поворота части.
       o.position.x *= kx;
+      if (nm !== 'fence_middle') {
+        const ax = _localAxisAlongSpan(o);
+        o.scale.setComponent(ax, o.scale.getComponent(ax) * kx);
+      }
     }
     o.material = (nm === FENCE_PANEL_NAME) ? panelMat : frameMat;
     o.castShadow = o.receiveShadow = true;
@@ -1766,15 +1781,15 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
       // Локальный +X модуля должен смотреть вдоль (ux, uz): поворот вокруг Y.
       const angle = Math.atan2(ux, uz) - Math.PI / 2;
 
-      const nFull = Math.floor(segLen / FENCE_SECTION_W + 1e-6);
-      const rem = segLen - nFull * FENCE_SECTION_W;
-      const widths = [];
-      for (let k = 0; k < nFull; k++) widths.push(FENCE_SECTION_W);
-      if (rem > FENCE_MIN_SPAN) widths.push(rem);
-      if (!widths.length) widths.push(segLen);
+      // Секции РАВНОЙ ширины: длина пролёта редко кратна 2 м, и «целые + огрызок»
+      // прижимали к углу узкую секцию со сплющенными планками. Округление к ближайшему
+      // числу секций держит ширину в пределах ~1.5–2 м, т.е. планки почти не искажаются.
+      const nSec = Math.max(1, Math.round(segLen / FENCE_SECTION_W));
+      const secW = segLen / nSec;
 
       let dist = 0;
-      for (const w of widths) {
+      for (let k = 0; k < nSec; k++) {
+        const w = secW;
         const x = a.x + ux * dist, z = a.z + uz * dist;
         const k = postKey(x, z);
         const withPost = !postSet.has(k);
