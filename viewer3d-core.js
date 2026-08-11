@@ -1142,8 +1142,11 @@ function buildScene3d() {
     buildPaths3d(houseGroup, M, S.pts.paths, houseL, houseW);
   }
 
-  if (S.sections.includes('fence') && S.pts.fence.filter(p=>!p.break).length >= 2)
+  // Забор: планки текстурируются товаром (свой deck-материал), рама — сплошной цвет.
+  if (S.sections.includes('fence') && S.pts.fence.filter(p=>!p.break).length >= 2) {
+    M.deck = _resolveDeckMat(_baseDeck, 'fence');
     buildFence3d(houseGroup, M, S.pts.fence, houseL, houseW);
+  }
 
   // Ступени — отдельная секция. Глубина в плане пересчитывается из bh.
   if (S.sections.includes('steps') && S.steps) {
@@ -1154,16 +1157,13 @@ function buildScene3d() {
     } catch (e) { console.error('[buildSteps3d]', e); }
   }
 
-  // Грядки — GLB-модуль planter. Если ещё не загружен — грузим и перестраиваем сцену.
+  // Грядки. Модель planter нужна только когда выбран товар; до этого (и пока GLB
+  // грузится) buildBeds3d рисует габаритные прямоугольники и сам дёргает загрузку.
   if (S.sections.includes('beds') && S.beds && S.beds.length) {
-    if (_planterCache) {
-      M.deck = _resolveDeckMat(_baseDeck, 'beds');
-      try {
-        buildBeds3d(houseGroup, M, S.beds, S.bedH || 0.20, houseL, houseW);
-      } catch (e) { console.error('[buildBeds3d]', e); }
-    } else {
-      ensurePlanterLoaded().then(c => { if (c && threeState) buildScene3d(); });
-    }
+    M.deck = _resolveDeckMat(_baseDeck, 'beds');
+    try {
+      buildBeds3d(houseGroup, M, S.beds, S.bedH || 0.20, houseL, houseW);
+    } catch (e) { console.error('[buildBeds3d]', e); }
   }
 
   // Восстанавливаем базовый deck в M (на случай, если ниже что-то на него опирается).
