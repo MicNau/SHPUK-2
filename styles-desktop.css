@@ -302,6 +302,17 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
 .d-3d-loading-bar.indet .d-3d-loading-fill { width: 40%; animation: dcatbar 1s linear infinite; transition: none; }
 .d-3d-loading-txt { font-size: 12px; color: #555; white-space: nowrap; }
 
+/* Тип секции забора — превьюшки модулей в шапке редактора */
+.d-fence-types { display: flex; gap: 8px; align-items: center; }
+.d-fence-type {
+  width: 76px; height: 52px; padding: 0; border: 2px solid #ddd; background: #f0f0f0;
+  cursor: pointer; overflow: hidden; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: #999; transition: border-color .15s;
+}
+.d-fence-type img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.d-fence-type:hover { border-color: #999; }
+.d-fence-type.active { border-color: #000; }
+
 /* Canvas editor overlay (hidden by default) */
 .d-center-canvas {
   position: absolute; inset: 0; display: none;

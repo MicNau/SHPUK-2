@@ -29,7 +29,7 @@ const D_CANVAS_INIT = {
   pool_terrace: () => initSnapCanvas('pool_terrace'),
   paths:        () => initPathsCanvas(),
   pier:         () => initSnapCanvas('pier'),
-  fence:        () => { initSnapCanvas('fence'); _dSyncFenceHeight(); },
+  fence:        () => { initSnapCanvas('fence'); _dSyncFenceHeight(); _dRenderFenceTypes(); },
   beds:         () => initBedsCanvas(),
   facade:       () => initFacadeCanvas(),
   furniture:    () => initFurnitureCanvas(),
@@ -206,6 +206,74 @@ async function _dRenderHousePreviews() {
   }
   renderer.dispose();
   done = total; updateProg();
+}
+
+// ── Тип секции забора: превьюшки GLB-модулей ──────────────────────────────
+// Рендерятся тем же способом, что карточки домов: одна off-screen сцена на модуль,
+// снимок → JPEG dataURL. Считаются один раз за сессию (ленивая, при первом открытии
+// редактора забора) и кэшируются.
+const _dFencePreviewCache = {};   // тип → dataURL
+
+function _dRenderFenceTypes() {
+  const host = document.getElementById('d-fence-types');
+  if (!host || typeof FENCE_TYPES === 'undefined') return;
+  const cur = (typeof S !== 'undefined' && S.fenceType) || FENCE_TYPES[0];
+  host.innerHTML = FENCE_TYPES.map((t, i) => `
+    <button class="d-fence-type${t === cur ? ' active' : ''}" id="d-fence-type-${t}"
+            title="Тип ${i + 1}" onclick="dSetFenceType('${t}')">${
+      _dFencePreviewCache[t] ? `<img src="${_dFencePreviewCache[t]}" alt="">` : `Тип ${i + 1}`
+    }</button>`).join('');
+  _dRenderFencePreviews().catch(e => console.warn('[fence-preview]', e));
+}
+
+function dSetFenceType(type) {
+  if (typeof FENCE_TYPES === 'undefined' || !FENCE_TYPES.includes(type)) return;
+  S.fenceType = type;
+  _dRenderFenceTypes();
+  if (typeof onParamChange === 'function') onParamChange();   // пересборка 3D
+}
+
+async function _dRenderFencePreviews() {
+  if (typeof THREE === 'undefined' || typeof FENCE_TYPES === 'undefined') return;
+  const todo = FENCE_TYPES.filter(t => !_dFencePreviewCache[t]);
+  if (!todo.length) return;
+  const W = 152, H = 104;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
+  renderer.setSize(W, H); renderer.setPixelRatio(1);
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  for (const t of todo) {
+    try {
+      const proto = await ensureFenceModule(t);
+      if (!proto) continue;
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xf0f0f0);
+      scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+      const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+      sun.position.set(4, 8, 6); scene.add(sun);
+      const inst = proto.clone(true);
+      // Модули идут без материалов — в превью красим «под доску», как в сцене.
+      const wood = new THREE.MeshStandardMaterial({ color: 0x8B7355, roughness: 0.8, metalness: 0.05 });
+      inst.traverse(o => { if (o.isMesh) o.material = wood; });
+      scene.add(inst);
+      const bbox = new THREE.Box3().setFromObject(inst);
+      const size = bbox.getSize(new THREE.Vector3());
+      const center = bbox.getCenter(new THREE.Vector3());
+      const cam = new THREE.PerspectiveCamera(30, W / H, 0.1, 100);
+      const dist = Math.max(size.x, size.y) * 1.5;
+      cam.position.set(center.x + dist * 0.35, center.y + dist * 0.25, center.z + dist);
+      cam.lookAt(center);
+      renderer.render(scene, cam);
+      _dFencePreviewCache[t] = renderer.domElement.toDataURL('image/jpeg', 0.85);
+      const btn = document.getElementById('d-fence-type-' + t);
+      if (btn) btn.innerHTML = `<img src="${_dFencePreviewCache[t]}" alt="">`;
+      scene.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+      wood.dispose();
+      await new Promise(r => setTimeout(r, 0));
+    } catch (e) {
+      console.warn('[fence-preview]', t, e);
+    }
+  }
+  renderer.dispose();
 }
 
 function _dApplyPreviewToCard(typeId, dataURL) {
@@ -475,16 +543,6 @@ function dOnPathWidth() {
   const v = parseFloat(document.getElementById('v-paths-width')?.value);
   if (!isNaN(v) && v > 0) S.pathWidth = v;
   if (typeof drawSnapCanvas === 'function') drawSnapCanvas('paths');
-  if (typeof onParamChange === 'function') onParamChange();
-}
-
-// Высота грядки (одна на все). mm ∈ {150, 200, 270, 300}. Подсвечивает активную
-// кнопку и пересобирает 3D (если грядки уже видны в сцене).
-function dSetBedHeight(mm) {
-  S.bedH = mm / 1000;
-  document.querySelectorAll('#bed-h-seg .bed-h-btn').forEach(btn => {
-    btn.classList.toggle('active', parseInt(btn.dataset.mm, 10) === mm);
-  });
   if (typeof onParamChange === 'function') onParamChange();
 }
 
@@ -836,7 +894,9 @@ function dRenderSwatches() {
 }
 
 // Элементы с настилом — материал у каждого свой (S.elementMat[el]).
-const DECK_MAT_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'pier'];
+// Забор здесь же: его планки текстурируются товаром как настил (остальные части
+// модуля красятся сплошным цветом в buildFence3d) — TODO.md → ЗАБОРЫ.
+const DECK_MAT_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'pier', 'fence'];
 // Текущий активный элемент красится как настил? (Ограждение террасы — нет.)
 function _activeIsDeck() {
   if (dActiveItem === 'terrace' && S.matSubMode === 'railing') return false;
@@ -852,7 +912,10 @@ function _applySampleToActive(sample) {
   if (_activeIsDeck()) {
     // productId/name сохраняем рядом с текстурами: по ним расчёт террасы на бэкенде
     // узнаёт выбранную доску (_deckingBoardProductId), 3D-слой их игнорирует.
-    const meta = { productId: sample.id || null, name: sample.name || '' };
+    // colorName — имя цвета товара из каталога: по нему забор красит непланочные
+    // части «под доску» (_fenceFrameColor в viewer3d-builders.js).
+    const meta = { productId: sample.id || null, name: sample.name || '',
+                   colorName: sample.colorName || '' };
     S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures, ...meta }
                               : (sample.color ? { color: sample.color, ...meta } : null);
     if (typeof buildScene3d === 'function') buildScene3d();
@@ -1321,13 +1384,15 @@ async function dApplyRealMat(e, pid) {
   if (idx < 0) {
     // price кладём в образец, чтобы повторное применение свотча тоже обновляло смету.
     S.samples.push({ id: product.id, name: product.name, color: '#C8A96E',
-                     textures: product.textures, price: _productPrice(product) });
+                     textures: product.textures, colorName: product.color || '',
+                     price: _productPrice(product) });
     idx = S.samples.length - 1;
   }
   // modelUrl нужен мебели (GLB-модель товара); для прочих элементов он просто пуст.
   // price — чтобы «Применить» сразу обновляло смету (_setEstimateForActive).
   _applySampleToActive({ id: product.id, name: product.name, color: null,
                          textures: product.textures, modelUrl: product.modelUrl || '',
+                         colorName: product.color || '',
                          price: _productPrice(product), _idx: idx });
 
   btn.textContent = '✓'; btn.style.background = '#444';
