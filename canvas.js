@@ -20,8 +20,30 @@ function mkCvState() {
 }
 
 function applyTransform(ctx, cx, W, H) {
-  ctx.clearRect(0,0,W,H); ctx.save();
+  // Чистим ВЕСЬ канвас, а не поле плана: канвас шире поля (см. fitCanvasToWrap),
+  // и при панорамировании за пределами квадрата оставались бы следы.
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height); ctx.save();
   ctx.translate(cx.ox, cx.oy); ctx.scale(cx.scale, cx.scale);
+}
+
+// ── Поле плана внутри полноразмерного канваса ──────────────────────────────
+// Канвас редактора занимает всю область (как 3D-вид), а сам план — квадрат
+// GRID×GRID м. planPx() — сторона этого квадрата в пикселях канваса; вся
+// математика рисования и попадания курсора работает в этих пикселях.
+function planPx(cvEl) { return Math.min(cvEl.width, cvEl.height); }
+
+// Растягивает канвас по контейнеру и центрирует поле плана. Смещение кладём
+// прямо в ox/oy pan-состояния — тогда остальной код (и рисование, и hit-тест,
+// который уже вычитает ox/oy) не меняется.
+function fitCanvasToWrap(wrap, cv, cvState) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = wrap.clientWidth || wrap.offsetWidth, h = wrap.clientHeight || wrap.offsetHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  cv.style.width = w + 'px'; cv.style.height = h + 'px';
+  const P = planPx(cv);
+  cvState.ox = (cv.width - P) / 2;
+  cvState.oy = (cv.height - P) / 2;
+  return P;
 }
 
 // Перемещение плана ПРАВОЙ кнопкой мыши (pan) — как в 3D-виде (ПКМ = перемещение).
@@ -111,10 +133,8 @@ function attachPanZoom(el, cvName, onRedraw) {
 function initSnapCanvas(name) {
   const wrap=document.getElementById('cw-'+name);
   const cv=document.getElementById('cv-'+name);
-  const dpr=window.devicePixelRatio||1, sz=wrap.offsetWidth;
-  cv.width=sz*dpr; cv.height=sz*dpr;
-  cv.style.width=sz+'px'; cv.style.height=sz+'px';
-  CV[name]=mkCvState();
+  CV[name] = mkCvState();
+  fitCanvasToWrap(wrap, cv, CV[name]);
 
   drawSnapCanvas(name);
 
@@ -135,7 +155,7 @@ function initSnapCanvas(name) {
     const sx=(e.clientX-r.left)*dpr, sy=(e.clientY-r.top)*dpr;
     const cx=CV[name];
     const wx=(sx-cx.ox)/cx.scale, wy=(sy-cx.oy)/cx.scale;
-    const W=cvEl.width, snapStep = W * SNAP / GRID;
+    const W = planPx(cvEl), snapStep = W * SNAP / GRID;
     let snX=Math.round(wx/snapStep)*snapStep/W, snY=Math.round(wy/snapStep)*snapStep/W;
 
     // Прилипание к стенам дома для террас (порог 1 м).
@@ -513,7 +533,7 @@ function splitAtBreaks(pts) {
 
 function drawSnapCanvas(name) {
   const cvEl=document.getElementById('cv-'+name); if (!cvEl) return;
-  const ctx=cvEl.getContext('2d'), W=cvEl.width, H=cvEl.height;
+  const ctx=cvEl.getContext('2d'), W=planPx(cvEl), H=W;
   const cx=CV[name]||{scale:1,ox:0,oy:0};
   const pts=S.pts[name]||[];
   applyTransform(ctx,cx,W,H);
@@ -629,10 +649,8 @@ let furnDrag = false, furnDragIdx = -1;
 function initFurnitureCanvas() {
   const wrap = document.getElementById('cw-furniture');
   const cv   = document.getElementById('cv-furniture');
-  const dpr = window.devicePixelRatio || 1, sz = wrap.offsetWidth;
-  cv.width = sz * dpr; cv.height = sz * dpr;
-  cv.style.width = sz + 'px'; cv.style.height = sz + 'px';
   CV['furniture'] = mkCvState();
+  fitCanvasToWrap(wrap, cv, CV['furniture']);
   if (!S.furniture) S.furniture = [];
   if (S.activeFurniture !== null && S.activeFurniture >= S.furniture.length) S.activeFurniture = null;
 
@@ -650,7 +668,7 @@ function initFurnitureCanvas() {
     return {
       x: ((clientX - r.left) * dpr2 - cx.ox) / cx.scale,
       y: ((clientY - r.top ) * dpr2 - cx.oy) / cx.scale,
-      W: cvEl.width,
+      W: planPx(cvEl),
     };
   };
   const active = () => CV['furniture']
@@ -763,7 +781,7 @@ function _dSyncFurniturePanel() {
 
 function drawFurnitureCanvas() {
   const cvEl = document.getElementById('cv-furniture'); if (!cvEl) return;
-  const ctx = cvEl.getContext('2d'), W = cvEl.width, H = cvEl.height;
+  const ctx = cvEl.getContext('2d'), W = planPx(cvEl), H = W;
   const cx = CV['furniture'] || { scale: 1, ox: 0, oy: 0 };
   applyTransform(ctx, cx, W, H);
 
@@ -829,10 +847,8 @@ function drawFurnitureCanvas() {
 function initFacadeCanvas() {
   const wrap = document.getElementById('cw-facade');
   const cv   = document.getElementById('cv-facade');
-  const dpr = window.devicePixelRatio || 1, sz = wrap.offsetWidth;
-  cv.width = sz * dpr; cv.height = sz * dpr;
-  cv.style.width = sz + 'px'; cv.style.height = sz + 'px';
   CV['facade'] = mkCvState();
+  fitCanvasToWrap(wrap, cv, CV['facade']);
 
   drawFacadeCanvas();
 
@@ -847,7 +863,7 @@ function initFacadeCanvas() {
     const r = wrap.getBoundingClientRect(), dpr2 = window.devicePixelRatio || 1;
     const sx = (e.clientX - r.left) * dpr2, sy = (e.clientY - r.top) * dpr2;
     const wx = (sx - cx.ox) / cx.scale, wy = (sy - cx.oy) / cx.scale;
-    const segId = _facadeHitSegment(wx / cvEl.width, wy / cvEl.height);
+    const P = planPx(cvEl); const segId = _facadeHitSegment(wx / P, wy / P);
     if (!segId) return;
     if (S.wallZones[segId]) delete S.wallZones[segId];
     else S.wallZones[segId] = true;
@@ -882,7 +898,7 @@ function _facadeHitSegment(nx, ny) {
 
 function drawFacadeCanvas() {
   const cvEl = document.getElementById('cv-facade'); if (!cvEl) return;
-  const ctx = cvEl.getContext('2d'), W = cvEl.width, H = cvEl.height;
+  const ctx = cvEl.getContext('2d'), W = planPx(cvEl), H = W;
   const cx = CV['facade'] || { scale: 1, ox: 0, oy: 0 };
   applyTransform(ctx, cx, W, H);
 
@@ -965,18 +981,15 @@ let stepsDragStart = null;
 function initStepsCanvas() {
   const wrap = document.getElementById('cw-steps');
   const cv   = document.getElementById('cv-steps');
-  const dpr = window.devicePixelRatio || 1, sz = wrap.offsetWidth;
-  cv.width = sz * dpr; cv.height = sz * dpr;
-  cv.style.width = sz + 'px'; cv.style.height = sz + 'px';
   CV['steps'] = mkCvState();
+  fitCanvasToWrap(wrap, cv, CV['steps']);
 
   // НЕ переснапиваем ступени на сетку при открытии — иначе rect, прижатый к стене
   // дома/кромке террасы (обычно не на сетке 0.5 м), отрывается («съезжает»).
 
   const newCv = cv.cloneNode(false);
-  newCv.width = sz * dpr; newCv.height = sz * dpr;
-  newCv.style.width = sz + 'px'; newCv.style.height = sz + 'px';
   wrap.replaceChild(newCv, cv);
+  fitCanvasToWrap(wrap, newCv, CV['steps']);   // клон заменил канвас — размеры задаём ему
 
   drawStepsCanvas();
   attachStepsEvents(wrap);
@@ -1024,7 +1037,7 @@ function attachStepsEvents(wrap) {
     return {
       x: ((clientX - r.left)*dpr - cx.ox) / cx.scale,
       y: ((clientY - r.top )*dpr - cx.oy) / cx.scale,
-      W: cvEl.width,
+      W: planPx(cvEl),
     };
   };
   const stepsActive = () =>
@@ -1118,7 +1131,7 @@ function attachStepsEvents(wrap) {
 
 function drawStepsCanvas() {
   const cvEl = document.getElementById('cv-steps'); if (!cvEl) return;
-  const ctx = cvEl.getContext('2d'), W = cvEl.width, H = cvEl.height;
+  const ctx = cvEl.getContext('2d'), W = planPx(cvEl), H = W;
   const cx = CV['steps'] || { scale:1, ox:0, oy:0 };
   applyTransform(ctx, cx, W, H);
 
@@ -1284,10 +1297,8 @@ function snapDraggedRect(kind, ds, dx, dy, excludeTerraceIdx) {
 function initTerraceCanvas() {
   const wrap = document.getElementById('cw-terrace');
   const cv   = document.getElementById('cv-terrace');
-  const dpr = window.devicePixelRatio || 1, sz = wrap.offsetWidth;
-  cv.width = sz * dpr; cv.height = sz * dpr;
-  cv.style.width = sz + 'px'; cv.style.height = sz + 'px';
   CV['terrace'] = mkCvState();
+  fitCanvasToWrap(wrap, cv, CV['terrace']);
 
   // Если rects пуст — создаём дефолтный rect рядом с домом.
   if (!S.terraceRects || S.terraceRects.length === 0) {
@@ -1302,9 +1313,8 @@ function initTerraceCanvas() {
   // («съезжала» при повторном редактировании).
 
   const newCv = cv.cloneNode(false);
-  newCv.width = sz * dpr; newCv.height = sz * dpr;
-  newCv.style.width = sz + 'px'; newCv.style.height = sz + 'px';
   wrap.replaceChild(newCv, cv);
+  fitCanvasToWrap(wrap, newCv, CV['terrace']);   // клон заменил канвас — размеры задаём ему
 
   drawTerraceCanvas();
   attachTerraceEvents(wrap);
@@ -1417,7 +1427,7 @@ function attachTerraceEvents(wrap) {
     return {
       x: ((clientX - r.left)*dpr - cx.ox) / cx.scale,
       y: ((clientY - r.top )*dpr - cx.oy) / cx.scale,
-      W: cvEl.width,
+      W: planPx(cvEl),
     };
   };
 
@@ -1531,7 +1541,7 @@ function attachTerraceEvents(wrap) {
 
 function drawTerraceCanvas() {
   const cvEl = document.getElementById('cv-terrace'); if (!cvEl) return;
-  const ctx = cvEl.getContext('2d'), W = cvEl.width, H = cvEl.height;
+  const ctx = cvEl.getContext('2d'), W = planPx(cvEl), H = W;
   const cx = CV['terrace'] || { scale: 1, ox: 0, oy: 0 };
   applyTransform(ctx, cx, W, H);
 
@@ -1656,10 +1666,8 @@ function _defaultBed() {
 function initBedsCanvas() {
   const wrap = document.getElementById('cw-beds');
   const cv   = document.getElementById('cv-beds');
-  const dpr = window.devicePixelRatio || 1, sz = wrap.offsetWidth;
-  cv.width = sz * dpr; cv.height = sz * dpr;
-  cv.style.width = sz + 'px'; cv.style.height = sz + 'px';
   CV['beds'] = mkCvState();
+  fitCanvasToWrap(wrap, cv, CV['beds']);
 
   if (!S.beds || S.beds.length === 0) {
     S.beds = [_defaultBed()];
@@ -1672,9 +1680,8 @@ function initBedsCanvas() {
 
 
   const newCv = cv.cloneNode(false);
-  newCv.width = sz * dpr; newCv.height = sz * dpr;
-  newCv.style.width = sz + 'px'; newCv.style.height = sz + 'px';
   wrap.replaceChild(newCv, cv);
+  fitCanvasToWrap(wrap, newCv, CV['beds']);   // клон заменил канвас — размеры задаём ему
 
   drawBedsCanvas();
   attachBedsEvents(wrap);
@@ -1770,7 +1777,7 @@ function attachBedsEvents(wrap) {
     return {
       x: ((clientX - r.left) * dpr - cx.ox) / cx.scale,
       y: ((clientY - r.top ) * dpr - cx.oy) / cx.scale,
-      W: cvEl.width,
+      W: planPx(cvEl),
     };
   };
   const bedsActive = () =>
@@ -1866,7 +1873,7 @@ function attachBedsEvents(wrap) {
 
 function drawBedsCanvas() {
   const cvEl = document.getElementById('cv-beds'); if (!cvEl) return;
-  const ctx = cvEl.getContext('2d'), W = cvEl.width, H = cvEl.height;
+  const ctx = cvEl.getContext('2d'), W = planPx(cvEl), H = W;
   const cx = CV['beds'] || { scale: 1, ox: 0, oy: 0 };
   applyTransform(ctx, cx, W, H);
 
