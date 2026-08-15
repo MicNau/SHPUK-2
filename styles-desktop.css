@@ -8,6 +8,9 @@
   --card-hover: #ccc;
   --text: #000;
   --r: 0;
+  /* Акцент кнопок действий (бывшая чёрная заливка). */
+  --accent: #f2722c;
+  --accent-hover: #f48549;
   --sidebar-w: 300px;
   --panel-w: 340px;
 }
@@ -18,11 +21,11 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
    ═══════════════════════════════════════════ */
 .d-fab-summary {
   position: fixed; right: 24px; bottom: 24px; z-index: 150;
-  height: 48px; padding: 0 24px; background: #1a1a1a; color: #fff;
+  height: 48px; padding: 0 24px; background: var(--accent); color: #fff;
   border: none; font-size: 15px; font-weight: 700; cursor: pointer;
   box-shadow: 0 4px 16px rgba(0,0,0,.25); transition: background .15s;
 }
-.d-fab-summary:hover { background: #333; }
+.d-fab-summary:hover { background: var(--accent-hover); }
 
 /* ═══════════════════════════════════════════
    SCREENS SYSTEM
@@ -136,12 +139,12 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
 #d-upload-input { display: none; }
 .d-select-next {
   margin-top: 32px; height: 56px; min-width: 240px; padding: 0 32px;
-  background: #1a1a1a; color: #fff; border: none; border-radius: var(--r);
+  background: var(--accent); color: #fff; border: none; border-radius: var(--r);
   font-size: 20px; font-weight: 700; letter-spacing: .04em;
   cursor: pointer; transition: background .15s, transform .1s;
   display: flex; align-items: center; justify-content: center; gap: 12px;
 }
-.d-select-next:hover { background: #333; }
+.d-select-next:hover { background: var(--accent-hover); }
 .d-select-next:active { transform: scale(.98); }
 
 /* ═══════════════════════════════════════════
@@ -200,8 +203,8 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
 }
 .d-btn-back { background: var(--card); color: var(--text); }
 .d-btn-back:hover { background: var(--card-hover); }
-.d-btn-next { background: #1a1a1a; color: #fff; }
-.d-btn-next:hover { background: #333; }
+.d-btn-next { background: var(--accent); color: #fff; }
+.d-btn-next:hover { background: var(--accent-hover); }
 
 /* ═══════════════════════════════════════════
    STEP 3 — WORKSPACE (left + center + right)
@@ -334,8 +337,8 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
   transition: background .15s;
 }
 .d-canvas-btn:hover { background: var(--card-hover); }
-.d-canvas-btn.confirm { background: #1a1a1a; color: #fff; }
-.d-canvas-btn.confirm:hover { background: #333; }
+.d-canvas-btn.confirm { background: var(--accent); color: #fff; }
+.d-canvas-btn.confirm:hover { background: var(--accent-hover); }
 .d-canvas-area {
   flex: 1; position: relative; overflow: hidden; touch-action: none; cursor: crosshair;
   display: flex; align-items: center; justify-content: center;
@@ -374,7 +377,7 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
 }
 .bed-h-btn:last-child { border-right: none; }
 .bed-h-btn:hover { background: var(--card-hover, #ddd); }
-.bed-h-btn.active { background: #1a1a1a; color: #fff; }
+.bed-h-btn.active { background: var(--accent); color: #fff; }
 
 /* RIGHT PANEL — materials / catalog */
 .d-panel {
@@ -383,8 +386,6 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
   background: var(--bg);
 }
 .d-panel.hidden { display: none; }
-.d-panel.locked .d-panel-body { opacity: 0.3; pointer-events: none; }
-.d-panel.locked .d-panel-title::after { content: ' (заблокировано)'; font-size: 12px; font-weight: 300; color: #999; }
 .d-panel-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 20px 12px; border-bottom: 1px solid #e8e8e8; flex-shrink: 0;
@@ -489,8 +490,8 @@ body { font-family:'Roboto',sans-serif; background:#e0e0e0; min-height:100vh; ov
   flex: 1; height: 34px; border: none; border-radius: 8px;
   font-size: 12px; font-weight: 700; cursor: pointer; transition: background .15s;
 }
-.d-mat-btn-apply { background: #000; color: #fff; }
-.d-mat-btn-apply:hover { background: #333; }
+.d-mat-btn-apply { background: var(--accent); color: #fff; }
+.d-mat-btn-apply:hover { background: var(--accent-hover); }
 .d-mat-btn-compare { background: var(--card); color: var(--text); }
 .d-mat-btn-compare:hover { background: var(--card-hover); }
 

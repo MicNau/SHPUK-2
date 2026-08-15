@@ -49,9 +49,8 @@ function dGoTo(s) {
   // Режим фасада живёт только на шаге 3 — при уходе гасим (иначе клики по 3D
   // на шаге 2 продолжали бы тоглить сегменты).
 
-  // Хедер убран; «Итог» — плавающая кнопка, видна только на шаге 3.
-  const summaryBtn = document.getElementById('d-btn-summary');
-  if (summaryBtn) summaryBtn.style.display = s === 3 ? '' : 'none';
+  // Хедер убран; «СМЕТА» — плавающая кнопка (см. _dSyncSummaryBtn).
+  _dSyncSummaryBtn();
 
   if (s === 1) _dInitHouseGrid();
   else if (s === 2) _dInitParamsView();
@@ -304,8 +303,6 @@ function _dResetAllConfigurations() {
   S.mats = {};
   S.elementMat = {};
   S.estimate = {};
-  S.samples = [];
-  S.activeSample = null;
   S.catColors = new Set();
   S.catPrice = null;
   S.catSection = null;
@@ -341,6 +338,8 @@ function _dCacheToggleDefaults() {
 }
 
 function dSelectHouseAndGo(typeId) {
+  // Новый дом — новая геометрия: разрешаем сцене снова выставить камеру.
+  if (typeof resetCameraFraming === 'function') resetCameraFraming();
   document.querySelectorAll('.d-house-card, .d-house-card-empty').forEach(c => c.classList.remove('selected'));
   const card = document.querySelector(`.d-house-card[data-typeid="${typeId}"]`) ||
                document.querySelector(`.d-house-card-empty[data-typeid="${typeId}"]`);
@@ -792,6 +791,30 @@ function _dOpenEditor(secId) {
   if (initFn) setTimeout(() => initFn(), 80);
 }
 
+// ── Назад (кнопка внизу сайдбара) ──
+// Открытый редактор закрывается ОТМЕНОЙ: пользователь, передумавший делать террасу,
+// раньше мог выйти только через «Готово», то есть согласившись её создать.
+function dBack() {
+  if (dEditorOpen) { dCancelCanvas(); return; }
+  dGoTo(2);
+}
+
+// Выход из редактора без подтверждения. Элемент, который до этого не был настроен,
+// из проекта убирается — разметка остаётся в S, но в сцену не попадает.
+function dCancelCanvas() {
+  const secId = dActiveItem;
+  dEditorOpen = false;
+  _dCloseAllCanvases();
+  if (secId && !dConfigured.has(secId)) {
+    S.sections = S.sections.filter(x => x !== secId);
+    dActiveItem = null;
+  }
+  _dRenderSidebar();
+  _dSetPanelLocked(!dActiveItem);
+  if (dActiveItem) _dRenderPanelContent();
+  if (typeof buildScene3d === 'function') buildScene3d();
+}
+
 // ── Confirm editor (Готово) ──
 function dConfirmCanvas(secId) {
   dConfigured.add(secId);
@@ -818,9 +841,20 @@ function _dCloseAllCanvases() {
 }
 
 // ── Panel lock/unlock ──
+// Правая панель во время canvas-настройки не блокируется, а ПРЯЧЕТСЯ: полупрозрачный
+// каталог с подписью «(заблокировано)» сбивал — непонятно, можно ли с ним работать.
 function _dSetPanelLocked(locked) {
   const panel = document.getElementById('d-panel');
-  if (panel) panel.classList.toggle('locked', locked);
+  if (panel) panel.classList.toggle('hidden', locked);
+}
+
+// Плавающая кнопка сметы: только на шаге 3 и только когда есть что показывать —
+// хотя бы один выбранный товар. Пустая смета кнопкой не заманивает.
+function _dSyncSummaryBtn() {
+  const btn = document.getElementById('d-btn-summary');
+  if (!btn) return;
+  const hasProduct = !!(S.estimate && Object.keys(S.estimate).length);
+  btn.style.display = (dStep === 3 && hasProduct) ? '' : 'none';
 }
 
 // ══════════════════════════════════════════════
@@ -860,37 +894,13 @@ function _dRenderPanelContent() {
   const _palette = new Set(_elementColors(secId, S.matSubMode).map(c => c.id));
   S.catColors = new Set([...S.catColors].filter(n => _palette.has(n)));
 
-  // Render swatches
-  dRenderSwatches();
-  // Auto-show catalog results
+  // Auto-show catalog results (селектор раздела и блок образцов убраны из UI)
   dShowResults();
 }
 
 function dSetSubMode(mode) {
   S.matSubMode = mode;
   _dRenderPanelContent();
-}
-
-// ── Samples ──
-function dRenderSwatches() {
-  const grid = document.getElementById('d-samples-grid');
-  const lbl = document.getElementById('d-samples-lbl');
-  if (!grid || !lbl) return;
-
-  const all = S.samples;
-  if (!all || !all.length) {
-    grid.innerHTML = '<span style="font-size:13px;color:#bbb;">Добавьте образцы из каталога</span>';
-    lbl.textContent = 'Образцы:';
-    return;
-  }
-  lbl.textContent = `Образцы (${all.length}):`;
-  grid.innerHTML = all.map((s, i) => `
-    <div class="swatch ${S.activeSample && S.activeSample.id === s.id && S.activeSample._idx === i ? 'swatch-active' : ''}"
-         title="${s.name}" onclick="dApplySwatch(${i})"
-         style="background:${s.color || '#d9d9d9'}; cursor:pointer;">
-      <button class="swatch-del" onclick="event.stopPropagation(); dRemoveSwatch(${i})">✕</button>
-      <span class="swatch-name" style="color:${_dIsLight(s.color) ? '#333' : '#fff'}">${s.name}</span>
-    </div>`).join('');
 }
 
 // Элементы с настилом — материал у каждого свой (S.elementMat[el]).
@@ -925,7 +935,6 @@ function _bedHeightFromProduct(sample) {
 }
 
 function _applySampleToActive(sample) {
-  S.activeSample = sample;                 // для подсветки образца
   _setEstimateForActive(sample);           // смета обновляется вместе с материалом
   if (_activeIsDeck()) {
     // productId/name сохраняем рядом с текстурами: по ним расчёт террасы на бэкенде
@@ -958,7 +967,6 @@ function _applySampleToActive(sample) {
   } else if (sample.color && typeof applyMaterialToScene === 'function') {
     applyMaterialToScene(sample.color);    // забор/ограждение — цвет
   }
-  dRenderSwatches();
 }
 
 // Назначает товар точке мебели: активной, иначе первой без товара (по номерам),
@@ -1024,23 +1032,6 @@ function _d3dLoadingRender() {
   box.classList.add('on');
 }
 
-function dApplySwatch(idx) {
-  const s = S.samples[idx];
-  if (!s) return;
-  _applySampleToActive({ ...s, _idx: idx });
-}
-
-function dRemoveSwatch(i) {
-  S.samples.splice(i, 1);
-  dRenderSwatches();
-}
-
-function _dIsLight(hex) {
-  if (!hex) return true;
-  const c = hex.replace('#', '');
-  const r = parseInt(c.substr(0, 2), 16), g = parseInt(c.substr(2, 2), 16), b = parseInt(c.substr(4, 2), 16);
-  return (r * 0.299 + g * 0.587 + b * 0.114) > 150;
-}
 
 // ── Catalog filters ──
 // Набор цветов для текущего элемента проекта (свой на тип, имена/цвета из COLORS.md).
@@ -1263,7 +1254,6 @@ function _dRenderCatalogLoading() {
 function dShowResults() {
   _dRenderColorGrid();
   _dRenderPriceGrid();
-  _dRenderSectionSelect();
   const secId = _activeSectionId();
   const cached = _catalogCache[secId];
   if (Array.isArray(cached)) {
@@ -1403,21 +1393,12 @@ async function dApplyRealMat(e, pid) {
   if (!product) { btn.textContent = orig; return; }
   try { await product.loadTextures(); } catch (_) {}
 
-  // В образцы кладём с превью-цветом и текстурами (чтобы повторное применение работало).
-  let idx = S.samples.findIndex(s => s.id === product.id);
-  if (idx < 0) {
-    // price кладём в образец, чтобы повторное применение свотча тоже обновляло смету.
-    S.samples.push({ id: product.id, name: product.name, color: '#C8A96E',
-                     textures: product.textures, colorName: product.color || '',
-                     price: _productPrice(product) });
-    idx = S.samples.length - 1;
-  }
   // modelUrl нужен мебели (GLB-модель товара); для прочих элементов он просто пуст.
   // price — чтобы «Применить» сразу обновляло смету (_setEstimateForActive).
   _applySampleToActive({ id: product.id, name: product.name, color: null,
                          textures: product.textures, modelUrl: product.modelUrl || '',
                          colorName: product.color || '',
-                         price: _productPrice(product), _idx: idx });
+                         price: _productPrice(product) });
 
   btn.textContent = '✓'; btn.style.background = '#444';
   setTimeout(() => { btn.textContent = orig; btn.style.background = '#000'; }, 700);
@@ -1431,8 +1412,7 @@ function dToggleMatCard(mid) {
 }
 
 function dApplyMat(e, mid, name, color, priceStr) {
-  S.samples.push({ id: mid, name, color, price: priceStr });
-  _applySampleToActive({ id: mid, name, color, price: priceStr, _idx: S.samples.length - 1 });
+  _applySampleToActive({ id: mid, name, color, price: priceStr });
   const btn = e.currentTarget;
   const orig = btn.textContent;
   btn.textContent = '✓';
@@ -1462,8 +1442,9 @@ function _setEstimateForActive(sample) {
   if (!dActiveItem) return;
   if (!('price' in sample)) return;   // источник цены не передал — строку сметы не трогаем
   const price = _parsePriceNum(sample.price);
-  if (price == null) { delete S.estimate[dActiveItem]; return; }
+  if (price == null) { delete S.estimate[dActiveItem]; _dSyncSummaryBtn(); return; }
   S.estimate[dActiveItem] = { id: sample.id, name: sample.name, price };
+  _dSyncSummaryBtn();
 }
 
 // ── Геометрические метрики элементов (для сметы) ──

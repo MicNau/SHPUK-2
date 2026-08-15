@@ -5,12 +5,13 @@
 // ══════════════════════════════════════════════
 const CV = {};
 const GRID = 32;       // total meters (canvas area)
-const SNAP = 0.5;      // snap step (meters)
-const CELLS = GRID / SNAP; // 64 grid cells
+const SNAP = 0.25;     // шаг КУРСОРА (снап), м
+const GRID_STEP = 0.5; // шаг РАЗМЕТКИ (точки сетки), м — крупнее снапа, специально
+const CELLS = GRID / GRID_STEP; // 64 точки разметки на сторону
 // Порог прилипания кромок/точек к стенам дома и соседним rect'ам, м.
-// ВАЖНО: grid-снап (SNAP=0.5 м) применяется ДО wall-снапа, поэтому эффективный
-// радиус захвата ≈ порог + полклетки. С прежним 1.0 м захват начинался за ~1.5 м
-// от стены — слишком рано; 0.5 м даёт захват с ~0.75 м.
+// ВАЖНО: grid-снап применяется ДО wall-снапа, поэтому эффективный радиус захвата
+// ≈ порог + полшага снапа. С прежним 1.0 м захват начинался за ~1.5 м от стены —
+// слишком рано; 0.5 м даёт захват с ~0.6 м (при шаге курсора 0.25 м).
 const EDGE_SNAP_DIST = 0.5;
 
 function mkCvState() {
@@ -134,7 +135,7 @@ function initSnapCanvas(name) {
     const sx=(e.clientX-r.left)*dpr, sy=(e.clientY-r.top)*dpr;
     const cx=CV[name];
     const wx=(sx-cx.ox)/cx.scale, wy=(sy-cx.oy)/cx.scale;
-    const W=cvEl.width, snapStep=W/CELLS;
+    const W=cvEl.width, snapStep = W * SNAP / GRID;
     let snX=Math.round(wx/snapStep)*snapStep/W, snY=Math.round(wy/snapStep)*snapStep/W;
 
     // Прилипание к стенам дома для террас (порог 1 м).
@@ -303,7 +304,7 @@ function _drawHouseOpenings(ctx, W, H, sc) {
       const bN = T.toNorm(e.x + e.dx * (it.start + it.width), e.z + e.dz * (it.start + it.width));
       const ax = aN.x * W, ay = aN.y * H, bx = bN.x * W, by = bN.y * H;
       // Проём: разрыв контурной линии стены (фоновым цветом).
-      ctx.strokeStyle = '#d9d9d9'; ctx.lineWidth = gapW; ctx.lineCap = 'butt';
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = gapW; ctx.lineCap = 'butt';   // цвет поля плана
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
       if (it.type === 'window') {
         // Остекление — тонкая синяя линия в проёме.
@@ -517,12 +518,12 @@ function drawSnapCanvas(name) {
   const pts=S.pts[name]||[];
   applyTransform(ctx,cx,W,H);
 
-  ctx.fillStyle='#d9d9d9'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
 
   // Сетка (0.5 м шаг)
   const step=W/CELLS;
   for(let r=0;r<=CELLS;r++) for(let c=0;c<=CELLS;c++) {
-    const isMajor = (r*SNAP)%1===0 && (c*SNAP)%1===0;
+    const isMajor = (r*GRID_STEP)%1===0 && (c*GRID_STEP)%1===0;
     ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
     ctx.beginPath(); ctx.arc(c*step,r*step,(isMajor?2:1.2)/cx.scale,0,Math.PI*2); ctx.fill();
   }
@@ -766,10 +767,10 @@ function drawFurnitureCanvas() {
   const cx = CV['furniture'] || { scale: 1, ox: 0, oy: 0 };
   applyTransform(ctx, cx, W, H);
 
-  ctx.fillStyle = '#d9d9d9'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
   const step = W / CELLS;
   for (let r = 0; r <= CELLS; r++) for (let c = 0; c <= CELLS; c++) {
-    const isMajor = (r * SNAP) % 1 === 0 && (c * SNAP) % 1 === 0;
+    const isMajor = (r * GRID_STEP) % 1 === 0 && (c * GRID_STEP) % 1 === 0;
     ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
     ctx.beginPath(); ctx.arc(c * step, r * step, (isMajor ? 2 : 1.2) / cx.scale, 0, Math.PI * 2); ctx.fill();
   }
@@ -885,11 +886,11 @@ function drawFacadeCanvas() {
   const cx = CV['facade'] || { scale: 1, ox: 0, oy: 0 };
   applyTransform(ctx, cx, W, H);
 
-  ctx.fillStyle = '#d9d9d9'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
   // Сетка + метки (как в остальных редакторах)
   const step = W / CELLS;
   for (let r = 0; r <= CELLS; r++) for (let c = 0; c <= CELLS; c++) {
-    const isMajor = (r * SNAP) % 1 === 0 && (c * SNAP) % 1 === 0;
+    const isMajor = (r * GRID_STEP) % 1 === 0 && (c * GRID_STEP) % 1 === 0;
     ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
     ctx.beginPath(); ctx.arc(c * step, r * step, (isMajor ? 2 : 1.2) / cx.scale, 0, Math.PI * 2); ctx.fill();
   }
@@ -1121,11 +1122,11 @@ function drawStepsCanvas() {
   const cx = CV['steps'] || { scale:1, ox:0, oy:0 };
   applyTransform(ctx, cx, W, H);
 
-  ctx.fillStyle = '#d9d9d9'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
   // Сетка
   const step = W/CELLS;
   for (let r = 0; r <= CELLS; r++) for (let c = 0; c <= CELLS; c++) {
-    const isMajor = (r*SNAP)%1===0 && (c*SNAP)%1===0;
+    const isMajor = (r*GRID_STEP)%1===0 && (c*GRID_STEP)%1===0;
     ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
     ctx.beginPath(); ctx.arc(c*step, r*step, (isMajor?2:1.2)/cx.scale, 0, Math.PI*2); ctx.fill();
   }
@@ -1534,12 +1535,12 @@ function drawTerraceCanvas() {
   const cx = CV['terrace'] || { scale: 1, ox: 0, oy: 0 };
   applyTransform(ctx, cx, W, H);
 
-  ctx.fillStyle = '#d9d9d9'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
 
   // Сетка
   const step = W / CELLS;
   for (let r = 0; r <= CELLS; r++) for (let c = 0; c <= CELLS; c++) {
-    const isMajor = (r * SNAP) % 1 === 0 && (c * SNAP) % 1 === 0;
+    const isMajor = (r * GRID_STEP) % 1 === 0 && (c * GRID_STEP) % 1 === 0;
     ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
     ctx.beginPath();
     ctx.arc(c * step, r * step, (isMajor ? 2 : 1.2) / cx.scale, 0, Math.PI * 2);
@@ -1869,11 +1870,11 @@ function drawBedsCanvas() {
   const cx = CV['beds'] || { scale: 1, ox: 0, oy: 0 };
   applyTransform(ctx, cx, W, H);
 
-  ctx.fillStyle = '#d9d9d9'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
   // Сетка
   const step = W / CELLS;
   for (let r = 0; r <= CELLS; r++) for (let c = 0; c <= CELLS; c++) {
-    const isMajor = (r * SNAP) % 1 === 0 && (c * SNAP) % 1 === 0;
+    const isMajor = (r * GRID_STEP) % 1 === 0 && (c * GRID_STEP) % 1 === 0;
     ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
     ctx.beginPath(); ctx.arc(c * step, r * step, (isMajor ? 2 : 1.2) / cx.scale, 0, Math.PI * 2); ctx.fill();
   }
