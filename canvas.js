@@ -986,6 +986,9 @@ function initStepsCanvas() {
 
   // НЕ переснапиваем ступени на сетку при открытии — иначе rect, прижатый к стене
   // дома/кромке террасы (обычно не на сетке 0.5 м), отрывается («съезжает»).
+  // Но глубину/разворот приводим сразу: они зависят от фундамента и разметки террасы,
+  // которые могли поменяться с прошлого открытия редактора.
+  _stepsNormalize();
 
   const newCv = cv.cloneNode(false);
   wrap.replaceChild(newCv, cv);
@@ -993,6 +996,69 @@ function initStepsCanvas() {
 
   drawStepsCanvas();
   attachStepsEvents(wrap);
+}
+
+// ── Ступени: глубина и ориентация задаются НЕ пользователем ────────────────
+// Глубина лестницы полностью определяется высотой фундамента (3D считает так же:
+// n = ceil(bh / STEP_RISE) ступенек по STEP_DEPTH), а разворот — ближайшей стороной
+// террасы/крыльца. Поэтому в редакторе меняется только ШИРИНА: прямоугольник,
+// который тянется по обеим осям, обещал бы настройку глубины, которой нет.
+function _stepsDepthNorm() {
+  const bh = (parseFloat(document.getElementById('v-found')?.value || 80)) / 100;
+  const rise  = (typeof STEP_RISE   !== 'undefined') ? STEP_RISE   : 0.17;
+  const depth = (typeof STEP_DEPTH  !== 'undefined') ? STEP_DEPTH  : 0.28;
+  const nose  = (typeof STEP_NOSING !== 'undefined') ? STEP_NOSING : 0.035;
+  const n = Math.max(1, Math.ceil(bh / rise));
+  return Math.max(0.3, (n - 1) * depth + nose) / GRID;
+}
+
+// Стороны опор (террасные блоки, при их отсутствии — габарит дома) в виде
+// {axis, coord, a, b, out}: axis — ось, ПОПЕРЁК которой идёт сторона; out — куда
+// от опоры смотрит наружная нормаль (+1/−1).
+function _stepsSupportSides() {
+  const sides = [];
+  const pushRect = r => {
+    sides.push({ axis: 'y', coord: r.y,       a: r.x, b: r.x + r.w, out: -1 });
+    sides.push({ axis: 'y', coord: r.y + r.h, a: r.x, b: r.x + r.w, out: +1 });
+    sides.push({ axis: 'x', coord: r.x,       a: r.y, b: r.y + r.h, out: -1 });
+    sides.push({ axis: 'x', coord: r.x + r.w, a: r.y, b: r.y + r.h, out: +1 });
+  };
+  (S.terraceRects || []).forEach(r => { if (r && r.w > 0 && r.h > 0) pushRect(r); });
+  if (!sides.length && typeof isEmptyLot === 'function' && !isEmptyLot()) {
+    const b = getHousePolygonNorm().bboxNorm;
+    pushRect({ x: b.nx, y: b.ny, w: b.nw, h: b.nh });
+  }
+  return sides;
+}
+
+// Приводит S.steps к «правильной» лестнице: глубина из высоты фундамента,
+// длинная сторона вдоль ближайшей опорной стороны, спуск — наружу от неё.
+function _stepsNormalize() {
+  const s = S.steps; if (!s) return;
+  const sides = _stepsSupportSides();
+  if (!sides.length) return;                      // ни террасы, ни дома — не трогаем
+  const D = _stepsDepthNorm();
+  const cx0 = s.x + s.w / 2, cy0 = s.y + s.h / 2;
+  let best = null, bestD = Infinity;
+  for (const sd of sides) {
+    const u = (sd.axis === 'y') ? cx0 : cy0;      // вдоль стороны
+    const v = (sd.axis === 'y') ? cy0 : cx0;      // поперёк
+    const uc = Math.max(sd.a, Math.min(sd.b, u));
+    const d = Math.hypot(u - uc, v - sd.coord);
+    if (d < bestD) { bestD = d; best = sd; }
+  }
+  const minW = SNAP / GRID;
+  if (best.axis === 'y') {                        // опора горизонтальная → спуск по Y
+    s.w = Math.max(minW, s.w);
+    s.h = D;
+    s.y = (best.out > 0) ? best.coord : best.coord - D;
+    s.x = Math.max(0, Math.min(1 - s.w, s.x));
+  } else {                                        // опора вертикальная → спуск по X
+    s.h = Math.max(minW, s.h);
+    s.w = D;
+    s.x = (best.out > 0) ? best.coord : best.coord - D;
+    s.y = Math.max(0, Math.min(1 - s.h, s.y));
+  }
 }
 
 function getStepsRectPx(W) {
@@ -1020,6 +1086,7 @@ function applyStepsDrag(wx, wy, W) {
   // excludeTerraceIdx = -1 — ступени снапаются ко ВСЕМ террасным rect'ам + стенам дома.
   const res = snapDraggedRect(stepsDrag, ds, dx, dy, -1);
   s.x = res.x; s.y = res.y; s.w = res.w; s.h = res.h;
+  _stepsNormalize();     // глубину и разворот пользователь не задаёт
   drawStepsCanvas();
 }
 
