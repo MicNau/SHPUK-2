@@ -1225,15 +1225,18 @@ function buildScene3d() {
   }
 
   // Навес строим ДО перил: высоту высоких столбов перила берут рейкастом по готовым плитам навеса.
-  const terraceCanopyOn = tgOn('terrace-roof');
+  // Навес включается тумблером в редакторе ОГРАЖДЕНИЙ (TODO.md → ОГРАЖДЕНИЯ 3).
+  const terraceCanopyOn = tgOn('railing-roof');
   if (terraceCanopyOn && S.sections.includes('terrace')) {
     try {
       buildTerraceCanopies(houseGroup, M, terraceRectPolys, terraceLevel, houseL, houseW);
     } catch (e) { console.error('[buildTerraceCanopies]', e); }
   }
 
-  const terraceRailingOn = tgOn('terrace-railing');
-  if (terraceRailingOn && S.sections.includes('terrace')) {
+  // Ограждение — отдельный элемент проекта: строится по НАРИСОВАННОЙ ломаной
+  // (S.pts.railing), а не по контуру террасы. Высота стандартная, не настраивается.
+  const railingPts = (S.pts.railing || []).filter(p => !p.break);
+  if (S.sections.includes('railing') && railingPts.length >= 2) {
     if (_railingCache && _railingCache.rails) {
       // Высоту высоких столбов берём по РЕАЛЬНЫМ плитам навеса (рейкаст), а не аналитикой —
       // на стыках блоков плита обрезана по диагонали, и аналитика (max по bbox) промахивалась.
@@ -1249,15 +1252,7 @@ function buildScene3d() {
           return hits.length ? hits[hits.length - 1].point.y : null;   // нижнее пересечение = низ плиты
         };
       }
-      // Единый контур объединения блоков → перила без разрывов на стыках.
-      _railPostReg = [];   // общий реестр столбов на весь проход (дедуп на стыках петель)
-      const loops = _terraceUnionLoops(allRectsWorld);
-      for (const loop of loops) {
-        try {
-          buildRailing3d(houseGroup, loop, terraceLevel, houseL, houseW, canopyUndersideY);
-        } catch (e) { console.error('[buildRailing3d]', e); }
-      }
-      _railPostReg = null;
+      buildRailingLine3d(houseGroup, S.pts.railing, terraceLevel, houseL, houseW, canopyUndersideY);
     } else {
       // GLB ограждения ещё не загружен — грузим и перестраиваем сцену (как грядки).
       ensureRailingLoaded().then(c => { if (c && threeState) buildScene3d(); });

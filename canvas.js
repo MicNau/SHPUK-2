@@ -411,6 +411,7 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
     pool_terrace: { fill:'rgba(0,80,200,.10)',  stroke:'rgba(0,80,200,.5)',  label:'Терр. бассейна' },
     pier:         { fill:'rgba(26,122,204,.10)',stroke:'rgba(26,122,204,.5)',label:'Причал' },
     fence:        { fill:'none',                stroke:'rgba(0,0,0,.3)',     label:'Забор' },
+    railing:      { fill:'none',                stroke:'rgba(122,75,35,.5)', label:'Ограждение' },
   };
 
   // Ступени — один rect (фон, если редактируем другую секцию)
@@ -561,14 +562,17 @@ function drawSnapCanvas(name) {
     ctx.fillStyle='#aaa'; ctx.font=`${13/cx.scale}px Roboto`; ctx.textAlign='center';
     const hint={terrace:'Нажмите чтобы поставить угол',pool_terrace:'Нажмите чтобы поставить угол',
                  pier:'Нажмите чтобы поставить угол',fence:'Нажмите чтобы поставить точку',
-                 paths:'Нажмите точки вдоль дорожки'};
+                 paths:'Нажмите точки вдоль дорожки',
+                 railing:'Нажмите точки по краю террасы'};
     ctx.fillText(hint[name]||'Нажмите чтобы поставить точку', W/2, H*0.92);
   }
 
   // Контур текущей секции
   if (realPts.length > 0) {
-    const color = {terrace:'#000',pool_terrace:'#0050CC',pier:'#1a7acc',paths:'#336600',fence:'#000'}[name]||'#000';
-    const segments = (name==='paths'||name==='fence') ? splitAtBreaks(pts) : [realPts];
+    const color = {terrace:'#000',pool_terrace:'#0050CC',pier:'#1a7acc',paths:'#336600',
+                   fence:'#000',railing:'#7a4b23'}[name]||'#000';
+    // Ломаные (могут состоять из нескольких линий через {break:true}).
+    const segments = (name==='paths'||name==='fence'||name==='railing') ? splitAtBreaks(pts) : [realPts];
 
     if (name === 'paths') {
       const pathW = ((S.pathWidth || 120) / 100) / GRID * W;
@@ -586,7 +590,7 @@ function drawSnapCanvas(name) {
         for(let i=1;i<seg.length;i++) ctx.lineTo(seg[i].x*W, seg[i].y*H);
         ctx.stroke(); ctx.setLineDash([]);
       }
-    } else if (name === 'fence') {
+    } else if (name === 'fence' || name === 'railing') {
       for (const seg of segments) {
         if (seg.length < 1) continue;
         ctx.beginPath(); ctx.moveTo(seg[0].x*W,seg[0].y*H);

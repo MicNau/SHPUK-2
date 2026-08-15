@@ -17,6 +17,7 @@ const D_SIDEBAR_ITEMS = [
   { id: 'fence',         lbl: 'Забор',               hasEditor: true  },
   { id: 'facade',        lbl: 'Отделка фасада',      hasEditor: true  },
   { id: 'beds',          lbl: 'Грядки',              hasEditor: true  },
+  { id: 'railing',       lbl: 'Ограждения террасы',  hasEditor: true  },
   { id: 'furniture',     lbl: 'Садовая мебель',      hasEditor: true  },
   { id: 'pool_terrace',  lbl: 'Терраса у бассейна',  hasEditor: true  },
   { id: 'pier',          lbl: 'Причал',              hasEditor: true  },
@@ -306,7 +307,6 @@ function _dResetAllConfigurations() {
   S.catColors = new Set();
   S.catPrice = null;
   S.catSection = null;
-  S.matSubMode = null;
   S.curSec = 0;
   dConfigured.clear();
   dActiveItem = null;
@@ -736,7 +736,6 @@ function dDeleteItem(secId) {
   // Если удаляемая позиция активна — сбрасываем активность
   if (dActiveItem === secId) {
     dActiveItem = null;
-    S.matSubMode = null;
   }
 
   _dRenderSidebar();
@@ -776,7 +775,6 @@ function dEditItem(secId) {
 function _dSelectItem(secId) {
   dActiveItem = secId;
   dEditorOpen = false;
-  S.matSubMode = null;
 
   // For non-editor items, add to sections on first click
   const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
@@ -852,7 +850,6 @@ function dConfirmCanvas(secId) {
   _dCloseAllCanvases();
 
   dActiveItem = secId;
-  S.matSubMode = null;
   S.curSec = 0;
 
   _dRenderSidebar();
@@ -898,40 +895,20 @@ function _dRenderPanelContent() {
   const panelTitle = document.getElementById('d-panel-title');
   if (panelTitle) panelTitle.textContent = item ? item.lbl : 'Материалы';
 
-  // Terrace sub-mode toggle (Терраса / Ограждение)
-  const subToggle = document.getElementById('d-panel-sub-toggle');
-  if (subToggle) {
-    if (secId === 'terrace') {
-      const mode = S.matSubMode || 'deck';
-      subToggle.innerHTML = `
-        <button class="d-sub-btn ${mode==='deck'?'active':''}" onclick="dSetSubMode('deck')">Терраса</button>
-        <button class="d-sub-btn ${mode==='railing'?'active':''}" onclick="dSetSubMode('railing')">Ограждение</button>`;
-      subToggle.style.display = '';
-    } else {
-      subToggle.style.display = 'none';
-      S.matSubMode = null;
-    }
-  }
-
   // Дефолтный раздел каталога для текущего элемента (сбрасываем явный выбор при
   // смене элемента/подрежима). Для ограждения террасы — раздел «Ограждения террасы».
-  let defSec = (typeof CONSTRUCTION_TO_SECTION !== 'undefined') ? CONSTRUCTION_TO_SECTION[secId] : null;
-  if (secId === 'terrace' && S.matSubMode === 'railing') defSec = 2331; // «Ограждения для террасы из ДПК» (2332 в API — бренд TalverWood)
+  const defSec = (typeof CONSTRUCTION_TO_SECTION !== 'undefined') ? CONSTRUCTION_TO_SECTION[secId] : null;
   S.catSection = defSec || null;
 
   // Палитра цветов у каждого элемента своя: выбранные для прошлого элемента цвета,
   // которых нет в текущей палитре, вычищаем — иначе невидимый выбор фильтрует выдачу.
-  const _palette = new Set(_elementColors(secId, S.matSubMode).map(c => c.id));
+  const _palette = new Set(_elementColors(secId).map(c => c.id));
   S.catColors = new Set([...S.catColors].filter(n => _palette.has(n)));
 
   // Auto-show catalog results (селектор раздела и блок образцов убраны из UI)
   dShowResults();
 }
 
-function dSetSubMode(mode) {
-  S.matSubMode = mode;
-  _dRenderPanelContent();
-}
 
 // Элементы с настилом — материал у каждого свой (S.elementMat[el]).
 // Забор здесь же: его планки текстурируются товаром как настил (остальные части
@@ -939,7 +916,6 @@ function dSetSubMode(mode) {
 const DECK_MAT_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'pier', 'fence'];
 // Текущий активный элемент красится как настил? (Ограждение террасы — нет.)
 function _activeIsDeck() {
-  if (dActiveItem === 'terrace' && S.matSubMode === 'railing') return false;
   return DECK_MAT_ELEMENTS.includes(dActiveItem);
 }
 
@@ -1066,10 +1042,9 @@ function _d3dLoadingRender() {
 // ── Catalog filters ──
 // Набор цветов для текущего элемента проекта (свой на тип, имена/цвета из COLORS.md).
 // id = название цвета (стабилен между типами; tooltip = название из каталога).
-function _elementColors(elId, subMode) {
+function _elementColors(elId) {
   let key = elId;
-  if (elId === 'terrace' && subMode === 'railing') key = 'railing';
-  else if (elId === 'paths' || elId === 'pool_terrace' || elId === 'pier') key = 'terrace';
+  if (elId === 'paths' || elId === 'pool_terrace' || elId === 'pier') key = 'terrace';
   const map = (typeof ELEMENT_COLOR_NAMES !== 'undefined') ? ELEMENT_COLOR_NAMES : {};
   const names = map[key] || map.terrace || [];
   const hexMap = (typeof CATALOG_COLOR_HEX !== 'undefined') ? CATALOG_COLOR_HEX : {};
@@ -1085,7 +1060,7 @@ function _dRenderColorGrid() {
   const isFurniture = (dActiveItem === 'furniture');
   if (sect) sect.style.display = isFurniture ? 'none' : '';
   if (isFurniture) { S.catColors = new Set(); grid.innerHTML = ''; return; }
-  grid.innerHTML = _elementColors(dActiveItem, S.matSubMode).map(c =>
+  grid.innerHTML = _elementColors(dActiveItem).map(c =>
     `<div class="d-color-dot ${S.catColors.has(c.id) ? 'selected' : ''}"
           title="${c.label}" style="background:${c.hex};"
           onclick="dToggleColor('${c.id.replace(/'/g, "\\'")}')"></div>`
@@ -1886,13 +1861,9 @@ function dCloseSummary() {
 // no-op заглушки goTo/updProg/selHouse/tci/renderSec/renderSwatches никого не
 // обслуживали. getActive и ttg остаются: их использует viewer3d и index.html.)
 // ══════════════════════════════════════════════
-// Парные toggle'ы крыльца ↔ террасы: навес и ограждение синхронизируются автоматически.
-const TG_PAIRS = {
-  'porch-canopy':    'terrace-roof',
-  'terrace-roof':    'porch-canopy',
-  'porch-railing':   'terrace-railing',
-  'terrace-railing': 'porch-railing',
-};
+// Парных тумблеров не осталось: ограждение стало отдельным элементом проекта,
+// а навес переехал в его настройки (TODO.md → ОГРАЖДЕНИЯ 2–3).
+const TG_PAIRS = {};
 function ttg(el) {
   el.classList.toggle('on');
   const isOn = el.classList.contains('on');
