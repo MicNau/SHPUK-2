@@ -17,6 +17,7 @@ const D_SIDEBAR_ITEMS = [
   { id: 'fence',         lbl: 'Забор',               hasEditor: true  },
   { id: 'facade',        lbl: 'Отделка фасада',      hasEditor: true  },
   { id: 'beds',          lbl: 'Грядки',              hasEditor: true  },
+  { id: 'railing',       lbl: 'Ограждения террасы',  hasEditor: true  },
   { id: 'furniture',     lbl: 'Садовая мебель',      hasEditor: true  },
   { id: 'pool_terrace',  lbl: 'Терраса у бассейна',  hasEditor: true  },
   { id: 'pier',          lbl: 'Причал',              hasEditor: true  },
@@ -29,7 +30,7 @@ const D_CANVAS_INIT = {
   pool_terrace: () => initSnapCanvas('pool_terrace'),
   paths:        () => initPathsCanvas(),
   pier:         () => initSnapCanvas('pier'),
-  fence:        () => { initSnapCanvas('fence'); _dSyncFenceHeight(); _dRenderFenceTypes(); },
+  fence:        () => { initSnapCanvas('fence'); _dSyncFenceHeight(); },
   beds:         () => initBedsCanvas(),
   facade:       () => initFacadeCanvas(),
   furniture:    () => initFurnitureCanvas(),
@@ -207,74 +208,6 @@ async function _dRenderHousePreviews() {
   done = total; updateProg();
 }
 
-// ── Тип секции забора: превьюшки GLB-модулей ──────────────────────────────
-// Рендерятся тем же способом, что карточки домов: одна off-screen сцена на модуль,
-// снимок → JPEG dataURL. Считаются один раз за сессию (ленивая, при первом открытии
-// редактора забора) и кэшируются.
-const _dFencePreviewCache = {};   // тип → dataURL
-
-function _dRenderFenceTypes() {
-  const host = document.getElementById('d-fence-types');
-  if (!host || typeof FENCE_TYPES === 'undefined') return;
-  const cur = (typeof S !== 'undefined' && S.fenceType) || FENCE_TYPES[0];
-  host.innerHTML = FENCE_TYPES.map((t, i) => `
-    <button class="d-fence-type${t === cur ? ' active' : ''}" id="d-fence-type-${t}"
-            title="Тип ${i + 1}" onclick="dSetFenceType('${t}')">${
-      _dFencePreviewCache[t] ? `<img src="${_dFencePreviewCache[t]}" alt="">` : `Тип ${i + 1}`
-    }</button>`).join('');
-  _dRenderFencePreviews().catch(e => console.warn('[fence-preview]', e));
-}
-
-function dSetFenceType(type) {
-  if (typeof FENCE_TYPES === 'undefined' || !FENCE_TYPES.includes(type)) return;
-  S.fenceType = type;
-  _dRenderFenceTypes();
-  if (typeof onParamChange === 'function') onParamChange();   // пересборка 3D
-}
-
-async function _dRenderFencePreviews() {
-  if (typeof THREE === 'undefined' || typeof FENCE_TYPES === 'undefined') return;
-  const todo = FENCE_TYPES.filter(t => !_dFencePreviewCache[t]);
-  if (!todo.length) return;
-  const W = 152, H = 104;
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
-  renderer.setSize(W, H); renderer.setPixelRatio(1);
-  renderer.outputEncoding = THREE.sRGBEncoding;
-  for (const t of todo) {
-    try {
-      const proto = await ensureFenceModule(t);
-      if (!proto) continue;
-      const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0xf0f0f0);
-      scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-      const sun = new THREE.DirectionalLight(0xffffff, 0.9);
-      sun.position.set(4, 8, 6); scene.add(sun);
-      const inst = proto.clone(true);
-      // Модули идут без материалов — в превью красим «под доску», как в сцене.
-      const wood = new THREE.MeshStandardMaterial({ color: 0x8B7355, roughness: 0.8, metalness: 0.05 });
-      inst.traverse(o => { if (o.isMesh) o.material = wood; });
-      scene.add(inst);
-      const bbox = new THREE.Box3().setFromObject(inst);
-      const size = bbox.getSize(new THREE.Vector3());
-      const center = bbox.getCenter(new THREE.Vector3());
-      const cam = new THREE.PerspectiveCamera(30, W / H, 0.1, 100);
-      const dist = Math.max(size.x, size.y) * 1.5;
-      cam.position.set(center.x + dist * 0.35, center.y + dist * 0.25, center.z + dist);
-      cam.lookAt(center);
-      renderer.render(scene, cam);
-      _dFencePreviewCache[t] = renderer.domElement.toDataURL('image/jpeg', 0.85);
-      const btn = document.getElementById('d-fence-type-' + t);
-      if (btn) btn.innerHTML = `<img src="${_dFencePreviewCache[t]}" alt="">`;
-      scene.traverse(o => { if (o.geometry) o.geometry.dispose(); });
-      wood.dispose();
-      await new Promise(r => setTimeout(r, 0));
-    } catch (e) {
-      console.warn('[fence-preview]', t, e);
-    }
-  }
-  renderer.dispose();
-}
-
 function _dApplyPreviewToCard(typeId, dataURL) {
   const hcp = document.querySelector(`.d-house-card[data-typeid="${typeId}"] .hcp`);
   if (!hcp) return;
@@ -306,7 +239,6 @@ function _dResetAllConfigurations() {
   S.catColors = new Set();
   S.catPrice = null;
   S.catSection = null;
-  S.matSubMode = null;
   S.curSec = 0;
   dConfigured.clear();
   dActiveItem = null;
@@ -736,7 +668,6 @@ function dDeleteItem(secId) {
   // Если удаляемая позиция активна — сбрасываем активность
   if (dActiveItem === secId) {
     dActiveItem = null;
-    S.matSubMode = null;
   }
 
   _dRenderSidebar();
@@ -776,7 +707,6 @@ function dEditItem(secId) {
 function _dSelectItem(secId) {
   dActiveItem = secId;
   dEditorOpen = false;
-  S.matSubMode = null;
 
   // For non-editor items, add to sections on first click
   const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
@@ -852,7 +782,6 @@ function dConfirmCanvas(secId) {
   _dCloseAllCanvases();
 
   dActiveItem = secId;
-  S.matSubMode = null;
   S.curSec = 0;
 
   _dRenderSidebar();
@@ -898,40 +827,20 @@ function _dRenderPanelContent() {
   const panelTitle = document.getElementById('d-panel-title');
   if (panelTitle) panelTitle.textContent = item ? item.lbl : 'Материалы';
 
-  // Terrace sub-mode toggle (Терраса / Ограждение)
-  const subToggle = document.getElementById('d-panel-sub-toggle');
-  if (subToggle) {
-    if (secId === 'terrace') {
-      const mode = S.matSubMode || 'deck';
-      subToggle.innerHTML = `
-        <button class="d-sub-btn ${mode==='deck'?'active':''}" onclick="dSetSubMode('deck')">Терраса</button>
-        <button class="d-sub-btn ${mode==='railing'?'active':''}" onclick="dSetSubMode('railing')">Ограждение</button>`;
-      subToggle.style.display = '';
-    } else {
-      subToggle.style.display = 'none';
-      S.matSubMode = null;
-    }
-  }
-
   // Дефолтный раздел каталога для текущего элемента (сбрасываем явный выбор при
   // смене элемента/подрежима). Для ограждения террасы — раздел «Ограждения террасы».
-  let defSec = (typeof CONSTRUCTION_TO_SECTION !== 'undefined') ? CONSTRUCTION_TO_SECTION[secId] : null;
-  if (secId === 'terrace' && S.matSubMode === 'railing') defSec = 2331; // «Ограждения для террасы из ДПК» (2332 в API — бренд TalverWood)
+  const defSec = (typeof CONSTRUCTION_TO_SECTION !== 'undefined') ? CONSTRUCTION_TO_SECTION[secId] : null;
   S.catSection = defSec || null;
 
   // Палитра цветов у каждого элемента своя: выбранные для прошлого элемента цвета,
   // которых нет в текущей палитре, вычищаем — иначе невидимый выбор фильтрует выдачу.
-  const _palette = new Set(_elementColors(secId, S.matSubMode).map(c => c.id));
+  const _palette = new Set(_elementColors(secId).map(c => c.id));
   S.catColors = new Set([...S.catColors].filter(n => _palette.has(n)));
 
   // Auto-show catalog results (селектор раздела и блок образцов убраны из UI)
   dShowResults();
 }
 
-function dSetSubMode(mode) {
-  S.matSubMode = mode;
-  _dRenderPanelContent();
-}
 
 // Элементы с настилом — материал у каждого свой (S.elementMat[el]).
 // Забор здесь же: его планки текстурируются товаром как настил (остальные части
@@ -939,7 +848,6 @@ function dSetSubMode(mode) {
 const DECK_MAT_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'pier', 'fence'];
 // Текущий активный элемент красится как настил? (Ограждение террасы — нет.)
 function _activeIsDeck() {
-  if (dActiveItem === 'terrace' && S.matSubMode === 'railing') return false;
   return DECK_MAT_ELEMENTS.includes(dActiveItem);
 }
 
@@ -969,10 +877,11 @@ function _applySampleToActive(sample) {
   if (_activeIsDeck()) {
     // productId/name сохраняем рядом с текстурами: по ним расчёт террасы на бэкенде
     // узнаёт выбранную доску (_deckingBoardProductId), 3D-слой их игнорирует.
-    // colorName — имя цвета товара из каталога: по нему забор красит непланочные
-    // части «под доску» (_fenceFrameColor в viewer3d-builders.js).
+    // colorName — имя цвета товара из каталога (пригождается 3D-слою).
     const meta = { productId: sample.id || null, name: sample.name || '',
-                   colorName: sample.colorName || '' };
+                   colorName: sample.colorName || '',
+                   // modelUrl: у забора по нему берётся GLB товара (TODO.md → ЗАБОР 2).
+                   modelUrl: sample.modelUrl || '' };
     S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures, ...meta }
                               : (sample.color ? { color: sample.color, ...meta } : null);
     // Грядки: высота борта — свойство товара (150/200/225/270/300 мм, см. TODO.md),
@@ -1066,10 +975,9 @@ function _d3dLoadingRender() {
 // ── Catalog filters ──
 // Набор цветов для текущего элемента проекта (свой на тип, имена/цвета из COLORS.md).
 // id = название цвета (стабилен между типами; tooltip = название из каталога).
-function _elementColors(elId, subMode) {
+function _elementColors(elId) {
   let key = elId;
-  if (elId === 'terrace' && subMode === 'railing') key = 'railing';
-  else if (elId === 'paths' || elId === 'pool_terrace' || elId === 'pier') key = 'terrace';
+  if (elId === 'paths' || elId === 'pool_terrace' || elId === 'pier') key = 'terrace';
   const map = (typeof ELEMENT_COLOR_NAMES !== 'undefined') ? ELEMENT_COLOR_NAMES : {};
   const names = map[key] || map.terrace || [];
   const hexMap = (typeof CATALOG_COLOR_HEX !== 'undefined') ? CATALOG_COLOR_HEX : {};
@@ -1085,7 +993,7 @@ function _dRenderColorGrid() {
   const isFurniture = (dActiveItem === 'furniture');
   if (sect) sect.style.display = isFurniture ? 'none' : '';
   if (isFurniture) { S.catColors = new Set(); grid.innerHTML = ''; return; }
-  grid.innerHTML = _elementColors(dActiveItem, S.matSubMode).map(c =>
+  grid.innerHTML = _elementColors(dActiveItem).map(c =>
     `<div class="d-color-dot ${S.catColors.has(c.id) ? 'selected' : ''}"
           title="${c.label}" style="background:${c.hex};"
           onclick="dToggleColor('${c.id.replace(/'/g, "\\'")}')"></div>`
@@ -1886,13 +1794,9 @@ function dCloseSummary() {
 // no-op заглушки goTo/updProg/selHouse/tci/renderSec/renderSwatches никого не
 // обслуживали. getActive и ttg остаются: их использует viewer3d и index.html.)
 // ══════════════════════════════════════════════
-// Парные toggle'ы крыльца ↔ террасы: навес и ограждение синхронизируются автоматически.
-const TG_PAIRS = {
-  'porch-canopy':    'terrace-roof',
-  'terrace-roof':    'porch-canopy',
-  'porch-railing':   'terrace-railing',
-  'terrace-railing': 'porch-railing',
-};
+// Парных тумблеров не осталось: ограждение стало отдельным элементом проекта,
+// а навес переехал в его настройки (TODO.md → ОГРАЖДЕНИЯ 2–3).
+const TG_PAIRS = {};
 function ttg(el) {
   el.classList.toggle('on');
   const isOn = el.classList.contains('on');

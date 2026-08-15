@@ -105,6 +105,7 @@ const CATALOG_SECTIONS = [
 const CONSTRUCTION_TO_SECTION = {
   terrace: 2314, paths: 2314, pool_terrace: 2314, pier: 2314,
   steps: 2330, beds: 2357, fence: 2348, facade: 2680, furniture: 2430,
+  railing: 2331,   // «Ограждения для террасы из ДПК» — отдельный элемент проекта
 };
 
 // Тег раздела для выборки ТЕКСТУРИРОВАННЫХ товаров. Превью и 3D-текстуры (texture_urls)
@@ -220,7 +221,9 @@ const S = {
   sections: [],
   // pool_terrace/paths/pier/fence — polygon-режим (массив точек).
   // terrace — multi-rect (см. terraceRects).
-  pts: { pool_terrace:[], paths:[], pier:[], fence:[] },
+  // railing — ограждение террасы: ломаная ВНУТРИ террасы (TODO.md → ОГРАЖДЕНИЯ),
+  // рисуется как забор и строится теми же секциями.
+  pts: { pool_terrace:[], paths:[], pier:[], fence:[], railing:[] },
   // Терраса/Крыльцо: массив прямоугольников (boolean union в 3D).
   // Все координаты нормированные 0..1 (как в canvas).
   terraceRects: [],
@@ -241,9 +244,6 @@ const S = {
   // null — «вровень с фундаментом» (значение по умолчанию до первой настройки).
   terraceH: null,
   fenceH: 1.5,       // высота полотна забора в метрах (1.5 | 1.9)
-  // Тип секции забора: имя GLB-модуля assets/houses/modules/fences/mod_fence_<тип>.glb.
-  // Выбирается превьюшками в редакторе забора (FENCE_TYPES в viewer3d-builders.js).
-  fenceType: '001',
   mats: {},
   // Материал настила по элементу (терраса/ступени/дорожки/грядки/бассейн/причал):
   // elementId -> { textures } | { color }. Применяется независимо в buildScene3d.
@@ -251,14 +251,15 @@ const S = {
   samples: [],    // [{id, name, color}] — накопленные образцы
   activeSample: null, // {id, name, color} — текущий выбранный для примерки
   curSec: 0,
-  matSubMode: null,    // 'railing' when editing terrace railing material
+  // matSubMode удалён вместе с переключателем ТЕРРАСА/ОГРАЖДЕНИЕ в каталоге:
+  // ограждение — отдельный элемент проекта со своим разделом каталога.
   catColors: new Set(),
   catPrice: null,
   catSection: null,    // выбранный раздел каталога (bitrix_id) или null = дефолт по элементу
   catShowResults: false,
   estimate: {},        // elementId -> { id, name, price } — выбранный в смету товар по элементу
-  // Тумблеры canvas-редакторов (id из data-id → bool): 'terrace-railing',
-  // 'terrace-roof', 'steps-railing', 'steps-sheathing'… Зеркалируются из DOM
+  // Тумблеры canvas-редакторов (id из data-id → bool): 'railing-roof',
+  // 'steps-railing', 'steps-sheathing'… Зеркалируются из DOM
   // в ttg/_dCacheToggleDefaults — 3D-слой читает ТОЛЬКО отсюда (tgOn), не DOM.
   toggles: {},
   pathWidth: 120,      // ширина дорожки, см (инпут v-paths-width зеркалится сюда)

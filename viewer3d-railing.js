@@ -280,15 +280,18 @@ function _insetOrthoPolygon(poly, d) {
 // из РЕАЛЬНОЙ плиты навеса рейкастом (`canopyUndersideY`), а не аналитики: на стыках блоков плита
 // обрезана по диагонали, аналитика (max по bbox) промахивалась и столб протыкал навес.
 // worldOutline — орто-полигон периметра всей террасы (не инсетнутый); canopyUndersideY(x,z)->Y|null.
-function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopyUndersideY){
+// segsOverride — готовые сегменты {ax,az,bx,bz}: так строится ограждение по
+// НАРИСОВАННОЙ ломаной (раздел «Ограждения»). Без него сегменты считаются по
+// контуру террасы, как раньше (инсет + пропуски у стен дома и лестницы).
+function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopyUndersideY, segsOverride){
   if (!_railingCache || !_railingCache.rails || !_railingCache.post) return;  // GLB ещё не загружен
-  if (!worldOutline || worldOutline.length < 3) return;
+  if (!segsOverride && (!worldOutline || worldOutline.length < 3)) return;
   const up = new THREE.Vector3(0, 1, 0);
   const railMat = new THREE.MeshStandardMaterial({ color: PORCH_COLUMN_COLOR, roughness: 0.72, metalness: 0.04 });
   railMat.name = 'mat_railing';
 
-  const insetPts = _insetOrthoPolygon(worldOutline, RAIL_INSET);
-  const segs = terracePerimeterSegments(insetPts, houseL, houseW, []);
+  const segs = segsOverride
+    || terracePerimeterSegments(_insetOrthoPolygon(worldOutline, RAIL_INSET), houseL, houseW, []);
   const canopyOn = !!canopyUndersideY;
 
   function placeGeo(geo, m4) {
@@ -606,3 +609,26 @@ function buildTerraceCanopies(parent, M, rectPolys, deckHeight, houseL, houseW) 
   }
 }
 
+
+
+// Ограждение по ломаной, нарисованной пользователем (раздел «Ограждения»):
+// логика та же, что у забора, но в пределах террасы. Ни инсета, ни пропусков у
+// стен и лестницы здесь нет — где ставить перила, решает пользователь.
+function buildRailingLine3d(parent, pts, deckHeight, houseL, houseW, canopyUndersideY) {
+  const segments = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [pts.filter(p => !p.break)];
+  _railPostReg = [];                      // общий реестр столбов: дедуп на стыках линий
+  for (const seg of segments) {
+    if (!seg || seg.length < 2) continue;
+    const w = canvasToWorld(seg, houseL, houseW);
+    const segs = [];
+    for (let i = 0; i < w.length - 1; i++) {
+      const a = w[i], b = w[i + 1];
+      if (Math.hypot(b.x - a.x, b.z - a.z) > 0.05) segs.push({ ax: a.x, az: a.z, bx: b.x, bz: b.z });
+    }
+    if (!segs.length) continue;
+    try {
+      buildRailing3d(parent, null, deckHeight, houseL, houseW, canopyUndersideY, segs);
+    } catch (e) { console.error('[buildRailingLine3d]', e); }
+  }
+  _railPostReg = null;
+}
