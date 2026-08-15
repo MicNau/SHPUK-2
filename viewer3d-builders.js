@@ -1622,149 +1622,102 @@ function buildPaths3d(parent, M, pts, houseL, houseW) {
 }
 
 // ══════════════════════════════════════════════
-// ЗАБОР — сборка из GLB-модулей (assets/houses/modules/fences/mod_fence_00N.glb)
+// ЗАБОР
 //
-// Устройство модуля (проверено по трём файлам, все три совпадают по габаритам):
-//   fence_post    — столб, x ∈ [−0.114, 0.114] (центр на x=0), y ∈ [0, 1.9];
-//   Fence_panels  — ПЛАНКИ, x ∈ [0, 2], y ∈ [0.139, 1.789] — единственная часть,
-//                   которая ТЕКСТУРИРУЕТСЯ товаром (TODO.md → ЗАБОРЫ);
-//   fence_bottom / fence_top — нижняя и верхняя лаги, x ∈ [0, 2];
-//   fence_middle  — средний стояк (только 002/003), x ≈ 1.
-// Шаг секции — 2 м: столб стоит в начале, полотно уходит в +X до следующего столба.
-// Локальный +X кладём вдоль пролёта, поэтому в конце ломаной нужен добавочный столб.
+// Модель забора приходит С СЕРВЕРА вместе с текстурой — как у садовой мебели
+// (TODO.md → ЗАБОР 2, 3): выбранный в каталоге товар несёт `glb_file_url`, его
+// материалы используются как есть. Пока таких товаров нет, забор строится
+// в УСЛОВНОМ виде: столбы + полотно нейтрального цвета, чтобы разметка была
+// видна в сцене и считалась в смете, но никто не принимал её за реальный профиль.
 // ══════════════════════════════════════════════
-const FENCE_SECTION_W  = 2.0;    // шаг секции по осям столбов (нативный для модулей), м
-const FENCE_NATIVE_H   = 1.9;    // высота столба в модуле, м — база для масштаба по S.fenceH
-const FENCE_PANEL_NAME = 'Fence_panels';   // имя части с планками (регистр как в GLB)
+const FENCE_SECTION_W  = 2.0;    // шаг секции по осям столбов, м
+const FENCE_NATIVE_H   = 1.9;    // высота секции модели-образца, м (база масштаба по S.fenceH)
+const FENCE_POST_W     = 0.10;   // сечение столба условного забора, м
+const FENCE_PANEL_T    = 0.04;   // толщина полотна условного забора, м
+const FENCE_GROUND_GAP = 0.05;   // просвет под полотном, м
+const FENCE_SCHEMATIC_COLOR = 0xb0a89c;   // нейтральный «условный» цвет
 
-const FENCE_TYPES = ['001', '002', '003'];
-const _fenceCache = {};          // тип → THREE.Group (прототип) | null (не загрузился)
-const _fenceLoading = {};        // тип → Promise
+const _fenceCache = {};          // url → THREE.Group (прототип) | null (не загрузилась)
+const _fenceLoading = {};        // url → Promise
 
-function fenceModuleUrl(type) {
-  return `assets/houses/modules/fences/mod_fence_${type}.glb`;
-}
-
-function ensureFenceModule(type) {
-  if (_fenceCache[type] !== undefined) return Promise.resolve(_fenceCache[type]);
-  if (_fenceLoading[type]) return _fenceLoading[type];
-  _fenceLoading[type] = new Promise(resolve => {
-    if (typeof THREE === 'undefined' || !THREE.GLTFLoader) { resolve(null); return; }
-    new THREE.GLTFLoader().load(fenceModuleUrl(type),
-      gltf => { _fenceCache[type] = gltf.scene; _fenceLoading[type] = null; resolve(gltf.scene); },
-      undefined,
-      err => { console.warn('[fence] не загрузился модуль', type, err);
-               _fenceCache[type] = null; _fenceLoading[type] = null; resolve(null); });
-  });
-  return _fenceLoading[type];
-}
-
-function _fenceType() {
-  const t = (typeof S !== 'undefined' && S.fenceType) || FENCE_TYPES[0];
-  return FENCE_TYPES.includes(t) ? t : FENCE_TYPES[0];
-}
-
-// Материал непланочных частей: сплошной цвет, близкий к доске. Источник цвета —
-// поле color товара (имена совпадают с CATALOG_COLOR_HEX), иначе средний цвет
-// текстуры, иначе нейтральное дерево. Текстуру не вешаем: по TODO её носят
-// только планки.
-const FENCE_FRAME_FALLBACK = 0x8B7355;
-
-function _avgTextureColor(tex) {
-  const img = tex && tex.image;
-  if (!img || !img.width) return null;
-  try {
-    const c = document.createElement('canvas');
-    c.width = c.height = 8;
-    const ctx = c.getContext('2d');
-    ctx.drawImage(img, 0, 0, 8, 8);
-    const d = ctx.getImageData(0, 0, 8, 8).data;   // tainted canvas → SecurityError
-    let r = 0, g = 0, b = 0;
-    for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
-    const n = d.length / 4;
-    return (Math.round(r / n) << 16) | (Math.round(g / n) << 8) | Math.round(b / n);
-  } catch (e) {
-    return null;   // картинка с другого origin без CORS — молча уходим на фолбэк
-  }
-}
-
-function _fenceFrameColor(panelMat) {
+// URL модели забора из выбранного товара (то же поле, что у мебели).
+function fenceModelUrl() {
   const el = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat.fence : null;
-  const name = el && el.colorName;
-  if (name && typeof CATALOG_COLOR_HEX !== 'undefined' && CATALOG_COLOR_HEX[name]) {
-    return new THREE.Color(CATALOG_COLOR_HEX[name]).getHex();
-  }
-  if (panelMat && panelMat.map) {
-    const avg = _avgTextureColor(panelMat.map);
-    if (avg != null) return avg;
-  }
-  if (panelMat && panelMat.color && !panelMat.map) return panelMat.color.getHex();
-  return FENCE_FRAME_FALLBACK;
+  return (el && (el.modelUrl || el.glbFileUrl)) || '';
 }
 
-// ⚠ У частей модуля СВОЙ поворот: вдоль пролёта (родительский +X) смотрит локальная
-// Z у планок и лаг, Y у среднего стояка и только у столба — X. Масштаб применяется ДО
-// поворота (M = T·R·S), поэтому тянуть надо ту локальную ось, которая ПОСЛЕ поворота
-// легла вдоль пролёта. Наивное o.scale.x сжимало планки по ВЫСОТЕ, а по длине они
-// оставались 2 м и вылезали за угол (та же грабля, что с центральной секцией водостока).
-const _FENCE_AXIS_X = new THREE.Vector3(1, 0, 0);
-function _localAxisAlongSpan(o) {
-  const v = _FENCE_AXIS_X.clone().applyQuaternion(o.quaternion.clone().conjugate());
-  const a = [Math.abs(v.x), Math.abs(v.y), Math.abs(v.z)];
-  return a.indexOf(Math.max(...a));
+function ensureFenceModel(url, label) {
+  if (_fenceCache[url] !== undefined) return Promise.resolve(_fenceCache[url]);
+  if (_fenceLoading[url]) return _fenceLoading[url];
+  const done = () => { if (typeof d3dLoadingClear === 'function') d3dLoadingClear(url); };
+  const show = pct => { if (typeof d3dLoadingSet === 'function') d3dLoadingSet(url, label || 'забор', pct); };
+  _fenceLoading[url] = new Promise(resolve => {
+    if (typeof THREE === 'undefined' || !THREE.GLTFLoader) { resolve(null); return; }
+    show(null);
+    new THREE.GLTFLoader().load(url,
+      gltf => { _fenceCache[url] = gltf.scene; _fenceLoading[url] = null; done(); resolve(gltf.scene); },
+      ev => { show(ev && ev.total > 0 ? Math.min(100, Math.round(ev.loaded / ev.total * 100)) : null); },
+      err => { console.warn('[fence] не загрузилась модель', url, err);
+               _fenceCache[url] = null; _fenceLoading[url] = null; done(); resolve(null); });
+  });
+  return _fenceLoading[url];
 }
 
-// Ставит одну секцию: клон модуля, повёрнутый локальным +X вдоль пролёта.
-// spanW < FENCE_SECTION_W → полотно и лаги ужимаются вдоль пролёта (столб и средний
-// стояк сохраняют сечение — им меняется только положение).
-function _placeFenceSection(proto, group, x, z, angle, spanW, sy, panelMat, frameMat, withPost) {
+// Секция условного забора: столб в начале + полотно до следующего столба.
+function _fenceSchematicSection(group, x, z, angle, spanW, panelH, mat, withPost) {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = angle;
+  if (withPost) {
+    const postH = FENCE_GROUND_GAP + panelH + 0.10;
+    const post = new THREE.Mesh(new THREE.BoxGeometry(FENCE_POST_W, postH, FENCE_POST_W), mat);
+    post.position.set(0, postH / 2, 0);
+    post.castShadow = post.receiveShadow = true;
+    g.add(post);
+  }
+  const panelLen = Math.max(0.05, spanW - FENCE_POST_W);
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(panelLen, panelH, FENCE_PANEL_T), mat);
+  panel.position.set(spanW / 2, FENCE_GROUND_GAP + panelH / 2, 0);
+  panel.castShadow = panel.receiveShadow = true;
+  g.add(panel);
+  threeState.fenceMeshes.push(panel);
+  group.add(g);
+}
+
+// Секция из модели товара: клон, растянутый по длине пролёта. Материалы — свои,
+// из GLB (текстура приходит вместе с моделью), поэтому мы их не трогаем.
+function _fenceModelSection(proto, group, x, z, angle, spanW, sy) {
   const inst = proto.clone(true);
   inst.position.set(x, 0, z);
   inst.rotation.y = angle;
-  inst.scale.set(1, sy, 1);
-  const kx = spanW / FENCE_SECTION_W;
-  inst.traverse(o => {
-    if (!o.isMesh) return;
-    const nm = o.name || '';
-    if (nm === 'fence_post') {
-      if (!withPost) { o.visible = false; return; }
-    } else if (kx !== 1) {
-      // position — в системе родителя, поэтому по X независимо от поворота части.
-      o.position.x *= kx;
-      if (nm !== 'fence_middle') {
-        const ax = _localAxisAlongSpan(o);
-        o.scale.setComponent(ax, o.scale.getComponent(ax) * kx);
-      }
-    }
-    o.material = (nm === FENCE_PANEL_NAME) ? panelMat : frameMat;
-    o.castShadow = o.receiveShadow = true;
-    if (nm === FENCE_PANEL_NAME) threeState.fenceMeshes.push(o);
-  });
+  inst.scale.set(spanW / FENCE_SECTION_W, sy, 1);
+  inst.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; threeState.fenceMeshes.push(o); } });
   group.add(inst);
 }
 
-// Забор по ломаной: пролёты делятся на секции по 2 м + добор; столб в начале каждой
-// секции, замыкающий — в конце пролёта (дедуп на стыках, чтобы на углах не было двух).
+// Забор по ломаной: пролёты делятся на секции РАВНОЙ ширины (округление длины на
+// шаг секции) — «целые + остаток» оставляли у углов узкий огрызок.
 function buildFence3d(parent, M, pts, houseL, houseW) {
   const realPts = pts.filter(p => !p.break);
   if (realPts.length < 2) return;
-  const type = _fenceType();
-  const proto = _fenceCache[type];
-  if (proto === undefined) {
-    ensureFenceModule(type).then(() => { if (threeState) buildScene3d(); });
-    return;
+
+  const url = fenceModelUrl();
+  let proto = null;
+  if (url) {
+    if (_fenceCache[url] === undefined) {
+      ensureFenceModel(url).then(() => { if (threeState) buildScene3d(); });
+    } else {
+      proto = _fenceCache[url];          // null → модель не загрузилась, строим условный
+    }
   }
-  if (!proto) return;                       // модуль не загрузился — забор не строим
 
   const fenceGroup = new THREE.Group();
-  const sy = ((typeof S !== 'undefined' && S.fenceH) ? S.fenceH : FENCE_NATIVE_H) / FENCE_NATIVE_H;
-  // Планки красит/текстурит выбранный товар (deck-материал элемента), рама — сплошной цвет.
-  const panelMat = M.deck.clone();
-  const frameMat = new THREE.MeshStandardMaterial({
-    color: _fenceFrameColor(panelMat), roughness: 0.8, metalness: 0.05,
+  const panelH = (typeof S !== 'undefined' && S.fenceH) ? S.fenceH : 1.5;
+  const sy = panelH / FENCE_NATIVE_H;
+  const schemMat = new THREE.MeshStandardMaterial({
+    color: FENCE_SCHEMATIC_COLOR, roughness: 0.85, metalness: 0.05,
   });
 
-  // Реестр столбов: на стыке пролётов и на углах столб общий.
   const postSet = new Set();
   const postKey = (x, z) => `${x.toFixed(2)},${z.toFixed(2)}`;
 
@@ -1778,40 +1731,28 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
       const segLen = Math.hypot(dx, dz);
       if (segLen < 0.05) continue;
       const ux = dx / segLen, uz = dz / segLen;
-      // Локальный +X модуля должен смотреть вдоль (ux, uz): поворот вокруг Y.
-      const angle = Math.atan2(ux, uz) - Math.PI / 2;
-
-      // Секции РАВНОЙ ширины: длина пролёта редко кратна 2 м, и «целые + огрызок»
-      // прижимали к углу узкую секцию со сплющенными планками. Округление к ближайшему
-      // числу секций держит ширину в пределах ~1.5–2 м, т.е. планки почти не искажаются.
+      const angle = Math.atan2(ux, uz) - Math.PI / 2;   // локальный +X вдоль пролёта
       const nSec = Math.max(1, Math.round(segLen / FENCE_SECTION_W));
       const secW = segLen / nSec;
 
-      let dist = 0;
       for (let k = 0; k < nSec; k++) {
-        const w = secW;
+        const dist = k * secW;
         const x = a.x + ux * dist, z = a.z + uz * dist;
-        const k = postKey(x, z);
-        const withPost = !postSet.has(k);
-        postSet.add(k);
-        _placeFenceSection(proto, fenceGroup, x, z, angle, w, sy, panelMat, frameMat, withPost);
-        dist += w;
+        const key = postKey(x, z);
+        const withPost = !postSet.has(key);
+        postSet.add(key);
+        if (proto) _fenceModelSection(proto, fenceGroup, x, z, angle, secW, sy);
+        else       _fenceSchematicSection(fenceGroup, x, z, angle, secW, panelH, schemMat, withPost);
       }
-      // Замыкающий столб пролёта — секцией без полотна (только столб).
+      // Замыкающий столб пролёта (только у условного забора: у модели столб свой).
       const ex = a.x + ux * segLen, ez = a.z + uz * segLen;
-      if (!postSet.has(postKey(ex, ez))) {
+      if (!proto && !postSet.has(postKey(ex, ez))) {
         postSet.add(postKey(ex, ez));
-        const capInst = proto.clone(true);
-        capInst.position.set(ex, 0, ez);
-        capInst.rotation.y = angle;
-        capInst.scale.set(1, sy, 1);
-        capInst.traverse(o => {
-          if (!o.isMesh) return;
-          if (o.name !== 'fence_post') { o.visible = false; return; }
-          o.material = frameMat;
-          o.castShadow = o.receiveShadow = true;
-        });
-        fenceGroup.add(capInst);
+        const postH = FENCE_GROUND_GAP + panelH + 0.10;
+        const post = new THREE.Mesh(new THREE.BoxGeometry(FENCE_POST_W, postH, FENCE_POST_W), schemMat);
+        post.position.set(ex, postH / 2, ez);
+        post.castShadow = post.receiveShadow = true;
+        fenceGroup.add(post);
       }
     }
   }
