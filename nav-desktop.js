@@ -906,6 +906,24 @@ function _activeIsDeck() {
 // Применяет образец (текстуры/цвет) к АКТИВНОМУ элементу. Деко-элементы — через
 // S.elementMat[el] + пересборку (каждый независимо); прочие (фасад/забор/ограждение)
 // — прежним способом (цвет live / глобально).
+// Высота борта грядки (м) из товара. Каталог различает грядки по высоте доски —
+// AIWood 150/200/270/300 мм, NauticPrime 150/225/300 мм (GARDEN_BEDS.md), и выбор
+// должен быть виден в 3D. Явного поля у товара нет, поэтому читаем из названия:
+// ищем ТОЛЬКО типовые значения рядом с «мм», чтобы не поймать длину («3000 мм»)
+// или сечение доски. Не нашли — null, высота остаётся прежней.
+const BED_BOARD_HEIGHTS_MM = [150, 200, 225, 270, 300];
+
+function _bedHeightFromProduct(sample) {
+  if (sample && typeof sample.bedHeightMm === 'number') return sample.bedHeightMm / 1000;
+  const text = [sample && sample.name, sample && sample.previewText].filter(Boolean).join(' ');
+  // \b после «мм» не работает: в ASCII-семантике кириллица — не словесный символ,
+  // поэтому конец слова проверяем явным «дальше не буква и не цифра».
+  const re = new RegExp(
+    `(?:^|[^\\d])(${BED_BOARD_HEIGHTS_MM.join('|')})\\s*(?:мм|mm)(?![а-яёa-z0-9])`, 'i');
+  const m = re.exec(text);
+  return m ? parseInt(m[1], 10) / 1000 : null;
+}
+
 function _applySampleToActive(sample) {
   S.activeSample = sample;                 // для подсветки образца
   _setEstimateForActive(sample);           // смета обновляется вместе с материалом
@@ -918,6 +936,12 @@ function _applySampleToActive(sample) {
                    colorName: sample.colorName || '' };
     S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures, ...meta }
                               : (sample.color ? { color: sample.color, ...meta } : null);
+    // Грядки: высота борта — свойство товара (150/200/225/270/300 мм, см. TODO.md),
+    // поэтому забираем её из названия и отдаём в 3D.
+    if (dActiveItem === 'beds') {
+      const h = _bedHeightFromProduct(sample);
+      if (h) S.bedH = h;
+    }
     if (typeof buildScene3d === 'function') buildScene3d();
   } else if (dActiveItem === 'furniture') {
     // Мебель: товар назначается ТОЧКЕ плана — выбранной, иначе первой свободной
