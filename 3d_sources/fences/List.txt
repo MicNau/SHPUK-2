@@ -1,0 +1,17 @@
+mod_fence_001.glb
+https://outdoor-mebel.ru/zabory-iz-dpk/kombinirovannaya_zabornaya_sistema_3_1750kh1900mm_jimbaran_stolby_v_komplekte/
+https://outdoor-mebel.ru/zabory-iz-dpk/zabor_iz_shpuntovannoy_doski_dpk_glukhoy/
+
+mod_fence_002.glb
+https://outdoor-mebel.ru/zabory-iz-dpk/zabornaya_sektsiya_aistone_veernaya_metallicheskaya_dlya_dosok_dpk_mpk/
+
+mod_fence_003.glb
+https://outdoor-mebel.ru/zabory-iz-dpk/zabornaya_sektsiya_aistone_metallicheskaya_dlya_dosok_dpk_mpk_/
+https://outdoor-mebel.ru/zabory-iz-dpk/zabor_iz_doski_dpk_gorizontalnyy_provetrivaemyy/
+
+mod_fence_004.glb
+https://outdoor-mebel.ru/zabory-iz-dpk/zabor_iz_doski_dpk_vertikalnyy_ventiliruemyy_hilst_sektsiya_2_2_m/
+https://outdoor-mebel.ru/shtaketnik-iz-dpk/zabor_iz_dpk_vertikalnyy/
+
+mod_fence_005.glb
+https://outdoor-mebel.ru/ograzhdeniya-dlya-terrasy-iz-dpk/pletenye-ograzhdeniya-deckwood/pletenoe_ograzhdenie_deckwood_/
