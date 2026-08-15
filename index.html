@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=11">
+<link rel="stylesheet" href="styles-desktop.css?v=12">
 </head>
 <body>
 
@@ -121,6 +121,12 @@
           </div>
           <div class="d-canvas-area" id="cw-terrace" style="cursor:default;"><canvas id="cv-terrace"></canvas></div>
           <div class="d-canvas-footer">
+            <div class="bed-h-row">
+              <span class="bed-h-lbl">Высота настила:</span>
+              <input class="d-terrace-h" type="number" id="v-terrace-h" min="10" step="5"
+                     oninput="dSetTerraceHeight(this.value)">
+              <span class="bed-h-unit" id="d-terrace-h-hint">см</span>
+            </div>
             <div class="tg on" onclick="ttg(this)" data-id="terrace-railing"><span class="tg-txt">Ограждение</span><div class="tg-ind"></div></div>
             <div class="tg on" onclick="ttg(this)" data-id="terrace-roof"><span class="tg-txt">Навес</span><div class="tg-ind"></div></div>
             <div class="d-canvas-actions">
@@ -361,8 +367,8 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=36"></script>
-<script src="canvas.js?v=35"></script>
+<script src="state.js?v=37"></script>
+<script src="canvas.js?v=36"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=82"></script>
 <!-- Каталожный API: домен выбирается по хосту.
@@ -379,11 +385,11 @@
 <script src="ResourceManager.js?v=5"></script>
 <!-- 3D viewer: core (сцена/материалы/оркестратор) → builders (конструкции) →
      railing (ограждение/навесы). Общая глобальная область, порядок важен. -->
-<script src="viewer3d-core.js?v=123"></script>
+<script src="viewer3d-core.js?v=124"></script>
 <script src="viewer3d-builders.js?v=9"></script>
 <script src="viewer3d-railing.js?v=3"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=63"></script>
+<script src="nav-desktop.js?v=64"></script>
 </body>
 </html>

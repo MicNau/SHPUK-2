@@ -691,6 +691,7 @@ function _resolveDeckMat(baseDeck, el) {
 const HOUSE_ROOF_TILE  = UV_TILE;
 const HOUSE_WALL_TILE  = UV_TILE;
 const HOUSE_BASE_TILE  = UV_TILE;
+const TERRACE_MIN_H = 0.10;   // минимальная высота настила террасы, м (TODO.md → ТЕРРАСА)
 const HOUSE_WOOD_COLOR = 0x4a2f18; // «дерево» — вариант рам/дверей по умолчанию (S.frameMat = 'wood')
 
 // Текстурный набор для материала дома: {color, map, normalMap, roughnessMap}.
@@ -970,6 +971,11 @@ function buildScene3d() {
   let houseL = houseW * RATIO;
   const wh     = wallH;
   const bh     = foundH;
+  // Уровень настила террасы: настраивается пользователем (S.terraceH, TODO.md → ТЕРРАСА)
+  // в пределах 0.10 м … высота фундамента; без дома — прежние 0.35 м. По этому уровню
+  // строятся настил, ограждение, навес, ступени и посадка мебели.
+  const terraceLevel = isNoHouse ? 0.35
+    : Math.min(bh, Math.max(TERRACE_MIN_H, (typeof S.terraceH === 'number') ? S.terraceH : bh));
 
   // Если дескриптор уже загружен — переопределяем houseL/houseW реальными
   // размерами bbox полигона (для крестообразных, T-, L-, П-форм). Также
@@ -1052,7 +1058,7 @@ function buildScene3d() {
   const terraceRectPolys = _terraceRectsToPolygons();
   if (S.sections.includes('terrace')) {
     M.deck = _resolveDeckMat(_baseDeck, 'terrace');
-    const deckH = (isNoHouse ? 0.35 : bh) - 0.01;
+    const deckH = terraceLevel - 0.01;
     const E = 0.04;   // допуск (м)
     // Направление досок блока — вдоль БЛИЖАЙШЕЙ стены дома (стабильно, не зависит от
     // разбивки на блоки): переднее/заднее крыло → доски вдоль X, боковое → вдоль Z.
@@ -1134,7 +1140,7 @@ function buildScene3d() {
 
   if (S.sections.includes('pool_terrace') && S.pts.pool_terrace.length >= 3) {
     M.deck = _resolveDeckMat(_baseDeck, 'pool_terrace');
-    buildTerrace3d(houseGroup, M, S.pts.pool_terrace, (isNoHouse ? 0.35 : bh) - 0.01, houseL, houseW, 'deckMeshes');
+    buildTerrace3d(houseGroup, M, S.pts.pool_terrace, terraceLevel - 0.01, houseL, houseW, 'deckMeshes');
   }
 
   if (S.sections.includes('pier') && S.pts.pier.length >= 3) {
@@ -1158,7 +1164,7 @@ function buildScene3d() {
     M.deck = _resolveDeckMat(_baseDeck, 'steps');
     try {
       // Подкладку строит сам buildSteps3d по реальному footprint лестницы.
-      buildSteps3d(houseGroup, M, S.steps, isNoHouse ? 0.35 : bh, houseL, houseW);
+      buildSteps3d(houseGroup, M, S.steps, terraceLevel, houseL, houseW);
     } catch (e) { console.error('[buildSteps3d]', e); }
   }
 
@@ -1188,7 +1194,7 @@ function buildScene3d() {
   // точкой: настил террасы, если точка внутри террасного блока (или причала/зоны
   // бассейна), иначе земля — мебель на террасе не проваливается под настил.
   if (S.sections.includes('furniture') && S.furniture && S.furniture.length) {
-    const deckY = (isNoHouse ? 0.35 : bh) - 0.01;
+    const deckY = terraceLevel - 0.01;
     const inPoly = (x, z, pts) => {                 // pts — мировые {x,z}
       let inside = false;
       for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
@@ -1222,7 +1228,7 @@ function buildScene3d() {
   const terraceCanopyOn = tgOn('terrace-roof');
   if (terraceCanopyOn && S.sections.includes('terrace')) {
     try {
-      buildTerraceCanopies(houseGroup, M, terraceRectPolys, isNoHouse ? 0.35 : bh, houseL, houseW);
+      buildTerraceCanopies(houseGroup, M, terraceRectPolys, terraceLevel, houseL, houseW);
     } catch (e) { console.error('[buildTerraceCanopies]', e); }
   }
 
@@ -1236,7 +1242,7 @@ function buildScene3d() {
         houseGroup.updateMatrixWorld(true);          // плиты навеса только что добавлены
         const _rc = new THREE.Raycaster();
         const _down = new THREE.Vector3(0, -1, 0);
-        const deckY = isNoHouse ? 0.35 : bh;
+        const deckY = terraceLevel;
         canopyUndersideY = (x, z) => {               // мировой Y НИЗА плиты навеса над точкой (или null)
           _rc.set(new THREE.Vector3(x, deckY + 10, z), _down);
           const hits = _rc.intersectObjects(threeState.canopyMeshes, true);
@@ -1248,7 +1254,7 @@ function buildScene3d() {
       const loops = _terraceUnionLoops(allRectsWorld);
       for (const loop of loops) {
         try {
-          buildRailing3d(houseGroup, loop, isNoHouse ? 0.35 : bh, houseL, houseW, canopyUndersideY);
+          buildRailing3d(houseGroup, loop, terraceLevel, houseL, houseW, canopyUndersideY);
         } catch (e) { console.error('[buildRailing3d]', e); }
       }
       _railPostReg = null;

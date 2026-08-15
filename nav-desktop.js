@@ -24,7 +24,7 @@ const D_SIDEBAR_ITEMS = [
 
 // Canvas init functions map
 const D_CANVAS_INIT = {
-  terrace:      () => initTerraceCanvas(),
+  terrace:      () => { initTerraceCanvas(); _dSyncTerraceHeight(); },
   steps:        () => initStepsCanvas(),
   pool_terrace: () => initSnapCanvas('pool_terrace'),
   paths:        () => initPathsCanvas(),
@@ -543,6 +543,36 @@ function dOnPathWidth() {
   if (!isNaN(v) && v > 0) S.pathWidth = v;
   if (typeof drawSnapCanvas === 'function') drawSnapCanvas('paths');
   if (typeof onParamChange === 'function') onParamChange();
+}
+
+// Высота настила террасы, см. Диапазон — 10 см … высота фундамента (TODO.md → ТЕРРАСА):
+// выше фундамента настил лезет на цоколь, ниже 10 см его не собрать.
+function dTerraceHeightRange() {
+  const foundCm = parseFloat(document.getElementById('v-found')?.value || 80);
+  return { min: 10, max: Math.max(10, Math.round(foundCm)) };
+}
+
+function dSetTerraceHeight(cm) {
+  const { min, max } = dTerraceHeightRange();
+  const v = Math.min(max, Math.max(min, parseFloat(cm) || min));
+  S.terraceH = v / 100;
+  const inp = document.getElementById('v-terrace-h');
+  if (inp && String(v) !== inp.value) inp.value = v;
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
+// Подтянуть поле к состоянию (открытие редактора, смена высоты фундамента).
+function _dSyncTerraceHeight() {
+  const inp = document.getElementById('v-terrace-h');
+  const hint = document.getElementById('d-terrace-h-hint');
+  if (!inp) return;
+  const { min, max } = dTerraceHeightRange();
+  inp.min = min; inp.max = max;
+  const cur = (typeof S.terraceH === 'number') ? Math.round(S.terraceH * 100) : max;
+  const v = Math.min(max, Math.max(min, cur));
+  inp.value = v;
+  S.terraceH = v / 100;
+  if (hint) hint.textContent = `см (${min}–${max})`;
 }
 
 function dSetFenceHeight(m) {
