@@ -12,12 +12,12 @@ const dConfigured = new Set(); // items that completed configuration
 // All sidebar items
 const D_SIDEBAR_ITEMS = [
   { id: 'terrace',       lbl: 'Терраса/Крыльцо',     hasEditor: true  },
+  { id: 'railing',       lbl: 'Ограждения террасы',  hasEditor: true  },
   { id: 'steps',         lbl: 'Ступени',             hasEditor: true  },
   { id: 'paths',         lbl: 'Дорожки',             hasEditor: true  },
   { id: 'fence',         lbl: 'Забор',               hasEditor: true  },
   { id: 'facade',        lbl: 'Отделка фасада',      hasEditor: true  },
   { id: 'beds',          lbl: 'Грядки',              hasEditor: true  },
-  { id: 'railing',       lbl: 'Ограждения террасы',  hasEditor: true  },
   { id: 'furniture',     lbl: 'Садовая мебель',      hasEditor: true  },
   { id: 'pool_terrace',  lbl: 'Терраса у бассейна',  hasEditor: true  },
   { id: 'pier',          lbl: 'Причал',              hasEditor: true  },
@@ -31,6 +31,7 @@ const D_CANVAS_INIT = {
   paths:        () => initPathsCanvas(),
   pier:         () => initSnapCanvas('pier'),
   fence:        () => { initSnapCanvas('fence'); _dSyncFenceHeight(); },
+  railing:      () => initSnapCanvas('railing'),
   beds:         () => initBedsCanvas(),
   facade:       () => initFacadeCanvas(),
   furniture:    () => initFurnitureCanvas(),
@@ -222,7 +223,9 @@ function _dApplyPreviewToCard(typeId, dataURL) {
 // 3D-объекты удаляются при следующей пересборке сцены (buildScene3d чистит houseGroup).
 function _dResetAllConfigurations() {
   S.sections = [];
-  S.pts = { pool_terrace: [], paths: [], pier: [], fence: [] };
+  // Ключи те же, что в state.js: пропущенный ключ (например railing) обнулял бы
+  // весь редактор — S.pts[name].push падал бы на undefined.
+  S.pts = { pool_terrace: [], paths: [], pier: [], fence: [], railing: [] };
   S.terraceRects = [];
   S.activeTerraceRect = null;
   S.steps = { ...DEFAULT_STEPS_RECT };
@@ -1442,6 +1445,7 @@ function _elementMetric(el) {
   if (el === 'pool_terrace') { const a = _polyAreaM2(S.pts.pool_terrace); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'pier')    { const a = _polyAreaM2(S.pts.pier); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'fence')   { const len = _polyLenM(S.pts.fence); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
+  if (el === 'railing') { const len = _polyLenM(S.pts.railing); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
   if (el === 'beds')    { const n = (S.beds || []).length; return n > 0 ? { kind: 'piece', value: n, text: n + ' шт' } : null; }
   if (el === 'furniture') {
     // Считаем только точки с выбранным товаром (пустые — просто места под мебель).
@@ -1461,7 +1465,8 @@ function _elementMetric(el) {
 //   linear — длина × 1.05 × цена/м.пог;
 //   piece  — количество × цена/шт.
 function _computeEstimate() {
-  const order = ['terrace', 'steps', 'paths', 'pool_terrace', 'pier', 'fence', 'beds', 'facade', 'furniture'];
+  const order = ['terrace', 'railing', 'steps', 'paths', 'pool_terrace', 'pier', 'fence',
+                 'beds', 'facade', 'furniture'];
   const rows = [];
   for (const el of order) {
     if (!S.sections.includes(el)) continue;
