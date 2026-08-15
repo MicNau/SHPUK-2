@@ -186,6 +186,9 @@ function init3dCanvas(targetSlotId) {
   // ── Controls ──────────────────────────────────
   const controls = _setupControls(camera, renderer.domElement);
   controls.target.set(4, 2, 2.5);
+  // Как только пользователь сам покрутил/подвинул камеру — перестаём её
+  // переставлять при пересборке сцены (см. хвост buildScene3d).
+  controls.addEventListener('start', () => { if (threeState) threeState.camTouched = true; });
 
 
   // ── Процедурное небо (до загрузки HDRI) ───────
@@ -1014,7 +1017,9 @@ function buildScene3d() {
           floorAreas: collected.floorAreas,
           floorHs:    collected.floorHs,
         },
-        { controls, porchEnabled: false }
+        // controls передаём ТОЛЬКО пока пользователь не трогал камеру: сборщик дома
+        // сам центрирует вид по bbox, и на каждой пересборке это сбивало ракурс.
+        { controls: threeState.camTouched ? null : controls, porchEnabled: false }
       );
     } else {
       // Дескриптор ещё не загружен — рисуем процедурный fallback и запускаем загрузку.
@@ -1292,11 +1297,22 @@ function buildScene3d() {
   //   _buildEntourage(threeState.vegGroup || threeState.scene);
   // }
 
-  const cx = isNoHouse ? 0 : houseL/2;
-  const cy = isNoHouse ? 1 : (bh+wh)/2;
-  const cz = isNoHouse ? 0 : houseW/2;
-  controls.target.set(cx, cy, cz);
-  controls.update();
+  // Центрируем вид на доме ТОЛЬКО пока пользователь не трогал камеру: раньше каждая
+  // пересборка (в том числе «Применить» товара) возвращала цель в центр дома и сбивала
+  // выбранный ракурс. Флаг сбрасывается при смене типа дома (resetCameraFraming).
+  if (!threeState.camTouched) {
+    const cx = isNoHouse ? 0 : houseL/2;
+    const cy = isNoHouse ? 1 : (bh+wh)/2;
+    const cz = isNoHouse ? 0 : houseW/2;
+    controls.target.set(cx, cy, cz);
+    controls.update();
+  }
+}
+
+// Разрешить сцене снова выставить камеру (смена типа дома — новая геометрия,
+// прежний ракурс может смотреть в пустоту).
+function resetCameraFraming() {
+  if (threeState) threeState.camTouched = false;
 }
 
 // disposeMaterials: true только для групп, чьи материалы создаём мы (houseGroup).
