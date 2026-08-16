@@ -283,11 +283,15 @@ function _insetOrthoPolygon(poly, d) {
 // segsOverride — готовые сегменты {ax,az,bx,bz}: так строится ограждение по
 // НАРИСОВАННОЙ ломаной (раздел «Ограждения»). Без него сегменты считаются по
 // контуру террасы, как раньше (инсет + пропуски у стен дома и лестницы).
-function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopyUndersideY, segsOverride){
+// matOverride — материал выбранного товара ограждения (S.elementMat.railing через
+// _resolveDeckMat). Без него — прежний цвет колонн крыльца.
+function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopyUndersideY, segsOverride, matOverride){
   if (!_railingCache || !_railingCache.rails || !_railingCache.post) return;  // GLB ещё не загружен
   if (!segsOverride && (!worldOutline || worldOutline.length < 3)) return;
   const up = new THREE.Vector3(0, 1, 0);
-  const railMat = new THREE.MeshStandardMaterial({ color: PORCH_COLUMN_COLOR, roughness: 0.72, metalness: 0.04 });
+  const railMat = matOverride
+    ? matOverride.clone()
+    : new THREE.MeshStandardMaterial({ color: PORCH_COLUMN_COLOR, roughness: 0.72, metalness: 0.04 });
   railMat.name = 'mat_railing';
 
   const segs = segsOverride
@@ -614,7 +618,7 @@ function buildTerraceCanopies(parent, M, rectPolys, deckHeight, houseL, houseW) 
 // Ограждение по ломаной, нарисованной пользователем (раздел «Ограждения»):
 // логика та же, что у забора, но в пределах террасы. Ни инсета, ни пропусков у
 // стен и лестницы здесь нет — где ставить перила, решает пользователь.
-function buildRailingLine3d(parent, pts, deckHeight, houseL, houseW, canopyUndersideY) {
+function buildRailingLine3d(parent, pts, deckHeight, houseL, houseW, canopyUndersideY, mat) {
   const segments = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [pts.filter(p => !p.break)];
   _railPostReg = [];                      // общий реестр столбов: дедуп на стыках линий
   for (const seg of segments) {
@@ -627,7 +631,7 @@ function buildRailingLine3d(parent, pts, deckHeight, houseL, houseW, canopyUnder
     }
     if (!segs.length) continue;
     try {
-      buildRailing3d(parent, null, deckHeight, houseL, houseW, canopyUndersideY, segs);
+      buildRailing3d(parent, null, deckHeight, houseL, houseW, canopyUndersideY, segs, mat);
     } catch (e) { console.error('[buildRailingLine3d]', e); }
   }
   _railPostReg = null;
