@@ -848,7 +848,8 @@ function _dRenderPanelContent() {
 // Элементы с настилом — материал у каждого свой (S.elementMat[el]).
 // Забор здесь же: его планки текстурируются товаром как настил (остальные части
 // модуля красятся сплошным цветом в buildFence3d) — TODO.md → ЗАБОРЫ.
-const DECK_MAT_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'pier', 'fence'];
+const DECK_MAT_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'pier', 'fence',
+                           'railing'];
 // Текущий активный элемент красится как настил? (Ограждение террасы — нет.)
 function _activeIsDeck() {
   return DECK_MAT_ELEMENTS.includes(dActiveItem);

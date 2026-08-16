@@ -1252,7 +1252,9 @@ function buildScene3d() {
           return hits.length ? hits[hits.length - 1].point.y : null;   // нижнее пересечение = низ плиты
         };
       }
-      buildRailingLine3d(houseGroup, S.pts.railing, terraceLevel, houseL, houseW, canopyUndersideY);
+      // Материал ограждения — свой (товар раздела 2331, тег fencing).
+      buildRailingLine3d(houseGroup, S.pts.railing, terraceLevel, houseL, houseW,
+                         canopyUndersideY, _resolveDeckMat(_baseDeck, 'railing'));
     } else {
       // GLB ограждения ещё не загружен — грузим и перестраиваем сцену (как грядки).
       ensureRailingLoaded().then(c => { if (c && threeState) buildScene3d(); });
