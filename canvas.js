@@ -184,6 +184,40 @@ function initSnapCanvas(name) {
       if (bestY !== null) snY = bestY;
     }
 
+    // Ограждение: прилипание к стенам дома и кромкам террасы, но НЕ вплотную —
+    // с отступом на полсечения столба (RAIL_INSET, тот же, что у автоматических
+    // перил по контуру). Иначе столб влезал бы в стену или свисал за край настила.
+    if (name === 'railing') {
+      const off = ((typeof RAIL_INSET !== 'undefined') ? RAIL_INSET : 0.10) / GRID;
+      const thr = EDGE_SNAP_DIST / GRID;
+      // Кромки настила и стены дома дают кандидатов ОТДЕЛЬНО: там, где край террасы
+      // совпадает со стеной (терраса пристроена к дому), у стены есть кандидат «наружу
+      // от дома», который может увести точку с настила. Поэтому сначала кромки террасы
+      // и только если по ним промах — стены.
+      const terrX = [], terrY = [], wallX = [], wallY = [];
+      for (const r of (S.terraceRects || [])) {   // от кромки настила — внутрь блока
+        if (!r || r.w <= 0 || r.h <= 0) continue;
+        terrX.push(r.x + off, r.x + r.w - off);
+        terrY.push(r.y + off, r.y + r.h - off);
+      }
+      if (!isEmptyLot()) {
+        const hp = getHousePolygonNorm();
+        const hx = hp.bboxNorm.nx + hp.bboxNorm.nw / 2;
+        const hy = hp.bboxNorm.ny + hp.bboxNorm.nh / 2;
+        for (const e of hp.edges) {          // от стены — наружу от дома
+          if (e.axis === 'v')      wallX.push(e.coord + (e.coord < hx ? -off : off));
+          else if (e.axis === 'h') wallY.push(e.coord + (e.coord < hy ? -off : off));
+        }
+      }
+      const nearest = (v, list) => {
+        let best = null, bd = thr;
+        for (const c of list) { const d = Math.abs(v - c); if (d < bd) { best = c; bd = d; } }
+        return best;
+      };
+      const nx2 = nearest(snX, terrX); snX = (nx2 !== null) ? nx2 : (nearest(snX, wallX) ?? snX);
+      const ny2 = nearest(snY, terrY); snY = (ny2 !== null) ? ny2 : (nearest(snY, wallY) ?? snY);
+    }
+
     S.pts[name].push({ x:snX, y:snY });
     drawSnapCanvas(name);
   });
