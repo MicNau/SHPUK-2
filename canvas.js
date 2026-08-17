@@ -4,6 +4,8 @@
 // PAN/ZOOM ENGINE
 // ══════════════════════════════════════════════
 const CV = {};
+// Шрифт подписей на canvas — тот же, что у интерфейса (см. body в styles-desktop.css).
+const UI_FONT = "'Segoe UI', system-ui, Roboto, sans-serif";
 const GRID = 32;       // total meters (canvas area)
 const SNAP = 0.25;     // шаг КУРСОРА (снап), м
 const GRID_STEP = 0.5; // шаг РАЗМЕТКИ (точки сетки), м — крупнее снапа, специально
@@ -431,9 +433,9 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
     // Окна и двери (условные обозначения) — «внятный план» во всех редакторах.
     _drawHouseOpenings(ctx, W, H, sc);
     // Подпись и габариты по bbox
-    ctx.fillStyle='#666'; ctx.font=`bold ${13/sc}px Roboto`; ctx.textAlign='center';
+    ctx.fillStyle='#666'; ctx.font=`bold ${13/sc}px ${UI_FONT}`; ctx.textAlign='center';
     ctx.fillText('ДОМ', bx+bw/2, by+bh/2+5/sc);
-    ctx.fillStyle='#888'; ctx.font=`${10/sc}px Roboto`;
+    ctx.fillStyle='#888'; ctx.font=`${10/sc}px ${UI_FONT}`;
     ctx.fillText(hp.lenL.toFixed(1)+'м', bx+bw/2, by-6/sc);
     ctx.save(); ctx.translate(bx-6/sc, by+bh/2);
     ctx.rotate(-Math.PI/2); ctx.textAlign='center';
@@ -457,7 +459,7 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
     ctx.strokeStyle = 'rgba(204,102,0,.5)'; ctx.lineWidth = 2/sc;
     ctx.setLineDash([4/sc, 2/sc]); ctx.strokeRect(rx, ry, rw, rh); ctx.setLineDash([]);
     ctx.fillStyle = 'rgba(204,102,0,.6)';
-    ctx.font = `${10/sc}px Roboto`; ctx.textAlign = 'center';
+    ctx.font = `${10/sc}px ${UI_FONT}`; ctx.textAlign = 'center';
     ctx.fillText('Ступени', rx+rw/2, ry+rh/2+4/sc);
   }
 
@@ -479,7 +481,7 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
       if (r.x+r.w > bx1) bx1 = r.x+r.w; if (r.y+r.h > by1) by1 = r.y+r.h;
     }
     ctx.fillStyle = 'rgba(0,150,80,.6)';
-    ctx.font = `${10/sc}px Roboto`; ctx.textAlign = 'center';
+    ctx.font = `${10/sc}px ${UI_FONT}`; ctx.textAlign = 'center';
     ctx.fillText('Терраса', (bx0+bx1)/2*W, (by0+by1)/2*H);
   }
 
@@ -494,7 +496,7 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
     }
     const b0 = S.beds[0];
     ctx.fillStyle = 'rgba(120,75,35,.7)';
-    ctx.font = `${10/sc}px Roboto`; ctx.textAlign = 'center';
+    ctx.font = `${10/sc}px ${UI_FONT}`; ctx.textAlign = 'center';
     ctx.fillText('Грядки', (b0.x + b0.w/2)*W, (b0.y + b0.h/2)*H + 4/sc);
   }
 
@@ -527,7 +529,7 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
     // Подпись
     const centX = realPts.reduce((s,p)=>s+p.x,0)/realPts.length*W;
     const centY = realPts.reduce((s,p)=>s+p.y,0)/realPts.length*H;
-    ctx.fillStyle=style.stroke; ctx.font=`${10/sc}px Roboto`; ctx.textAlign='center';
+    ctx.fillStyle=style.stroke; ctx.font=`${10/sc}px ${UI_FONT}`; ctx.textAlign='center';
     ctx.fillText(style.label, centX, centY);
   }
 
@@ -548,7 +550,7 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
       const realPts = pp.filter(p=>!p.break);
       if (realPts.length) {
         const mid = realPts[Math.floor(realPts.length/2)];
-        ctx.fillStyle='rgba(51,102,0,.6)'; ctx.font=`${10/sc}px Roboto`; ctx.textAlign='center';
+        ctx.fillStyle='rgba(51,102,0,.6)'; ctx.font=`${10/sc}px ${UI_FONT}`; ctx.textAlign='center';
         ctx.fillText('Дорожка', mid.x*W, mid.y*H - pathHalfW - 4/sc);
       }
     }
@@ -584,7 +586,7 @@ function drawSnapCanvas(name) {
   }
 
   // Метки метров (каждые 5м)
-  ctx.fillStyle='#999'; ctx.font=`${9/cx.scale}px Roboto`; ctx.textAlign='center';
+  ctx.fillStyle='#999'; ctx.font=`${9/cx.scale}px ${UI_FONT}`; ctx.textAlign='center';
   for(let m=5;m<=GRID;m+=5) { const px=m/GRID*W; ctx.fillText(m+'м', px, H-3/cx.scale); }
 
   // Ранее заданные объекты
@@ -593,7 +595,7 @@ function drawSnapCanvas(name) {
   // Подсказка
   const realPts = pts.filter(p=>!p.break);
   if (!realPts.length) {
-    ctx.fillStyle='#aaa'; ctx.font=`${13/cx.scale}px Roboto`; ctx.textAlign='center';
+    ctx.fillStyle='#aaa'; ctx.font=`${13/cx.scale}px ${UI_FONT}`; ctx.textAlign='center';
     const hint={terrace:'Нажмите чтобы поставить угол',pool_terrace:'Нажмите чтобы поставить угол',
                  pier:'Нажмите чтобы поставить угол',fence:'Нажмите чтобы поставить точку',
                  paths:'Нажмите точки вдоль дорожки',
@@ -647,7 +649,7 @@ function drawSnapCanvas(name) {
       ctx.beginPath(); ctx.arc(p.x*W,p.y*H,8/cx.scale,0,Math.PI*2);
       ctx.fillStyle='#fff'; ctx.fill();
       ctx.strokeStyle=color; ctx.lineWidth=2.5/cx.scale; ctx.stroke();
-      ctx.fillStyle=color; ctx.font=`bold ${10/cx.scale}px Roboto`; ctx.textAlign='center';
+      ctx.fillStyle=color; ctx.font=`bold ${10/cx.scale}px ${UI_FONT}`; ctx.textAlign='center';
       ctx.fillText(ptNum,p.x*W,p.y*H+4/cx.scale);
     });
   }
@@ -830,7 +832,7 @@ function drawFurnitureCanvas() {
     ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
     ctx.beginPath(); ctx.arc(c * step, r * step, (isMajor ? 2 : 1.2) / cx.scale, 0, Math.PI * 2); ctx.fill();
   }
-  ctx.fillStyle = '#999'; ctx.font = `${9 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+  ctx.fillStyle = '#999'; ctx.font = `${9 / cx.scale}px ${UI_FONT}`; ctx.textAlign = 'center';
   for (let m = 5; m <= GRID; m += 5) { const px = m / GRID * W; ctx.fillText(m + 'м', px, H - 3 / cx.scale); }
 
   drawPreviousLayers(ctx, W, H, cx, 'furniture');   // дом, терраса, дорожки — фоном
@@ -859,17 +861,17 @@ function drawFurnitureCanvas() {
     ctx.lineWidth = (isActive ? 3 : 2) / cx.scale;
     ctx.stroke();
     ctx.fillStyle = p.product ? '#fff' : '#7a4b23';
-    ctx.font = `bold ${11 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+    ctx.font = `bold ${11 / cx.scale}px ${UI_FONT}`; ctx.textAlign = 'center';
     ctx.fillText(String(i + 1), px, py + 4 / cx.scale);
     // Подпись товара у активной точки
     if (isActive && p.product) {
-      ctx.fillStyle = '#333'; ctx.font = `${10 / cx.scale}px Roboto`;
+      ctx.fillStyle = '#333'; ctx.font = `${10 / cx.scale}px ${UI_FONT}`;
       ctx.fillText(p.product.name.slice(0, 34), px, py - R - 5 / cx.scale);
     }
   });
 
   if (!pts.length) {
-    ctx.fillStyle = '#aaa'; ctx.font = `${13 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+    ctx.fillStyle = '#aaa'; ctx.font = `${13 / cx.scale}px ${UI_FONT}`; ctx.textAlign = 'center';
     ctx.fillText('Кликните по плану, чтобы поставить точку для мебели', W / 2, H * 0.92);
   }
   ctx.restore();
@@ -948,7 +950,7 @@ function drawFacadeCanvas() {
     ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
     ctx.beginPath(); ctx.arc(c * step, r * step, (isMajor ? 2 : 1.2) / cx.scale, 0, Math.PI * 2); ctx.fill();
   }
-  ctx.fillStyle = '#999'; ctx.font = `${9 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+  ctx.fillStyle = '#999'; ctx.font = `${9 / cx.scale}px ${UI_FONT}`; ctx.textAlign = 'center';
   for (let m = 5; m <= GRID; m += 5) { const px = m / GRID * W; ctx.fillText(m + 'м', px, H - 3 / cx.scale); }
 
   drawPreviousLayers(ctx, W, H, cx, 'facade');   // дом (с окнами/дверями) + конструкции фоном
@@ -1002,7 +1004,7 @@ function drawFacadeCanvas() {
                                : 'Ничего не выбрано — материал ляжет на весь фасад';
     }
   } else {
-    ctx.fillStyle = '#aaa'; ctx.font = `${13 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+    ctx.fillStyle = '#aaa'; ctx.font = `${13 / cx.scale}px ${UI_FONT}`; ctx.textAlign = 'center';
     ctx.fillText('План недоступен: дом ещё загружается или участок без дома', W / 2, H * 0.5);
   }
   ctx.restore();
@@ -1248,7 +1250,7 @@ function drawStepsCanvas() {
     ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
     ctx.beginPath(); ctx.arc(c*step, r*step, (isMajor?2:1.2)/cx.scale, 0, Math.PI*2); ctx.fill();
   }
-  ctx.fillStyle='#999'; ctx.font=`${9/cx.scale}px Roboto`; ctx.textAlign='center';
+  ctx.fillStyle='#999'; ctx.font=`${9/cx.scale}px ${UI_FONT}`; ctx.textAlign='center';
   for (let m=5; m<=GRID; m+=5) { const px = m/GRID*W; ctx.fillText(m+'м', px, H-3/cx.scale); }
 
   drawPreviousLayers(ctx, W, H, cx, 'steps');
@@ -1274,7 +1276,7 @@ function drawStepsCanvas() {
     ctx.stroke();
   }
   ctx.strokeStyle = '#cc6600'; ctx.lineWidth = 2.5/cx.scale; ctx.strokeRect(x, y, w, h);
-  ctx.fillStyle = '#cc6600'; ctx.font = `bold ${11/cx.scale}px Roboto`; ctx.textAlign = 'center';
+  ctx.fillStyle = '#cc6600'; ctx.font = `bold ${11/cx.scale}px ${UI_FONT}`; ctx.textAlign = 'center';
   ctx.fillText('Ступени', x+w/2, y+h/2+4/cx.scale);
 
   // Handles
@@ -1662,7 +1664,7 @@ function drawTerraceCanvas() {
     ctx.fill();
   }
   // Метки метров
-  ctx.fillStyle = '#999'; ctx.font = `${9 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+  ctx.fillStyle = '#999'; ctx.font = `${9 / cx.scale}px ${UI_FONT}`; ctx.textAlign = 'center';
   for (let m = 5; m <= GRID; m += 5) {
     const px = m / GRID * W;
     ctx.fillText(m + 'м', px, H - 3 / cx.scale);
@@ -1695,7 +1697,7 @@ function drawTerraceCanvas() {
       if (r.y + r.h > by1) by1 = r.y + r.h;
     }
     ctx.fillStyle = COL_INACTIVE;
-    ctx.font = `bold ${11 / cx.scale}px Roboto`;
+    ctx.font = `bold ${11 / cx.scale}px ${UI_FONT}`;
     ctx.textAlign = 'center';
     ctx.fillText('Терраса/Крыльцо', (bx0+bx1)/2*W, (by0+by1)/2*H);
   }
@@ -1715,7 +1717,7 @@ function drawTerraceCanvas() {
   // Подсказка если пусто
   if (!rects.length) {
     ctx.fillStyle = '#aaa';
-    ctx.font = `${13 / cx.scale}px Roboto`;
+    ctx.font = `${13 / cx.scale}px ${UI_FONT}`;
     ctx.textAlign = 'center';
     ctx.fillText('Нажмите «＋ Прямоугольник» чтобы добавить террасу', W/2, H * 0.92);
   }
@@ -1990,7 +1992,7 @@ function drawBedsCanvas() {
     ctx.fillStyle = isMajor ? '#bbb' : '#ccc';
     ctx.beginPath(); ctx.arc(c * step, r * step, (isMajor ? 2 : 1.2) / cx.scale, 0, Math.PI * 2); ctx.fill();
   }
-  ctx.fillStyle = '#999'; ctx.font = `${9 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+  ctx.fillStyle = '#999'; ctx.font = `${9 / cx.scale}px ${UI_FONT}`; ctx.textAlign = 'center';
   for (let m = 5; m <= GRID; m += 5) { const px = m / GRID * W; ctx.fillText(m + 'м', px, H - 3 / cx.scale); }
 
   drawPreviousLayers(ctx, W, H, cx, 'beds');
@@ -2016,12 +2018,12 @@ function drawBedsCanvas() {
     if (!isActive) ctx.setLineDash([6 / cx.scale, 3 / cx.scale]);
     ctx.strokeRect(rx, ry, rw, rh);
     ctx.setLineDash([]);
-    ctx.fillStyle = COL; ctx.font = `bold ${10 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+    ctx.fillStyle = COL; ctx.font = `bold ${10 / cx.scale}px ${UI_FONT}`; ctx.textAlign = 'center';
     ctx.fillText(`${BED_LEN}×${BED_WID} м`, rx + rw / 2, ry + rh / 2 + 4 / cx.scale);
   }
 
   if (!beds.length) {
-    ctx.fillStyle = '#aaa'; ctx.font = `${13 / cx.scale}px Roboto`; ctx.textAlign = 'center';
+    ctx.fillStyle = '#aaa'; ctx.font = `${13 / cx.scale}px ${UI_FONT}`; ctx.textAlign = 'center';
     ctx.fillText('Нажмите «＋ Грядка» чтобы добавить', W / 2, H * 0.92);
   }
 
