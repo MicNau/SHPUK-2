@@ -146,18 +146,13 @@ async function _dRenderHousePreviews() {
 
       // Минимальная сцена для рендера
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0xf0f0f0);
+      // Белый фон без земли: подписи карточки лежат поверх превью, и попадать они
+      // должны на чистый белый, а не на газон.
+      scene.background = new THREE.Color(0xffffff);
       scene.add(new THREE.AmbientLight(0xffffff, 0.55));
       const sun = new THREE.DirectionalLight(0xffffff, 0.95);
       sun.position.set(10, 14, 8);
       scene.add(sun);
-      // Земля под домом — небольшая плита
-      const ground = new THREE.Mesh(
-        new THREE.PlaneGeometry(40, 40),
-        new THREE.MeshStandardMaterial({ color: 0x7fa86b, roughness: 0.9, metalness: 0 })
-      );
-      ground.rotation.x = -Math.PI / 2;
-      scene.add(ground);
 
       const houseGroup = new THREE.Group();
       scene.add(houseGroup);
@@ -177,10 +172,52 @@ async function _dRenderHousePreviews() {
       const size = bbox.getSize(new THREE.Vector3());
       const center = bbox.getCenter(new THREE.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z);
-      const cam = new THREE.PerspectiveCamera(32, W / H, 0.1, 200);
-      const dist = maxDim * 1.6;
-      cam.position.set(center.x + dist * 0.75, center.y + dist * 0.55, center.z + dist * 0.85);
-      cam.lookAt(center);
+      const FOV = 32;
+      const cam = new THREE.PerspectiveCamera(FOV, W / H, 0.1, 200);
+
+      // Дом должен целиком уместиться в верхней части превью: снизу PREVIEW_LABEL_PX
+      // занимает подпись карточки, туда попадать он не должен. Кадрируем по реальной
+      // проекции bbox, а не по maxDim: у двухэтажных домов и Г-образных силуэтов
+      // габарит по одной оси плохо предсказывает, сколько места дом займёт в кадре.
+      const corners = [];
+      for (let i = 0; i < 8; i++) corners.push(new THREE.Vector3(
+        (i & 1) ? bbox.max.x : bbox.min.x,
+        (i & 2) ? bbox.max.y : bbox.min.y,
+        (i & 4) ? bbox.max.z : bbox.min.z));
+      const PREVIEW_LABEL_PX = 60, PREVIEW_PAD_PX = 10;
+      const bandW = W - 2 * PREVIEW_PAD_PX;
+      const bandH = H - PREVIEW_LABEL_PX - PREVIEW_PAD_PX;
+      const bandCx = W / 2;
+      const bandCy = PREVIEW_PAD_PX + bandH / 2;
+
+      // Три прохода: замерили проекцию → поправили дистанцию и точку прицела → повторили.
+      const aim = center.clone();
+      let dist = maxDim * 2;
+      for (let pass = 0; pass < 3; pass++) {
+        cam.position.set(aim.x + dist * 0.75, aim.y + dist * 0.55, aim.z + dist * 0.85);
+        cam.lookAt(aim);
+        cam.updateMatrixWorld(true);
+
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+        for (const c of corners) {
+          const p = c.clone().project(cam);
+          const px = (p.x + 1) / 2 * W, py = (1 - p.y) / 2 * H;
+          x0 = Math.min(x0, px); x1 = Math.max(x1, px);
+          y0 = Math.min(y0, py); y1 = Math.max(y1, py);
+        }
+
+        dist *= Math.max((y1 - y0) / bandH, (x1 - x0) / bandW);
+        // Прицел сдвигаем в сторону, ПРОТИВОПОЛОЖНУЮ нужному сдвигу картинки:
+        // камера смотрит выше — дом уезжает вниз, и наоборот.
+        const visH = 2 * dist * Math.tan(FOV * Math.PI / 360);
+        const visW = visH * (W / H);
+        const up    = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+        aim.addScaledVector(up,    -((y0 + y1) / 2 - bandCy) / H * visH);
+        aim.addScaledVector(right,  ((x0 + x1) / 2 - bandCx) / W * visW);
+      }
+      cam.position.set(aim.x + dist * 0.75, aim.y + dist * 0.55, aim.z + dist * 0.85);
+      cam.lookAt(aim);
 
       renderer.render(scene, cam);
       const dataURL = renderer.domElement.toDataURL('image/jpeg', 0.82);
