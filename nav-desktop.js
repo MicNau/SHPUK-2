@@ -1650,8 +1650,11 @@ function buildTerraceCalcRequest() {
   if (!S.sections.includes('terrace')) return { error: 'Терраса не выбрана в проекте.' };
   const loop = _terracePlanLoop();
   if (!loop || loop.length < 3) return { error: 'Терраса не размечена на плане.' };
+  // Доску можно не выбирать: по контракту id необязателен, а сейчас он ещё и не
+  // читается — расчёт всегда идёт на товарах по умолчанию (calculation_api.md,
+  // «Выбор товаров»). Выбранный id всё равно шлём: заработает, когда в каталоге
+  // заполнят характеристики.
   const productId = _deckingBoardProductId();
-  if (!productId) return { error: 'Выберите террасную доску в каталоге («Применить» или «В смету»).' };
 
   const G = _GRIDm();
   const houseEdges = (!isEmptyLot() && typeof getHousePolygonNorm === 'function')
@@ -1667,6 +1670,9 @@ function buildTerraceCalcRequest() {
     vertexType: _vertexOnHouse(p, houseEdges, 0.15) ? 'house' : 'free',
   }));
   // Высота настила над землёй = высота фундамента (см → мм); без дома — 35 см, как в 3D.
+  // NB: в опубликованном контракте (calculation_api.md, «Терраса») этого поля нет —
+  // там height только у ступеней. Продолжаем слать до ответа бэкендера: лишнее поле
+  // расчёту не мешает, а если оно учитывается — терять его нельзя.
   const foundCm = parseFloat(document.getElementById('v-found')?.value || 80);
   const terraceHeight = isEmptyLot() ? 350 : Math.round(foundCm * 10);
   return {
@@ -1679,35 +1685,82 @@ function buildTerraceCalcRequest() {
   };
 }
 
-// ── Запрос к бэкенду + кэш по телу запроса ──
-const TERRACE_CALC_PATH = '/api/v1/calculate_terrace/';
+// ── Запрос к бэкенду через Calculator + кэш по телу запроса ──
+//
+// Сетевую часть держит обёртка бэкендера (backend_API/Calculator.js): адрес,
+// метод, разбор ответа и ошибок. Свой fetch убран, чтобы формат запроса жил в
+// одном месте — в их библиотеке и calculation_api.md.
 let _terraceCalc = null;    // { key, state:'loading'|'ok'|'err', data, error }
+let _calculator = null;
 
-async function _fetchTerraceCalc(payload) {
+function _dCalculator() {
+  if (_calculator) return _calculator;
+  if (typeof Calculator === 'undefined') return null;
   const domain = (typeof RESOURCE_API_DOMAIN !== 'undefined') ? RESOURCE_API_DOMAIN : '';
-  const res = await fetch(domain + TERRACE_CALC_PATH, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  _calculator = new Calculator(domain + '/api/v1/');
+  return _calculator;
+}
+
+// Текст для пользователя по виду ошибки. Ветвимся по kind, а не по тексту:
+// message предназначен для показа, а не для разбора (calculator.md, «Ошибки»).
+function _calcErrorText(e) {
+  switch (e && e.kind) {
+    case CalculationErrorKind.GEOMETRY:  return e.message;   // про контур — показываем как есть
+    case CalculationErrorKind.MATERIALS: return 'Расчёт временно недоступен: в каталоге не заполнены характеристики товара.';
+    case CalculationErrorKind.NETWORK:   return 'Сервис расчёта недоступен, попробуйте ещё раз.';
+    case CalculationErrorKind.TIMEOUT:   return 'Смета не собралась за отведённое время, попробуйте ещё раз.';
+    default: return 'Ошибка расчёта, подробности в консоли.';
+  }
 }
 
 // Запускает расчёт, если тело запроса изменилось; перерисовывает блок по готовности.
 function _ensureTerraceCalc() {
   const req = buildTerraceCalcRequest();
   if (req.error) { _terraceCalc = { key: 'x', state: 'err', error: req.error }; return; }
+  const calc = _dCalculator();
+  if (!calc) { _terraceCalc = { key: 'x', state: 'err', error: 'Сервис расчёта не подключён.' }; return; }
   const key = JSON.stringify(req.payload);
   if (_terraceCalc && _terraceCalc.key === key && _terraceCalc.state !== 'err') return;
   _terraceCalc = { key, state: 'loading' };
-  _fetchTerraceCalc(req.payload)
+  calc.getCalculation(CalculationType.TERRACE, req.payload)
     .then(data => { _terraceCalc = { key, state: 'ok', data }; _dRenderTerraceCalc(); })
     .catch(e => {
       console.warn('[calculate_terrace]', e);
-      _terraceCalc = { key, state: 'err', error: 'Сервис расчёта недоступен (' + e.message + ').' };
+      _terraceCalc = { key, state: 'err', error: _calcErrorText(e) };
       _dRenderTerraceCalc();
     });
+}
+
+// ── Смета террасы в PDF ──
+//
+// Собирается фоновой задачей: Calculator ставит её, опрашивает состояние и
+// отдаёт ссылку на файл. Тело запроса — то же, что у расчёта. Смета всегда по
+// ОДНОМУ объекту: общей сметы на проект в контракте нет, поэтому кнопка живёт
+// в блоке террасы, а не в окне «Итог».
+async function dTerraceReport() {
+  const btn = document.getElementById('d-terrace-pdf');
+  const state = document.getElementById('d-terrace-pdf-state');
+  const setState = t => { if (state) state.textContent = t; };
+  const req = buildTerraceCalcRequest();
+  const calc = _dCalculator();
+  if (req.error || !calc) { setState(req.error || 'Сервис расчёта не подключён.'); return; }
+
+  if (btn) btn.disabled = true;
+  setState('Ставим задачу…');
+  try {
+    const url = await calc.getReport(CalculationType.TERRACE, req.payload,
+      s => setState(s === ReportStatus.PENDING ? 'Готовим смету…' : ''));
+    // Ссылка приходит относительной (/api/v1/calculation_report/file/…). На хосте
+    // без прокси статика и API — разные домены, поэтому разворачиваем по домену API.
+    const domain = (typeof RESOURCE_API_DOMAIN !== 'undefined') ? RESOURCE_API_DOMAIN : '';
+    window.open(domain ? new URL(url, domain).href : url, '_blank');
+    setState('');
+  } catch (e) {
+    console.warn('[calculation_report]', e);
+    setState(_calcErrorText(e));
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function terraceCalcTotal(data) {
@@ -1754,9 +1807,14 @@ function _dRenderTerraceCalc() {
       </tbody>
       <tfoot><tr><td colspan="4" class="est-r">Итого по террасе:</td><td class="est-r est-total">${_fmtRub(terraceCalcTotal(c.data))}</td></tr></tfoot>
     </table>
-    <div class="est-note">Спецификация и работы посчитаны бэкендом по контуру террасы, высоте настила и выбранной
-    доске. Строка «Терраса» в таблице выше — стоимость «голой» доски по площади; здесь —
-    полная спецификация: подконструкция, крепёж и работы.</div>`;
+    <div class="est-actions">
+      <button class="d-canvas-btn" id="d-terrace-pdf" onclick="dTerraceReport()">Смета террасы в PDF</button>
+      <span class="est-note" id="d-terrace-pdf-state"></span>
+    </div>
+    <div class="est-note">Спецификация и работы посчитаны бэкендом по контуру террасы и высоте настила.
+    Строка «Терраса» в таблице выше — стоимость «голой» доски по площади; здесь —
+    полная спецификация: подконструкция, крепёж и работы. Пока в каталоге не заполнены
+    характеристики товаров, расчёт идёт на товарах по умолчанию, а не на выбранной доске.</div>`;
 }
 
 // ══════════════════════════════════════════════

@@ -39,11 +39,32 @@ class Filter {
     }
 }
 
+// Готовые наборы фильтров под разделы каталога. Пополняются бэкендером —
+// см. backend_API/ResourceManager.js, откуда они перенесены сюда 2026-08-18.
 const Presets = {
     terrasnaya_doska_dpk: () => [
         new Filter(FilterType.TAGS, ['terrasnaya_doska']),
         new Filter(FilterType.SECTION_CODE, 'terrasnaya-doska-iz-dpk')
-    ]
+    ],
+    terrasnaya_doska_mpk: () => [
+        new Filter(FilterType.TAGS, ['terrasnaya_doska']),
+        new Filter(FilterType.SECTION_CODE, 'terrasnaya-doska-iz-mpk')
+    ],
+    universalnaya_doska_dpk: () => [
+        new Filter(FilterType.SECTION_CODE, 'doska-dpk-universalnaya')
+    ],
+    steps_dpk: () => [
+        new Filter(FilterType.TAGS, ['dpk_steps']),
+        new Filter(FilterType.SECTION_CODE, 'stupeni-iz-dpk')
+    ],
+    walls_dpk: () => [
+        new Filter(FilterType.TAGS, ['walls']),
+        new Filter(FilterType.SECTION_CODE, 'fasadnye-sistemy-iz-dpk')
+    ],
+    walls_mpk: () => [
+        new Filter(FilterType.TAGS, ['walls']),
+        new Filter(FilterType.SECTION_CODE, 'fasadnye-paneli-iz-mpk')
+    ],
 }
 
 
@@ -57,7 +78,10 @@ class ProductResource {
         
         this.mainSectionId = data.main_section_id;
         this.sections = data.sections || [];
-        
+        // Торговые предложения товара (variants_id). Задел бэкендера под вариации:
+        // по их замечанию структура продукта поменяется — цены, превью и текстуры
+        // переедут в массив trade_offers (backend_API/readme.txt, «Замечания по продуктам»).
+        this.productVariants = data.variants_id || [];
         this.previewText = data.preview_text;
         this.previewTextType = data.preview_text_type;
         this.color = data.color || '';   // имя цвета товара (появилось в API 2026-07-29)
@@ -93,6 +117,7 @@ class ProductResource {
         this.sort = productData.sort || this.sort;
         this.mainSectionId = productData.main_section_id || this.mainSectionId;
         this.sections = productData.sections || this.sections;
+        this.productVariants = productData.variants_id || this.productVariants;
         this.previewText = productData.preview_text || this.previewText;
         this.previewTextType = productData.preview_text_type || this.previewTextType;
         this.color = productData.color || this.color;
