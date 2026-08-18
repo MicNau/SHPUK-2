@@ -600,6 +600,9 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 .est-table tfoot td { border-top:2px solid #333; border-bottom:none; font-weight:700; padding-top:10px; }
 .est-total { font-size:16px; }
 .est-note { font-size:11px; color:#999; margin-top:8px; }
+/* Кнопка выгрузки сметы в PDF + статус фоновой задачи рядом с ней. */
+.est-actions { display:flex; align-items:center; gap:12px; margin-top:12px; }
+.est-actions .est-note { margin-top:0; }
 
 /* ── Отделка фасада: счётчик в футере план-редактора ── */
 .d-facade-count { font-size:12px; color:#777; white-space:nowrap; }
