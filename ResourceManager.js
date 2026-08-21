@@ -78,9 +78,11 @@ class ProductResource {
         
         this.mainSectionId = data.main_section_id;
         this.sections = data.sections || [];
-        // Торговые предложения товара (variants_id). Задел бэкендера под вариации:
-        // по их замечанию структура продукта поменяется — цены, превью и текстуры
-        // переедут в массив trade_offers (backend_API/readme.txt, «Замечания по продуктам»).
+        // Торговые предложения (variants_id) — ссылки на соседние предложения товара.
+        // Каждое предложение у бэкенда самостоятельный ресурс: своя цена, превью и
+        // текстуры; отдельного массива предложений внутри товара не будет. Замечание
+        // про будущий trade_offers в backend_API/readme.txt устарело (со слов
+        // бэкендера, 2026-08-18) — структура продукта не меняется, править нечего.
         this.productVariants = data.variants_id || [];
         this.previewText = data.preview_text;
         this.previewTextType = data.preview_text_type;
