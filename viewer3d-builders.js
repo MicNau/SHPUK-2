@@ -911,6 +911,85 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   }
 
 
+  // Щёки лестницы — non-convex полигон, повторяющий
+  // ВНЕШНИЙ силуэт лестницы с учётом проступей и nosing. Точки лежат в 2D-плоскости
+  // (off вдоль направления спуска × Y вертикаль). Триангулируем через ShapeUtils.
+  //
+  // Силуэт (по часовой стрелке от top-back, в координатах (off, y)):
+  //   (0, bh)                                                — top-back, у опоры
+  //   (RISER_THICKNESS, bh)                                  — верх передней плоскости подступенка 0
+  //   Для i=0..n-1:
+  //     (i·D+R, y_bot_riser_i)                               — низ подступенка i
+  //     если i < n-1 (есть проступь i): дополнительные точки nosing:
+  //       (i·D+R, y_bot_tread_i)                             — задняя нижняя кромка проступи i (внутри подступенка не строится отдельно, совмещаем)
+  //       Wait — это та же точка что и выше, если y_bot_riser_i == y_top_tread_i.
+  //       Простой профиль:
+  //       1: ((i+1)·D + N, y_bot_tread_i)                    — передняя кромка nosing проступи i
+  //       2: ((i+1)·D + N, y_bot_tread_i - TREAD_THICKNESS)  — низ nosing
+  //       3: ((i+1)·D + R, y_bot_tread_i - TREAD_THICKNESS)  — низ проступи на передней плоскости подступенка i+1
+  //   После последней ступени: (0, 0) — задний-низ.
+  if (THREE.ShapeUtils && typeof THREE.ShapeUtils.triangulateShape === 'function') {
+    for (const lateralSign of [-1, +1]) {
+      const latX = (bestSide.axisAlong === 'X') ? (cxW + lateralSign * stairWidth / 2) : null;
+      const latZ = (bestSide.axisAlong === 'Z') ? (czW + lateralSign * stairWidth / 2) : null;
+
+      // Строим 2D-контур (off, y), по часовой.
+      const points2D = [];
+      const addPt = (off, y) => points2D.push(new THREE.Vector2(off, y));
+
+      // Подступенок 0 не строится → щека начинается с верха проступи 0
+      // (bh − realRise), а не с уровня террасы. Это убирает «полочку»
+      // под террасой и z-fighting в районе nosing террасы.
+      const yTop0 = bh - realRise;
+      addPt(0, yTop0);                                      // top-back (на уровне верха первой проступи)
+      addPt(RISER_THICKNESS, yTop0);                        // верх в районе передней плоскости подступенка 0
+      for (let i = 0; i < n; i++) {
+        const isLast = (i === n - 1);
+        const yBotRiser = isLast ? 0 : (bh - (i + 1) * realRise);
+        const offRiserFront = i * STEP_DEPTH + RISER_THICKNESS;
+        addPt(offRiserFront, yBotRiser);                    // низ подступенка i
+
+        if (!isLast) {
+          // У этой ступени есть проступь — добавляем nosing-зубец:
+          const yTopTread = bh - (i + 1) * realRise;
+          const yBotTread = yTopTread - TREAD_THICKNESS;
+          const offNosing = (i + 1) * STEP_DEPTH + STEP_NOSING;
+          const offNextRiserFront = (i + 1) * STEP_DEPTH + RISER_THICKNESS;
+          addPt(offNosing, yTopTread);                      // передняя кромка nosing (верх)
+          addPt(offNosing, yBotTread);                      // передняя кромка nosing (низ)
+          addPt(offNextRiserFront, yBotTread);              // низ проступи у передней плоскости след. подступенка
+        }
+      }
+      addPt(0, 0);                                          // задний-низ
+
+      // ShapeUtils.triangulateShape ожидает CCW порядок; наши точки идут CW —
+      // разворачиваем перед триангуляцией.
+      const ccw = points2D.slice().reverse();
+      const tris = THREE.ShapeUtils.triangulateShape(ccw, []);
+
+      // Конвертируем в 3D. У нас полигон в перевёрнутом порядке (ccw), поэтому
+      // индексы тоже относятся к ccw, не к points2D.
+      const verts3D = [];
+      for (const p of ccw) {
+        if (bestSide.axisAlong === 'X') verts3D.push(latX, p.y, topZ + dirZ * p.x);
+        else                             verts3D.push(topX + dirX * p.x, p.y, latZ);
+      }
+      const idx = [];
+      for (const tri of tris) idx.push(tri[0], tri[1], tri[2]);
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(verts3D, 3));
+      geo.setIndex(idx);
+      geo.computeVertexNormals();
+      const cheekMat = matStep.clone ? matStep.clone() : new THREE.MeshStandardMaterial({ color: 0x9aa2a8, roughness: 0.85 });
+      cheekMat.side = THREE.DoubleSide;
+      const cheek = new THREE.Mesh(geo, cheekMat);
+      cheek.castShadow = cheek.receiveShadow = true;
+      stairGroup.add(cheek);
+      threeState.stepMeshes.push(cheek);
+    }
+  }
+
   // Перила лестницы (toggle steps-railing) — из того же GLB-модуля, что и ограждение
   // террасы (post / rails / balu_floor). Поручень+нижнее перило идут под РЕЙК (наклон по
   // разнице уровней верх→низ), балясины — вертикальные, нативного сечения, по проступям.
@@ -924,7 +1003,13 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       // latOff: перила сдвинуты от краёв ступеней внутрь (на STAIR_RAIL_INSET) — соосны
       // колонне навеса на углу проёма террасы (см. terracePerimeterSegments).
       const latOff = Math.max(0.10, stairWidth / 2 - STAIR_RAIL_INSET);
-      const stairRailMat = new THREE.MeshStandardMaterial({ color: PORCH_COLUMN_COLOR, roughness: 0.72, metalness: 0.04 });
+      // Перила лестницы всегда из того же материала, что ограждение террасы:
+      // это одна конструкция, разные материалы у них выглядели бы ошибкой.
+      // _resolveDeckMat подставит текстуры или цвет выбранного товара (S.elementMat.railing).
+      const stairRailBase = new THREE.MeshStandardMaterial({ color: PORCH_COLUMN_COLOR, roughness: 0.72, metalness: 0.04 });
+      const stairRailMat = (typeof _resolveDeckMat === 'function')
+        ? _resolveDeckMat(stairRailBase, 'railing')
+        : stairRailBase;
       stairRailMat.name = 'mat_railing';
       const up = new THREE.Vector3(0, 1, 0);
       // Тот же масштаб по высоте, что у ограждения террасы (столб → RAIL_POST_H),
