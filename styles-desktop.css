@@ -337,7 +337,7 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
    по её верхнему краю (в аккордеоне под кнопкой раскрываются настройки). */
 .d-sb-row { display: flex; gap: 2px; align-items: flex-start; }
 .d-sb-btn {
-  flex: 1; height: 48px; background: var(--bg); border: 2px solid var(--btn-border);
+  width: 100%; height: 48px; background: var(--bg); border: 2px solid var(--btn-border);
   border-radius: var(--r); font-size: 18px; font-weight: 600; cursor: pointer;
   text-align: left; padding: 0 14px;
   transition: border-color .2s, box-shadow .2s, background .15s;
@@ -397,8 +397,14 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
    Настройки открытого элемента раскрываются под его кнопкой, кнопки действий
    встают колонкой справа, кнопка подтверждения — вниз панели рядом с «Назад».
    Узлы переносятся из футера редактора (_dMountEditorControls). */
+/* Кнопка элемента и его настройки — одна колонка, кнопки действий справа от
+   неё. Раньше аккордеон шёл отдельным блоком под всем рядом и начинался ниже
+   колонки кнопок — настройки уезжали вниз, оставляя пустое место. */
+.d-sb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .d-sb-accordion { padding: 10px 2px 4px; }
+.d-sb-accordion:empty { display: none; }
 .d-sb-accordion .d-param-group:last-child { margin-bottom: 0; }
+.d-sb-accordion .tg:last-child { margin-bottom: 0; }
 .d-sb-accordion:empty { display: none; }
 .d-sb-actions { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
 .d-sb-actions .d-canvas-btn { height: 48px; white-space: nowrap; }
