@@ -377,7 +377,7 @@ function getHouseMats() {
     envMapIntensity: eI * 0.7,
   });
   wall.normalScale  = new THREE.Vector2(0.5, 0.5);
-  _assignHouseMatTex(wall, _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'stucco'));
+  _assignHouseMatTex(wall, _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'beige'));
 
   // Цоколь — бетон (однотонный) или камень (текстура).
   const base = new THREE.MeshStandardMaterial({
@@ -709,7 +709,9 @@ function _houseTexSet(kind, variant) {
       metal_red:   { c: 0xffffff, d: 'roof_diff_03', n: 'roof_norm_03', r: 'roof_roug_03' },
     },
     wall: {
-      stucco: { c: 0xefe2c8 },
+      white: { c: 0xf2f0ec },
+      beige: { c: 0xefe2c8 },
+      brown: { c: 0x7a5533 },
     },
     base: {
       beige:    { c: 0xd9c9a8 },
@@ -826,7 +828,7 @@ function _applyHouseTexSet(mesh, tex, tileSize, uvFn) {
 function _applyHouseMaterials(parent) {
   if (!parent) return;
   const roofT = _houseTexSet('roof', (typeof S !== 'undefined' && S.roofMat) || 'tile');
-  const wallT = _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'stucco');
+  const wallT = _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'beige');
   const baseT = _houseTexSet('base', (typeof S !== 'undefined' && S.baseMat) || 'beige');
   const frameC = _houseTexSet('frame', (typeof S !== 'undefined' && S.frameMat) || 'wood').color;
   parent.traverse(o => {
@@ -1056,25 +1058,13 @@ function buildScene3d() {
     _applyFacadeSelection();
   }
 
-  // Терраса/Крыльцо — multi-rect. Каждый rect → 4-точечный polygon → buildTerrace3d.
-  // На стыках возможен z-fighting (MVP); boolean union — следующая итерация.
-  const terraceRectPolys = _terraceRectsToPolygons();
-  if (S.sections.includes('terrace')) {
-    M.deck = _resolveDeckMat(_baseDeck, 'terrace');
-    const deckH = terraceLevel - 0.01;
+  // Настилы прямоугольных секций (RECT_SECTIONS): терраса/крыльцо и отдельно
+  // стоящие — терраса у бассейна и причал. Каждый rect → 4-точечный polygon →
+  // _buildTerracePoly, углы перпендикулярных крыльев сшиваются миттером.
+  //   hEdges — рёбра дома (направление досок вдоль ближайшей стены); null у
+  //   отдельно стоящих: там доски идут вдоль длинной стороны блока.
+  const _buildRectDecks = (polys, deckH, _hEdges) => {
     const E = 0.04;   // допуск (м)
-    // Направление досок блока — вдоль БЛИЖАЙШЕЙ стены дома (стабильно, не зависит от
-    // разбивки на блоки): переднее/заднее крыло → доски вдоль X, боковое → вдоль Z.
-    // Fallback (нет дома) — длинная сторона блока.
-    let _hEdges = null;
-    if (!isNoHouse && _housePoly && _housePoly.corners && _housePoly.corners.length >= 2) {
-      const poly = _housePoly;
-      _hEdges = [];
-      for (let k = 0; k < poly.corners.length; k++) {
-        const a = poly.corners[k], b = poly.corners[(k + 1) % poly.corners.length];
-        _hEdges.push({ ax: a.x, az: a.z, dx: b.x - a.x, dz: b.z - a.z });
-      }
-    }
     const plankDir = (cx, cz, fallback) => {
       if (!_hEdges) return fallback;
       let best = Infinity, alongX = fallback;
@@ -1088,7 +1078,7 @@ function buildScene3d() {
       return alongX;
     };
     // Мировые bbox + направление досок. e* — эффективные границы после подрезки углов.
-    const tR = terraceRectPolys.map(pp => {
+    const tR = polys.map(pp => {
       const wp = canvasToWorld(pp, houseL, houseW);
       const minX = Math.min(...wp.map(p => p.x)), maxX = Math.max(...wp.map(p => p.x));
       const minZ = Math.min(...wp.map(p => p.z)), maxZ = Math.max(...wp.map(p => p.z));
@@ -1139,16 +1129,35 @@ function buildScene3d() {
       try { _buildTerracePoly(houseGroup, M, ct.p, deckH, ct.pa, 'deckMeshes'); }
       catch (e) { console.error('[_buildTerracePoly corner]', e); }
     }
+  };
+
+  // Рёбра дома — направление досок пристроенной террасы.
+  let _houseEdgesW = null;
+  if (!isNoHouse && _housePoly && _housePoly.corners && _housePoly.corners.length >= 2) {
+    _houseEdgesW = [];
+    for (let k = 0; k < _housePoly.corners.length; k++) {
+      const a = _housePoly.corners[k], b = _housePoly.corners[(k + 1) % _housePoly.corners.length];
+      _houseEdgesW.push({ ax: a.x, az: a.z, dx: b.x - a.x, dz: b.z - a.z });
+    }
   }
 
-  if (S.sections.includes('pool_terrace') && S.pts.pool_terrace.length >= 3) {
+  const terraceRectPolys = _terraceRectsToPolygons('terrace');
+  if (S.sections.includes('terrace')) {
+    M.deck = _resolveDeckMat(_baseDeck, 'terrace');
+    _buildRectDecks(terraceRectPolys, terraceLevel - 0.01, _houseEdgesW);
+  }
+
+  // Отдельно стоящие террасы: тот же настил, но доски вдоль длинной стороны блока
+  // (дом на них не влияет). Причал — на своей отметке 0.5 м над землёй/водой.
+  const poolRectPolys = _terraceRectsToPolygons('pool_terrace');
+  if (S.sections.includes('pool_terrace') && poolRectPolys.length) {
     M.deck = _resolveDeckMat(_baseDeck, 'pool_terrace');
-    buildTerrace3d(houseGroup, M, S.pts.pool_terrace, terraceLevel - 0.01, houseL, houseW, 'deckMeshes');
+    _buildRectDecks(poolRectPolys, terraceLevel - 0.01, null);
   }
-
-  if (S.sections.includes('pier') && S.pts.pier.length >= 3) {
+  const pierRectPolys = _terraceRectsToPolygons('pier');
+  if (S.sections.includes('pier') && pierRectPolys.length) {
     M.deck = _resolveDeckMat(_baseDeck, 'pier');
-    buildTerrace3d(houseGroup, M, S.pts.pier, 0.5, houseL, houseW, 'deckMeshes');
+    _buildRectDecks(pierRectPolys, 0.5, null);
   }
 
   if (S.sections.includes('paths') && S.pts.paths.filter(p=>!p.break).length >= 2) {
@@ -1198,29 +1207,25 @@ function buildScene3d() {
   // бассейна), иначе земля — мебель на террасе не проваливается под настил.
   if (S.sections.includes('furniture') && S.furniture && S.furniture.length) {
     const deckY = terraceLevel - 0.01;
-    const inPoly = (x, z, pts) => {                 // pts — мировые {x,z}
-      let inside = false;
-      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-        if ((pts[i].z > z) !== (pts[j].z > z)
-            && x < (pts[j].x - pts[i].x) * (z - pts[i].z) / (pts[j].z - pts[i].z + 1e-12) + pts[i].x) {
-          inside = !inside;
-        }
-      }
-      return inside;
-    };
-    const poolPts = (S.sections.includes('pool_terrace') && S.pts.pool_terrace.length >= 3)
-      ? canvasToWorld(S.pts.pool_terrace, houseL, houseW) : null;
-    const pierPts = (S.sections.includes('pier') && S.pts.pier.length >= 3)
-      ? canvasToWorld(S.pts.pier, houseL, houseW) : null;
+    // Отдельно стоящие террасы — тоже прямоугольники; bbox достаточно.
+    const rectsWorldOf = secId => (S.sections.includes(secId)
+      ? _terraceRectsToPolygons(secId).map(pp => {
+          const w = canvasToWorld(pp, houseL, houseW);
+          return {
+            minX: Math.min(...w.map(p => p.x)), maxX: Math.max(...w.map(p => p.x)),
+            minZ: Math.min(...w.map(p => p.z)), maxZ: Math.max(...w.map(p => p.z)),
+          };
+        })
+      : []);
+    const poolRectsW = rectsWorldOf('pool_terrace');
+    const pierRectsW = rectsWorldOf('pier');
+    const inRects = (x, z, list) =>
+      list.some(r => x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ);
     const surfaceYAt = (x, z) => {
-      if (S.sections.includes('terrace')) {
-        for (const r of allRectsWorld) {
-          if (x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ) return deckY;
-        }
-      }
-      if (poolPts && inPoly(x, z, poolPts)) return deckY;
-      if (pierPts && inPoly(x, z, pierPts)) return 0.5;   // причал — своя отметка
-      return 0;                                           // земля
+      if (S.sections.includes('terrace') && inRects(x, z, allRectsWorld)) return deckY;
+      if (inRects(x, z, poolRectsW)) return deckY;
+      if (inRects(x, z, pierRectsW)) return 0.5;   // причал — своя отметка
+      return 0;                                    // земля
     };
     try {
       buildFurniture3d(houseGroup, M, S.furniture, houseL, houseW, surfaceYAt);
@@ -1274,9 +1279,10 @@ function buildScene3d() {
       threeState.occupiedZones.push({ type:'poly', points:canvasToWorld(polyPts,houseL,houseW) });
     }
   }
-  for (const secId of ['pool_terrace','pier']) {
-    if (S.sections.includes(secId) && S.pts[secId].length >= 3) {
-      threeState.occupiedZones.push({ type:'poly', points:canvasToWorld(S.pts[secId],houseL,houseW) });
+  for (const [secId, polys] of [['pool_terrace', poolRectPolys], ['pier', pierRectPolys]]) {
+    if (!S.sections.includes(secId)) continue;
+    for (const polyPts of polys) {
+      threeState.occupiedZones.push({ type:'poly', points:canvasToWorld(polyPts,houseL,houseW) });
     }
   }
   if (S.sections.includes('paths') && S.pts.paths.filter(p=>!p.break).length >= 2) {
