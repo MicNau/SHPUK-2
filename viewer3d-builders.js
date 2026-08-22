@@ -266,14 +266,18 @@ function _buildTerracePoly(parent, M, foot, deckHeight, plankAlongX, meshArrayNa
 // площадка) и красится нейтрально-серым.
 // Материал создаётся per-build и диспозится в clearGroup(houseGroup, true).
 const PAD_OFFSET = 0.10;      // выступ подкладки за габарит конструкции, м
-const PAD_COLOR  = 0x808080;  // нейтрально-серый
+// Цвет — из HouseBuilder (единый источник для отмостки дома, крыльца и конструкций);
+// читаем при вызове, а не при загрузке файла: house-builder подключается раньше,
+// но константа нужна только в момент сборки сцены.
+const _padColor = () => ((typeof HouseBuilder !== 'undefined' && HouseBuilder.PAD_COLOR)
+                          || 0x585858);
 function buildConstructionPad(parent, minX, maxX, minZ, maxZ, offset) {
   const padThick = 0.05;
   const off = (offset === undefined) ? PAD_OFFSET : offset;
   const W = (maxX - minX) + 2 * off;
   const D = (maxZ - minZ) + 2 * off;
   if (W < 0.3 || D < 0.3) return;
-  const mat = new THREE.MeshStandardMaterial({ color: PAD_COLOR, roughness: 0.95, metalness: 0.0 });
+  const mat = new THREE.MeshStandardMaterial({ color: _padColor(), roughness: 0.95, metalness: 0.0 });
   mat.name = 'mat_construction_pad';
   const m = new THREE.Mesh(new THREE.BoxGeometry(W, padThick, D), mat);
   m.position.set((minX + maxX) / 2, padThick / 2, (minZ + maxZ) / 2);

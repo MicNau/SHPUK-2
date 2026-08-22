@@ -24,6 +24,12 @@
 // ── Архитектурные константы ────────────────────
 const FOUNDATION_OVERHANG = 0.10;  // фундамент шире стены на это значение наружу
 const ROOF_EAVE           = 0.30;  // свес карниза за стену
+// Цвет подкладки (отмостки) — един для дома, крыльца, террасы и ступеней.
+// Базовый цвет умножается на освещение сцены (~×2.3 и с холодным оттенком неба),
+// поэтому «средне-серый В КАДРЕ» получается из более тёмного значения: замеры по
+// рендеру — 0x808080 → ≈205, 0x585858 → ≈160, 0x3C3C3C → ≈130 (то, что нужно).
+// Тот же источник читает buildConstructionPad (viewer3d-builders.js).
+const PAD_COLOR = 0x3c3c3c;
 const SS_EPS              = 1e-6;
 
 // Cache-busting для GLB-модулей. Браузер агрессивно кэширует .glb, и при пересборке
@@ -1011,7 +1017,7 @@ function buildPorch(parent, desc, outlineFloor0, modulesDef, materialsMap, baseH
   const uCenterPad = (padUStart + padUEnd) / 2;
   const padCx = frame.cx + frame.normalX * uCenterPad;
   const padCz = frame.cz + frame.normalZ * uCenterPad;
-  const padMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.95, metalness: 0.0 });
+  const padMat = new THREE.MeshStandardMaterial({ color: PAD_COLOR, roughness: 0.95, metalness: 0.0 });
   padMat.name = 'mat_porch_pad';
   const padGeo = new THREE.BoxGeometry(padSizeX, padThick, padSizeZ);
   const padMesh = new THREE.Mesh(padGeo, padMat);
@@ -3524,10 +3530,10 @@ function buildHouseFromDescriptor(houseGroup, desc, modules, params, options = {
   }
 
   // PAD ПОД ДОМОМ — повторяет РЕАЛЬНЫЙ контур (outline), расширенный наружу на
-  // padOffset: для Г/П/Т/+-форм тёмная отмостка идёт точно по периметру дома,
+  // padOffset: для Г/П/Т/+-форм отмостка идёт точно по периметру дома,
   // а не по bbox (раньше был прямоугольник BoxGeometry с «навесом» в пустых углах).
   if (firstOutline && firstOutline.items) {
-    const padMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.95, metalness: 0.0 });
+    const padMat = new THREE.MeshStandardMaterial({ color: PAD_COLOR, roughness: 0.95, metalness: 0.0 });
     padMat.name = 'mat_house_pad';
     buildPadSlab(houseGroup, firstOutline, 0.30, 0.05, padMat);
   }
@@ -3754,6 +3760,7 @@ global.HouseBuilder = {
   // Constants (можно использовать снаружи)
   FOUNDATION_OVERHANG,
   ROOF_EAVE,
+  PAD_COLOR,
 };
 
 })(typeof window !== 'undefined' ? window : globalThis);

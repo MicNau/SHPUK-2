@@ -1043,7 +1043,9 @@ function buildScene3d() {
       // Pad под процедурным домом (старый fallback) — по houseL/houseW.
       const padW = houseL + 0.6, padD = houseW + 0.6, padH = 0.05;
       const padGeo = new THREE.BoxGeometry(padW, padH, padD);
-      const padMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.95, metalness: 0.0 });
+      const padMat = new THREE.MeshStandardMaterial({
+        color: (typeof HouseBuilder !== 'undefined' && HouseBuilder.PAD_COLOR) || 0x585858,
+        roughness: 0.95, metalness: 0.0 });
       const padMesh = new THREE.Mesh(padGeo, padMat);
       padMesh.position.set(houseL/2, padH/2, houseW/2);
       padMesh.receiveShadow = true;

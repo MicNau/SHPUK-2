@@ -592,9 +592,13 @@ function buildTerraceCanopies(parent, M, rectPolys, deckHeight, houseL, houseW) 
       colPts.push({ x: c.x, z: c.z, h });
     }
   }
-  // Если включено ограждение террасы — опоры навеса даёт само ограждение (высокие
-  // столбы каждые ~2.5 м), отдельные колонны навеса не строим (иначе задвоение).
-  const railingOn = tgOn('terrace-railing') && S.sections.includes('terrace');
+  // Если ограждение размечено — опоры навеса даёт САМО ограждение (угловые столбы и
+  // каждый второй вытягиваются до низа навеса, см. makeTallPost в buildRailing3d),
+  // отдельные колонны не строим: иначе рядом со столбами вырастают «лишние» стойки.
+  // Проверяем разметку, а не тумблер: тумблера 'terrace-railing' в UI давно нет —
+  // ограждение стало отдельным элементом проекта со своей ломаной.
+  const railingOn = S.sections.includes('railing')
+    && (S.pts.railing || []).filter(p => !p.break).length >= 2;
   const useGlbCol = (typeof HouseBuilder !== 'undefined'
                      && HouseBuilder.placeScaledGlb
                      && _houseCache.modules
