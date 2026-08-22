@@ -228,16 +228,19 @@ function _buildTerracePoly(parent, M, foot, deckHeight, plankAlongX, meshArrayNa
   for (const p of foot) { pos.push(p.x, yBot, p.z); const t = topUV(p.x, p.z); uv.push(t[0], t[1]); } // низ  n..2n-1
   for (let i = 1; i < n - 1; i++) idx.push(0, i + 1, i);          // верх (нормаль +Y)
   for (let i = 1; i < n - 1; i++) idx.push(n, n + i, n + i + 1);  // низ  (нормаль −Y)
-  // Юбка: на каждое ребро — свой квад (U вдоль ребра, V по высоте → доски горизонтально).
+  // Юбка: на каждое ребро — свой квад. Текстура повёрнута на 90° относительно
+  // настила (U идёт по высоте, V вдоль ребра → доски вертикально), ребро
+  // UV-бокса — TERRACE_SIDE_TILE.
+  const TS = TERRACE_SIDE_TILE;
   for (let i = 0; i < n; i++) {
     const a = foot[i], b = foot[(i + 1) % n];
     const alongX = Math.abs(b.x - a.x) >= Math.abs(b.z - a.z);
-    const uA = (alongX ? a.x : a.z) / T, uB = (alongX ? b.x : b.z) / T;
+    const vA = (alongX ? a.x : a.z) / TS, vB = (alongX ? b.x : b.z) / TS;
     const base = pos.length / 3;
-    pos.push(a.x, yTop, a.z); uv.push(uA, yTop / T);
-    pos.push(b.x, yTop, b.z); uv.push(uB, yTop / T);
-    pos.push(b.x, yBot, b.z); uv.push(uB, yBot / T);
-    pos.push(a.x, yBot, a.z); uv.push(uA, yBot / T);
+    pos.push(a.x, yTop, a.z); uv.push(yTop / TS, vA);
+    pos.push(b.x, yTop, b.z); uv.push(yTop / TS, vB);
+    pos.push(b.x, yBot, b.z); uv.push(yBot / TS, vB);
+    pos.push(a.x, yBot, a.z); uv.push(yBot / TS, vA);
     idx.push(base, base + 1, base + 2, base, base + 2, base + 3); // наружу (foot CCW)
   }
   const geo = new THREE.BufferGeometry();
