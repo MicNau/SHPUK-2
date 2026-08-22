@@ -1053,7 +1053,8 @@ function _dRenderPriceGrid() {
   grid.innerHTML = PRICE_TIERS.map(t =>
     `<button class="d-price-btn ${S.catPrice === t.id ? 'selected' : ''}"
              onclick="dSelectPrice('${t.id}')">
-       ${t.lbl}<br><span style="font-size:11px;font-weight:400;opacity:.7">${t.sub}</span>
+       <span class="d-radio"></span>
+       <span class="d-price-lbl">${t.lbl}<span class="d-price-sub">${t.sub}</span></span>
      </button>`
   ).join('');
 }
