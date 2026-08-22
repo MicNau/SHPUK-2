@@ -25,11 +25,11 @@ const D_SIDEBAR_ITEMS = [
 
 // Canvas init functions map
 const D_CANVAS_INIT = {
-  terrace:      () => { initTerraceCanvas(); _dSyncTerraceHeight(); },
+  terrace:      () => { initRectCanvas('terrace'); _dSyncTerraceHeight(); },
   steps:        () => initStepsCanvas(),
-  pool_terrace: () => initSnapCanvas('pool_terrace'),
+  pool_terrace: () => initRectCanvas('pool_terrace'),
   paths:        () => initPathsCanvas(),
-  pier:         () => initSnapCanvas('pier'),
+  pier:         () => initRectCanvas('pier'),
   fence:        () => { initSnapCanvas('fence'); _dSyncFenceHeight(); },
   railing:      () => initSnapCanvas('railing'),
   beds:         () => initBedsCanvas(),
@@ -262,9 +262,11 @@ function _dResetAllConfigurations() {
   S.sections = [];
   // Ключи те же, что в state.js: пропущенный ключ (например railing) обнулял бы
   // весь редактор — S.pts[name].push падал бы на undefined.
-  S.pts = { pool_terrace: [], paths: [], pier: [], fence: [], railing: [] };
-  S.terraceRects = [];
-  S.activeTerraceRect = null;
+  S.pts = { paths: [], fence: [], railing: [] };
+  for (const secId of Object.keys(RECT_SECTIONS)) {   // terrace, pool_terrace, pier
+    secRects(secId).length = 0;
+    setSecActiveIdx(secId, null);
+  }
   S.steps = { ...DEFAULT_STEPS_RECT };
   S.beds = [];
   S.activeBed = null;
@@ -806,7 +808,7 @@ function dDeleteItem(secId) {
 
   // Чистим данные позиции
   if (S.pts && S.pts[secId]) S.pts[secId] = [];
-  if (secId === 'terrace') { S.terraceRects = []; S.activeTerraceRect = null; }
+  if (RECT_SECTIONS[secId]) { secRects(secId).length = 0; setSecActiveIdx(secId, null); }
   if (secId === 'steps')   { S.steps = { ...DEFAULT_STEPS_RECT }; }
   if (secId === 'beds')    { S.beds = []; S.activeBed = null; }
   if (secId === 'facade')  { S.wallZones = {}; }
@@ -1641,16 +1643,6 @@ function _polyLenM(pts) {
   }
   return L;
 }
-function _polyAreaM2(pts) {
-  const G = _GRIDm();
-  const p = (pts || []).filter(q => !q.break);
-  if (p.length < 3) return 0;
-  let a = 0;
-  for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
-    a += (p[j].x * G) * (p[i].y * G) - (p[i].x * G) * (p[j].y * G);
-  }
-  return Math.abs(a) / 2;
-}
 // Ширина доски из названия товара в метрах; не распознали — 0.14 м.
 //
 // Порядок размеров в каталоге НЕ единый: «доска 20*140*2900» (толщина×ширина×длина),
@@ -1674,11 +1666,9 @@ function _boardWidthM(name) {
 
 // Метрика элемента: {kind:'deck'|'linear'|'piece', value, text}.
 function _elementMetric(el) {
-  if (el === 'terrace') { const a = _rectsAreaM2(S.terraceRects); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
+  if (RECT_SECTIONS[el]) { const a = _rectsAreaM2(secRects(el)); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'steps')   { const G = _GRIDm(); const a = (S.steps.w * G) * (S.steps.h * G); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'paths')   { const len = _polyLenM(S.pts.paths); const w = (S.pathWidth || 120) / 100; const a = len * w; return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
-  if (el === 'pool_terrace') { const a = _polyAreaM2(S.pts.pool_terrace); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
-  if (el === 'pier')    { const a = _polyAreaM2(S.pts.pier); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'fence')   { const len = _polyLenM(S.pts.fence); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
   if (el === 'railing') { const len = _polyLenM(S.pts.railing); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
   if (el === 'beds')    { const n = (S.beds || []).length; return n > 0 ? { kind: 'piece', value: n, text: n + ' шт' } : null; }
@@ -1767,8 +1757,8 @@ function _compassFromVec(vx, vy) {
 // тот же, по которому строится ограждение (_terraceUnionLoops из viewer3d-railing.js;
 // он работает с любыми координатами, лишь бы rect'ы были в одной системе).
 // Возвращает внешний контур (самый большой по площади) или null.
-function _terracePlanLoop() {
-  const rects = (S.terraceRects || []).filter(r => r && r.w > 0 && r.h > 0);
+function _terracePlanLoop(secId) {
+  const rects = secRects(secId || 'terrace').filter(r => r && r.w > 0 && r.h > 0);
   if (!rects.length || typeof _terraceUnionLoops !== 'function') return null;
   const G = _GRIDm();
   const loops = _terraceUnionLoops(rects.map(r => ({
@@ -1914,16 +1904,18 @@ function _furnitureProjectObject(name) {
     : null;
 }
 
-// Объекты проекта. Терраса у бассейна и причал не попадают: своих типов в API
-// у них нет. Дорожки тоже пока нет — API ждёт замкнутый контур ленты с
-// отмеченной стартовой стороной, а у нас хранится осевая линия с шириной.
+// Объекты проекта. Терраса у бассейна и причал уходят тем же типом TERRACE —
+// это отдельно стоящие террасы, все вершины 'free'. Дорожек пока нет: API ждёт
+// замкнутый контур ленты с отмеченной стартовой стороной, а у нас хранится
+// осевая линия с шириной.
 function _projectObjects() {
   const lbl = id => (D_SIDEBAR_ITEMS.find(i => i.id === id) || {}).lbl || id;
   const objs = [];
 
-  if (S.sections.includes('terrace')) {
-    const req = buildTerraceCalcRequest();
-    if (req.payload) objs.push({ type: CalculationType.TERRACE, name: lbl('terrace'), ...req.payload });
+  for (const secId of Object.keys(RECT_SECTIONS)) {   // terrace, pool_terrace, pier
+    if (!S.sections.includes(secId)) continue;
+    const req = buildTerraceCalcRequest(secId);
+    if (req.payload) objs.push({ type: CalculationType.TERRACE, name: lbl(secId), ...req.payload });
   }
   if (S.sections.includes('steps')) {
     const o = _stepsProjectObject(lbl('steps'));
@@ -1955,28 +1947,33 @@ function buildProjectCalcRequest() {
 
 // id террасной доски для расчёта: сначала явный выбор «В смету», затем применённый
 // к террасе товар (S.elementMat.terrace.productId пишется в _applySampleToActive).
-function _deckingBoardProductId() {
-  const est = S.estimate && S.estimate.terrace;
+function _deckingBoardProductId(secId) {
+  const sec = secId || 'terrace';
+  const est = S.estimate && S.estimate[sec];
   if (est && est.id) return est.id;
-  const mat = S.elementMat && S.elementMat.terrace;
+  const mat = S.elementMat && S.elementMat[sec];
   if (mat && mat.productId) return mat.productId;
   return null;
 }
 
 // Собирает тело запроса или причину, по которой расчёт невозможен.
 // { payload } | { error }
-function buildTerraceCalcRequest() {
-  if (!S.sections.includes('terrace')) return { error: 'Терраса не выбрана в проекте.' };
-  const loop = _terracePlanLoop();
-  if (!loop || loop.length < 3) return { error: 'Терраса не размечена на плане.' };
+function buildTerraceCalcRequest(secId) {
+  const sec = secId || 'terrace';
+  const cfg = RECT_SECTIONS[sec];
+  if (!S.sections.includes(sec)) return { error: `«${cfg ? cfg.label : sec}» не выбрана в проекте.` };
+  const loop = _terracePlanLoop(sec);
+  if (!loop || loop.length < 3) return { error: `«${cfg ? cfg.label : sec}» не размечена на плане.` };
   // Доску можно не выбирать: по контракту id необязателен, а сейчас он ещё и не
   // читается — расчёт всегда идёт на товарах по умолчанию (calculation_api.md,
   // «Выбор товаров»). Выбранный id всё равно шлём: заработает, когда в каталоге
   // заполнят характеристики.
-  const productId = _deckingBoardProductId();
+  const productId = _deckingBoardProductId(sec);
 
   const G = _GRIDm();
-  const houseEdges = (!isEmptyLot() && typeof getHousePolygonNorm === 'function')
+  // Примыкание к дому считаем ТОЛЬКО для террасы/крыльца. Терраса у бассейна и
+  // причал — отдельно стоящие: у них все вершины 'free', дом в расчёте не участвует.
+  const houseEdges = (cfg && cfg.house && !isEmptyLot() && typeof getHousePolygonNorm === 'function')
     ? getHousePolygonNorm().edges.map(e => ({
         x1: e.x1 * G, y1: e.y1 * G, x2: e.x2 * G, y2: e.y2 * G,
       }))
@@ -1986,14 +1983,18 @@ function buildTerraceCalcRequest() {
   const mm = v => Math.round(v * 1000);
   const vertices = loop.map(p => ({
     x: mm(p.x - ox), y: mm(p.y - oy),
-    vertexType: _vertexOnHouse(p, houseEdges, 0.15) ? 'house' : 'free',
+    vertexType: (houseEdges.length && _vertexOnHouse(p, houseEdges, 0.15)) ? 'house' : 'free',
   }));
   // Высота настила над землёй = высота фундамента (см → мм); без дома — 35 см, как в 3D.
   // NB: в опубликованном контракте (calculation_api.md, «Терраса») этого поля нет —
   // там height только у ступеней. Продолжаем слать до ответа бэкендера: лишнее поле
   // расчёту не мешает, а если оно учитывается — терять его нельзя.
   const foundCm = parseFloat(document.getElementById('v-found')?.value || 80);
-  const terraceHeight = isEmptyLot() ? 350 : Math.round(foundCm * 10);
+  // Отметка настила: у пристроенной террасы — вровень с фундаментом; у отдельно
+  // стоящих фиксированная (та же, что в 3D: бассейн — как терраса, причал — 0.5 м).
+  let terraceHeight;
+  if (sec === 'pier') terraceHeight = 500;
+  else terraceHeight = isEmptyLot() ? 350 : Math.round(foundCm * 10);
   return {
     payload: {
       vertices,

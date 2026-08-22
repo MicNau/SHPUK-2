@@ -190,10 +190,11 @@ function canvasToWorld(pts, houseL, houseW) {
   return pts.map(p=>({ x:p.x*gridSize-offsetX+_houseBboxMinX, z:p.y*gridSize-offsetZ+_houseBboxMinZ }));
 }
 
-// Преобразует S.terraceRects в массив 4-точечных полигонов (canvas-нормированные).
+// Преобразует прямоугольники секции (по умолчанию терраса/крыльцо) в массив
+// 4-точечных полигонов (canvas-нормированные).
 // CCW winding (как ожидает scanline в buildTerrace3d / buildRailing3d).
-function _terraceRectsToPolygons() {
-  const rects = (typeof S !== 'undefined' && S.terraceRects) ? S.terraceRects : [];
+function _terraceRectsToPolygons(secId) {
+  const rects = (typeof secRects === 'function') ? secRects(secId || 'terrace') : [];
   const polys = [];
   for (const r of rects) {
     if (!r || r.w <= 0 || r.h <= 0) continue;

@@ -16,6 +16,48 @@ const SECS = [
   {id:'pier',         lbl:'Причал',             req:'pier'},
 ];
 
+// Секции с ПРЯМОУГОЛЬНЫМ редактором (терраса и две её отдельно стоящие копии).
+// Один редактор на все три: набор прямоугольников, drag за углы, снап к сетке.
+// Отличие только в примыкании к дому:
+//   • terrace — пристраивается к дому: кромки липнут к стенам, в расчёт вершины
+//     уходят с vertexType 'house';
+//   • pool_terrace / pier — ОТДЕЛЬНО СТОЯЩИЕ: снап только к сетке и к собственным
+//     блокам, все вершины 'free', в 3D направление досок берётся по длинной стороне.
+// rects/active — имена полей S; colors — палитра плана (свой цвет у каждой секции).
+const RECT_SECTIONS = {
+  terrace: {
+    rects: 'terraceRects', active: 'activeTerraceRect', house: true,
+    label: 'Терраса/Крыльцо', short: 'Терраса',
+    fill: 'rgba(0,150,80,.12)', stroke: '#5a8c5a', bgStroke: 'rgba(0,150,80,.5)',
+  },
+  pool_terrace: {
+    rects: 'poolRects', active: 'activePoolRect', house: false,
+    label: 'Терраса у бассейна', short: 'Терр. бассейна',
+    fill: 'rgba(0,80,200,.10)', stroke: '#3a63b0', bgStroke: 'rgba(0,80,200,.5)',
+  },
+  pier: {
+    rects: 'pierRects', active: 'activePierRect', house: false,
+    label: 'Причал', short: 'Причал',
+    fill: 'rgba(26,122,204,.10)', stroke: '#2a7ec4', bgStroke: 'rgba(26,122,204,.5)',
+  },
+};
+
+// Прямоугольники секции (всегда массив; создаётся лениво).
+function secRects(secId) {
+  const c = RECT_SECTIONS[secId];
+  if (!c) return [];
+  if (!Array.isArray(S[c.rects])) S[c.rects] = [];
+  return S[c.rects];
+}
+function secActiveIdx(secId) {
+  const c = RECT_SECTIONS[secId];
+  return c ? S[c.active] : null;
+}
+function setSecActiveIdx(secId, v) {
+  const c = RECT_SECTIONS[secId];
+  if (c) S[c.active] = v;
+}
+
 // Маппинг легаси-имён типа дома («человеческие» названия из старого мобильного
 // флоу) → typeId дескриптора ('type_NN') или 'no_house'. Единый источник —
 // им пользуется getHouseTypeId (viewer3d-core.js): в S.houseType легаси-строка
@@ -161,7 +203,9 @@ const HOUSE_MATERIALS = {
   wall: {
     label: 'Цвет стен',
     items: [
-      { id: 'stucco', color: '#efe2c8' },                    // светло-бежевая штукатурка
+      { id: 'white', color: '#f2f0ec' },                     // белый
+      { id: 'beige', color: '#efe2c8' },                     // бежевый
+      { id: 'brown', color: '#7a5533' },                     // коричневый
     ],
   },
   // Рамы окон и полотна дверей (меши с материалами mat_frame*/mat_door). Текстур нет,
@@ -226,15 +270,19 @@ const STUB_RESULTS = [
 const S = {
   houseType: null,
   sections: [],
-  // pool_terrace/paths/pier/fence — polygon-режим (массив точек).
-  // terrace — multi-rect (см. terraceRects).
+  // paths/fence — polyline-режим (массив точек).
   // railing — ограждение террасы: ломаная ВНУТРИ террасы (TODO.md → ОГРАЖДЕНИЯ),
   // рисуется как забор и строится теми же секциями.
-  pts: { pool_terrace:[], paths:[], pier:[], fence:[], railing:[] },
+  pts: { paths:[], fence:[], railing:[] },
   // Терраса/Крыльцо: массив прямоугольников (boolean union в 3D).
   // Все координаты нормированные 0..1 (как в canvas).
   terraceRects: [],
   activeTerraceRect: null, // индекс выбранного rect или null
+  // Терраса у бассейна и причал — тот же редактор, отдельно стоящие (RECT_SECTIONS).
+  poolRects: [],
+  activePoolRect: null,
+  pierRects: [],
+  activePierRect: null,
   // Ступени: один rect (положение + ширина = от пользователя; глубина в 3D
   // пересчитывается автоматически из количества подступенков).
   steps: { ...DEFAULT_STEPS_RECT },
@@ -284,7 +332,7 @@ const S = {
   // Материалы дома (шаг «Параметры дома»).
   roofMat: 'tile',     // tile | metal_green | metal_red
   baseMat: 'beige',    // beige | brown | darkgray (только цвет, без текстур)
-  wallMat: 'stucco',   // только цвет, без текстур
+  wallMat: 'beige',    // white | beige | brown (только цвет, без текстур)
   frameMat: 'wood',    // wood | white | dark — рамы окон и двери
 };
 // (TOTAL и глобальный step удалены — прогресс-бар мобильного wizard'а.)

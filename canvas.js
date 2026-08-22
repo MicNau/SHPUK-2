@@ -182,7 +182,7 @@ function attachPanZoom(el, cvName, onRedraw) {
 }
 
 // ══════════════════════════════════════════════
-// SNAP-CANVAS (терраса, pool, pier, fence, paths-точки)
+// SNAP-CANVAS (дорожки, забор, ограждение — разметка точками)
 // ══════════════════════════════════════════════
 function initSnapCanvas(name) {
   const wrap=document.getElementById('cw-'+name);
@@ -212,31 +212,9 @@ function initSnapCanvas(name) {
     const W = planPx(cvEl), snapStep = W * SNAP / GRID;
     let snX=Math.round(wx/snapStep)*snapStep/W, snY=Math.round(wy/snapStep)*snapStep/W;
 
-    // Прилипание к стенам дома для террас (порог 1 м).
-    // Работает по ВСЕМ ortho-рёбрам полигона дома (не только bbox), чтобы
-    // L/T/+/П-формы тоже снапались к своим внутренним углам.
-    if (['terrace','pool_terrace','pier'].includes(name) && !isEmptyLot()) {
-      const hp = getHousePolygonNorm();
-      const thr = EDGE_SNAP_DIST / GRID; // порог в нормализованных координатах
-      // Собираем уникальные snap-координаты (X для вертикальных рёбер, Y для горизонтальных)
-      const xCoords = new Set(), yCoords = new Set();
-      for (const e of hp.edges) {
-        if (e.axis === 'v') xCoords.add(e.coord);
-        else if (e.axis === 'h') yCoords.add(e.coord);
-      }
-      let bestX = null, bestXD = thr;
-      for (const xc of xCoords) {
-        const d = Math.abs(snX - xc);
-        if (d < bestXD) { bestX = xc; bestXD = d; }
-      }
-      if (bestX !== null) snX = bestX;
-      let bestY = null, bestYD = thr;
-      for (const yc of yCoords) {
-        const d = Math.abs(snY - yc);
-        if (d < bestYD) { bestY = yc; bestYD = d; }
-      }
-      if (bestY !== null) snY = bestY;
-    }
+    // (Прилипание к стенам дома здесь больше не нужно: все три террасы —
+    // терраса/крыльцо, терраса у бассейна и причал — редактируются
+    // прямоугольниками, у них свой снап в snapDraggedRect.)
 
     // Ограждение: прилипание к стенам дома и кромкам террасы, но НЕ вплотную —
     // с отступом на полсечения столба (RAIL_INSET, тот же, что у автоматических
@@ -496,8 +474,6 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
 
   // Цвета для фоновых слоёв
   const layerStyles = {
-    pool_terrace: { fill:'rgba(0,80,200,.10)',  stroke:'rgba(0,80,200,.5)',  label:'Терр. бассейна' },
-    pier:         { fill:'rgba(26,122,204,.10)',stroke:'rgba(26,122,204,.5)',label:'Причал' },
     fence:        { fill:'none',                stroke:'rgba(0,0,0,.3)',     label:'Забор' },
     railing:      { fill:'none',                stroke:'rgba(122,75,35,.5)', label:'Ограждение' },
   };
@@ -515,12 +491,19 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
     ctx.fillText('Ступени', rx+rw/2, ry+rh/2+4/sc);
   }
 
-  // Терраса/Крыльцо — массив rect'ов (фон, если редактируем другую секцию)
-  if (excludeName !== 'terrace' && S.terraceRects && S.terraceRects.length) {
-    ctx.fillStyle = 'rgba(0,150,80,.12)';
-    ctx.strokeStyle = 'rgba(0,150,80,.5)';
+  // Прямоугольные секции (терраса/крыльцо, терраса у бассейна, причал) — фоном,
+  // если редактируем другую секцию. Цвет и подпись — из RECT_SECTIONS.
+  for (const [secId, cfg] of Object.entries(RECT_SECTIONS)) {
+    if (secId === excludeName) continue;
+    // Только секции, оставшиеся в проекте: после отмены редактора (dCancelCanvas)
+    // прямоугольники в состоянии остаются, но объекта в проекте уже нет.
+    if (!S.sections.includes(secId)) continue;
+    const rects = secRects(secId);
+    if (!rects.length) continue;
+    ctx.fillStyle = cfg.fill;
+    ctx.strokeStyle = cfg.bgStroke;
     ctx.lineWidth = 2/sc; ctx.setLineDash([6/sc, 3/sc]);
-    for (const r of S.terraceRects) {
+    for (const r of rects) {
       const rx = r.x * W, ry = r.y * H, rw = r.w * W, rh = r.h * H;
       ctx.fillRect(rx, ry, rw, rh);
       ctx.strokeRect(rx, ry, rw, rh);
@@ -528,13 +511,13 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
     ctx.setLineDash([]);
     // Подпись по центру bbox
     let bx0=Infinity, by0=Infinity, bx1=-Infinity, by1=-Infinity;
-    for (const r of S.terraceRects) {
+    for (const r of rects) {
       if (r.x < bx0) bx0 = r.x; if (r.y < by0) by0 = r.y;
       if (r.x+r.w > bx1) bx1 = r.x+r.w; if (r.y+r.h > by1) by1 = r.y+r.h;
     }
-    ctx.fillStyle = 'rgba(0,150,80,.6)';
+    ctx.fillStyle = cfg.bgStroke;
     ctx.font = `${10/sc}px ${UI_FONT}`; ctx.textAlign = 'center';
-    ctx.fillText('Терраса', (bx0+bx1)/2*W, (by0+by1)/2*H);
+    ctx.fillText(cfg.short, (bx0+bx1)/2*W, (by0+by1)/2*H);
   }
 
   // Грядки — массив rect'ов фиксированного размера (фон, если редактируем другую секцию)
@@ -552,7 +535,7 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
     ctx.fillText('Грядки', (b0.x + b0.w/2)*W, (b0.y + b0.h/2)*H + 4/sc);
   }
 
-  // 2. Полигоны: pool_terrace, pier, fence
+  // 2. Ломаные: забор и ограждение террасы
   for (const [secId, style] of Object.entries(layerStyles)) {
     if (secId === excludeName) continue;
     const tp = S.pts[secId];
@@ -651,8 +634,7 @@ function drawSnapCanvas(name) {
   const realPts = pts.filter(p=>!p.break);
   if (!realPts.length) {
     ctx.fillStyle='#aaa'; ctx.font=`${13/cx.scale}px ${UI_FONT}`; ctx.textAlign='center';
-    const hint={terrace:'Нажмите чтобы поставить угол',pool_terrace:'Нажмите чтобы поставить угол',
-                 pier:'Нажмите чтобы поставить угол',fence:'Нажмите чтобы поставить точку',
+    const hint={fence:'Нажмите чтобы поставить точку',
                  paths:'Нажмите точки вдоль дорожки',
                  railing:'Нажмите точки по краю террасы'};
     ctx.fillText(hint[name]||'Нажмите чтобы поставить точку', W/2, H*0.92);
@@ -690,7 +672,7 @@ function drawSnapCanvas(name) {
         ctx.strokeStyle=color; ctx.lineWidth=2.5/cx.scale; ctx.stroke();
       }
     } else {
-      // Полигоны (terrace, pool_terrace, pier)
+      // Замкнутый контур (запасная ветка: сейчас все snap-редакторы — ломаные)
       ctx.beginPath(); ctx.moveTo(realPts[0].x*W,realPts[0].y*H);
       for(let i=1;i<realPts.length;i++) ctx.lineTo(realPts[i].x*W,realPts[i].y*H);
       if(realPts.length>2) { ctx.closePath(); ctx.fillStyle='rgba(0,0,0,.08)'; ctx.fill(); }
@@ -1197,7 +1179,7 @@ function applyStepsDrag(wx, wy, W) {
 }
 
 function attachStepsEvents(wrap) {
-  // Слушатели вешаются один раз (см. attachTerraceEvents) — guard + чтение CV['steps'] свежим.
+  // Слушатели вешаются один раз (см. attachRectEvents) — guard + чтение CV['steps'] свежим.
   if (wrap._stepsBound) return;
   wrap._stepsBound = true;
   let touchId = null;
@@ -1357,37 +1339,44 @@ function drawStepsCanvas() {
 }
 
 // ══════════════════════════════════════════════
-// ТЕРРАСА/КРЫЛЬЦО: multi-rect drag+resize
+// ПРЯМОУГОЛЬНЫЙ РЕДАКТОР: терраса/крыльцо, терраса у бассейна, причал
+// (секции из RECT_SECTIONS — state.js). Один код на все три; отличие в том,
+// пристраивается ли секция к дому (cfg.house).
 // Каждый прямоугольник — {x,y,w,h} в нормализованных координатах 0..1.
-// Активный (S.activeTerraceRect — индекс) показывает handles и drag'абелен.
+// Активный (индекс в S[cfg.active]) показывает handles и drag'абелен.
 // Клик по неактивному → активирует его. Клик по пустому месту → снимает выделение.
 // ══════════════════════════════════════════════
 const HANDLE_R = 18;
 let trDrag = null;       // 'move' | 'nw' | 'ne' | 'sw' | 'se'
 let trDragStart = null;  // { mx, my, x, y, w, h }
 let trDragIdx = -1;      // индекс rect'а, который тащим
+let trDragSec = null;    // секция, в которой идёт drag
 
 // Snap нормализованной координаты к сетке 0.5 м.
 function snapNorm(v) { return Math.round(v * GRID / SNAP) * SNAP / GRID; }
 
 // Собирает координаты вертикальных (xs) и горизонтальных (ys) рёбер,
 // к которым прилипают кромки rect'ов:
-//   • рёбра дома (getHousePolygonNorm);
-//   • рёбра всех S.terraceRects, КРОМЕ excludeTerraceIdx (редактируемый террасный
-//     rect не должен снапаться на собственные кромки; при редактировании ступеней
-//     excludeTerraceIdx = -1 → все террасные rect'ы учитываются).
-function _snapTargets(excludeTerraceIdx) {
+//   • рёбра дома (getHousePolygonNorm) — только для секций, пристроенных к дому
+//     (terrace, а также ступени/грядки, которые зовут с secId по умолчанию);
+//   • рёбра прямоугольников СВОЕЙ секции, КРОМЕ excludeIdx (редактируемый rect не
+//     должен снапаться на собственные кромки; при редактировании ступеней/грядок
+//     excludeIdx = -1 → все террасные rect'ы учитываются).
+// Отдельно стоящие секции (pool_terrace, pier) к дому не липнут.
+function _snapTargets(excludeIdx, secId) {
+  const sec = secId || 'terrace';
+  const cfg = (typeof RECT_SECTIONS !== 'undefined') ? RECT_SECTIONS[sec] : null;
   const xs = [], ys = [];
-  if (!isEmptyLot()) {
+  if ((!cfg || cfg.house) && !isEmptyLot()) {
     const hp = getHousePolygonNorm();
     for (const e of hp.edges) {
       if (e.axis === 'v') xs.push(e.coord);
       else if (e.axis === 'h') ys.push(e.coord);
     }
   }
-  const rects = S.terraceRects || [];
+  const rects = secRects(sec);
   for (let i = 0; i < rects.length; i++) {
-    if (i === excludeTerraceIdx) continue;
+    if (i === excludeIdx) continue;
     const r = rects[i];
     xs.push(r.x, r.x + r.w);
     ys.push(r.y, r.y + r.h);
@@ -1410,13 +1399,14 @@ function _nearestTarget(coord, targets) {
 //   kind: 'move' | 'nw' | 'ne' | 'sw' | 'se'
 //   ds:   стартовое состояние {x,y,w,h}
 //   dx,dy: смещение мыши (нормализованное)
-//   excludeTerraceIdx: индекс террасного rect, который НЕ участвует как цель снапа.
+//   excludeIdx: индекс rect'а секции, который НЕ участвует как цель снапа.
+//   secId: секция снапа (по умолчанию terrace — так зовут ступени и грядки).
 // Принцип: к стене/террасе липнет ТОЛЬКО движущаяся кромка; противоположная остаётся
 // на сетке. Поэтому wall-snap НЕ перетирается финальным snapNorm, и дальние углы
 // не уносит с сетки (исправление «снапается целиком»).
-function snapDraggedRect(kind, ds, dx, dy, excludeTerraceIdx) {
+function snapDraggedRect(kind, ds, dx, dy, excludeIdx, secId) {
   const mn = SNAP / GRID;
-  const { xs, ys } = _snapTargets(excludeTerraceIdx);
+  const { xs, ys } = _snapTargets(excludeIdx, secId);
 
   if (kind === 'move') {
     // Ближний угол (top-left) грид-снапим; дальний = left+ds.w (на сетке, если ds.w на сетке).
@@ -1468,18 +1458,21 @@ function snapDraggedRect(kind, ds, dx, dy, excludeTerraceIdx) {
   return { x: left, y: top, w: right - left, h: bottom - top };
 }
 
-function initTerraceCanvas() {
-  const wrap = document.getElementById('cw-terrace');
-  const cv   = document.getElementById('cv-terrace');
-  CV['terrace'] = mkCvState();
-  fitCanvasToWrap(wrap, cv, CV['terrace']);
+function initRectCanvas(secId) {
+  const wrap = document.getElementById('cw-' + secId);
+  const cv   = document.getElementById('cv-' + secId);
+  if (!wrap || !cv) return;
+  CV[secId] = mkCvState();
+  fitCanvasToWrap(wrap, cv, CV[secId]);
 
-  // Если rects пуст — создаём дефолтный rect рядом с домом.
-  if (!S.terraceRects || S.terraceRects.length === 0) {
-    S.terraceRects = [_defaultTerraceRect()];
-    S.activeTerraceRect = 0;
-  } else if (S.activeTerraceRect === null || S.activeTerraceRect >= S.terraceRects.length) {
-    S.activeTerraceRect = 0;
+  // Если rects пуст — создаём дефолтный (у дома / в свободном месте участка).
+  const rects = secRects(secId);
+  if (rects.length === 0) {
+    rects.push(_defaultRect(secId));
+    setSecActiveIdx(secId, 0);
+  } else {
+    const act = secActiveIdx(secId);
+    if (act === null || act >= rects.length) setSecActiveIdx(secId, 0);
   }
   // НЕ переснапиваем существующие rects на сетку при открытии: они уже корректно
   // расставлены при создании/перетаскивании (на сетке ИЛИ вплотную к стене дома,
@@ -1488,82 +1481,98 @@ function initTerraceCanvas() {
 
   const newCv = cv.cloneNode(false);
   wrap.replaceChild(newCv, cv);
-  fitCanvasToWrap(wrap, newCv, CV['terrace']);   // клон заменил канвас — размеры задаём ему
+  fitCanvasToWrap(wrap, newCv, CV[secId]);   // клон заменил канвас — размеры задаём ему
 
-  drawTerraceCanvas();
-  attachTerraceEvents(wrap);
+  drawRectCanvas(secId);
+  attachRectEvents(wrap, secId);
 }
 
-function _defaultTerraceRect() {
-  // По умолчанию ставим небольшой прямоугольник 4×2 м у нижнего края дома.
-  const hp = (typeof getHousePolygonNorm === 'function') ? getHousePolygonNorm() : null;
-  if (hp && hp.bboxNorm) {
-    const b = hp.bboxNorm;
+// Дефолтный прямоугольник секции 4×2 м. Терраса/крыльцо — вплотную к нижней стене
+// дома; отдельно стоящие (бассейн, причал) — в стороне от дома, с отступом 3 м,
+// чтобы не пересекаться с ним и друг с другом.
+function _defaultRect(secId) {
+  const w0 = snapNorm(4 / GRID), h0 = snapNorm(2 / GRID);
+  const hp = (typeof getHousePolygonNorm === 'function' && !isEmptyLot())
+    ? getHousePolygonNorm() : null;
+  const b = hp && hp.bboxNorm;
+  const gap = 3 / GRID;
+  const clamp = (v, size) => Math.max(0, Math.min(1 - size, v));
+
+  if (secId === 'pool_terrace') {
+    return b
+      ? { x: snapNorm(clamp(b.nx - w0 - gap, w0)), y: snapNorm(clamp(b.ny, h0)), w: w0, h: h0 }
+      : { x: snapNorm(0.12), y: snapNorm(0.25), w: w0, h: h0 };
+  }
+  if (secId === 'pier') {
+    return b
+      ? { x: snapNorm(clamp(b.nx + b.nw + gap, w0)), y: snapNorm(clamp(b.ny + b.nh, h0)), w: w0, h: h0 }
+      : { x: snapNorm(0.7), y: snapNorm(0.7), w: w0, h: h0 };
+  }
+  // terrace — у нижнего края дома, по центру фасада.
+  if (b) {
     return {
       x: snapNorm(b.nx + b.nw / 2 - 2 / GRID),
       y: snapNorm(b.ny + b.nh),
-      w: snapNorm(4 / GRID),
-      h: snapNorm(2 / GRID),
+      w: w0, h: snapNorm(2 / GRID),
     };
   }
-  return { x: snapNorm(0.4), y: snapNorm(0.5), w: snapNorm(4/GRID), h: snapNorm(2/GRID) };
+  return { x: snapNorm(0.4), y: snapNorm(0.5), w: w0, h: snapNorm(2 / GRID) };
 }
 
 // Добавляет новый rect рядом с активным (или в центре, если нет активного).
-function addTerraceRect() {
-  if (!S.terraceRects) S.terraceRects = [];
+function addRect(secId) {
+  const rects = secRects(secId);
   const mn = SNAP / GRID;
   const w0 = snapNorm(3 / GRID), h0 = snapNorm(2 / GRID);
+  const act = secActiveIdx(secId);
   let nx, ny;
-  if (S.activeTerraceRect !== null && S.terraceRects[S.activeTerraceRect]) {
-    const a = S.terraceRects[S.activeTerraceRect];
+  if (act !== null && rects[act]) {
+    const a = rects[act];
     nx = snapNorm(a.x + a.w + mn);  // справа от активного
     ny = a.y;
     if (nx + w0 > 1) { nx = snapNorm(Math.max(0, a.x - w0 - mn)); }
   } else {
-    nx = snapNorm(0.4); ny = snapNorm(0.5);
+    const d = _defaultRect(secId);
+    nx = d.x; ny = d.y;
   }
-  S.terraceRects.push({ x: nx, y: ny, w: w0, h: h0 });
-  S.activeTerraceRect = S.terraceRects.length - 1;
-  drawTerraceCanvas();
+  rects.push({ x: nx, y: ny, w: w0, h: h0 });
+  setSecActiveIdx(secId, rects.length - 1);
+  drawRectCanvas(secId);
 }
 
-function delActiveTerraceRect() {
-  if (!S.terraceRects || S.activeTerraceRect === null) return;
-  S.terraceRects.splice(S.activeTerraceRect, 1);
-  if (S.terraceRects.length === 0) {
-    S.activeTerraceRect = null;
-  } else {
-    S.activeTerraceRect = Math.min(S.activeTerraceRect, S.terraceRects.length - 1);
-  }
-  drawTerraceCanvas();
+function delActiveRect(secId) {
+  const rects = secRects(secId);
+  const act = secActiveIdx(secId);
+  if (act === null || !rects.length) return;
+  rects.splice(act, 1);
+  setSecActiveIdx(secId, rects.length ? Math.min(act, rects.length - 1) : null);
+  drawRectCanvas(secId);
 }
 
 // Определяет, по какому элементу попал клик: индекс rect и тип взаимодействия.
 //   Возвращает {idx, kind: 'nw'|'ne'|'sw'|'se'|'move'} или null.
 //   Сначала проверяем handles активного rect (приоритет — он сверху).
-function hitTerrace(wx, wy, W) {
-  const rects = S.terraceRects || [];
+function hitRect(secId, wx, wy, W) {
+  const rects = secRects(secId);
+  const act = secActiveIdx(secId);
   // Hitbox handle = визуальный радиус кружка В МИРОВЫХ координатах. Кружок рисуется
-  // как HANDLE_R / scale (см. drawTerraceCanvas), поэтому и зона попадания должна
+  // как HANDLE_R / scale (см. drawRectCanvas), поэтому и зона попадания должна
   // делиться на scale — иначе при зуме-аут клик по видимому кружку промахивается
   // мимо угла (срывается захват / вместо resize получается move).
-  const sc = (CV['terrace'] && CV['terrace'].scale) || 1;
+  const sc = (CV[secId] && CV[secId].scale) || 1;
   const R = HANDLE_R / sc;
   // 1. Handles активного rect (приоритет).
-  if (S.activeTerraceRect !== null && rects[S.activeTerraceRect]) {
-    const r = rects[S.activeTerraceRect];
+  if (act !== null && rects[act]) {
+    const r = rects[act];
     const rx = r.x * W, ry = r.y * W, rw = r.w * W, rh = r.h * W;
     for (const [k, cx, cy] of [['nw',rx,ry], ['ne',rx+rw,ry], ['sw',rx,ry+rh], ['se',rx+rw,ry+rh]]) {
-      if (Math.hypot(wx - cx, wy - cy) < R) {
-        return { idx: S.activeTerraceRect, kind: k };
-      }
+      if (Math.hypot(wx - cx, wy - cy) < R) return { idx: act, kind: k };
     }
   }
   // 2. Тело любого rect (от верхнего к нижнему — берём активный первым).
   const order = [];
-  if (S.activeTerraceRect !== null) order.push(S.activeTerraceRect);
-  for (let i = 0; i < rects.length; i++) if (i !== S.activeTerraceRect) order.push(i);
+  if (act !== null) order.push(act);
+  for (let i = 0; i < rects.length; i++) if (i !== act) order.push(i);
   for (const i of order) {
     const r = rects[i];
     const rx = r.x * W, ry = r.y * W, rw = r.w * W, rh = r.h * W;
@@ -1574,29 +1583,31 @@ function hitTerrace(wx, wy, W) {
   return null;
 }
 
-function applyTerraceDrag(wx, wy, W) {
-  if (trDragIdx < 0 || !S.terraceRects[trDragIdx]) return;
+function applyRectDrag(secId, wx, wy, W) {
+  const rects = secRects(secId);
+  if (trDragIdx < 0 || !rects[trDragIdx]) return;
   const ds = trDragStart;
   const dx = (wx - ds.mx) / W, dy = (wy - ds.my) / W;
-  const r = S.terraceRects[trDragIdx];
-  // excludeTerraceIdx = trDragIdx — редактируемый rect не снапается на свои кромки.
-  const res = snapDraggedRect(trDrag, ds, dx, dy, trDragIdx);
+  const r = rects[trDragIdx];
+  // excludeIdx = trDragIdx — редактируемый rect не снапается на свои кромки.
+  const res = snapDraggedRect(trDrag, ds, dx, dy, trDragIdx, secId);
   r.x = res.x; r.y = res.y; r.w = res.w; r.h = res.h;
-  drawTerraceCanvas();
+  drawRectCanvas(secId);
 }
 
-function attachTerraceEvents(wrap) {
+function attachRectEvents(wrap, secId) {
   // Слушатели вешаются на wrap/document ОДИН РАЗ. Раньше attach вызывался при каждом
   // открытии редактора → дубли слушателей и захват устаревшего cx из замыкания
-  // (срыв захвата / двойная обработка). Теперь guard + чтение CV['terrace'] свежим.
-  if (wrap._terraceBound) return;
-  wrap._terraceBound = true;
+  // (срыв захвата / двойная обработка). Теперь guard + чтение CV[secId] свежим.
+  if (wrap._rectBound) return;
+  wrap._rectBound = true;
   let touchId = null;
   let pinchActive = false;
+  const redraw = () => drawRectCanvas(secId);
 
   const getWorld = (clientX, clientY) => {
-    const cx = CV['terrace'] || { ox: 0, oy: 0, scale: 1 };
-    const cvEl = document.getElementById('cv-terrace');
+    const cx = CV[secId] || { ox: 0, oy: 0, scale: 1 };
+    const cvEl = document.getElementById('cv-' + secId);
     const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio||1;
     return {
       x: ((clientX - r.left)*dpr - cx.ox) / cx.scale,
@@ -1606,22 +1617,23 @@ function attachTerraceEvents(wrap) {
   };
 
   const startDrag = (worldX, worldY, W) => {
-    const hit = hitTerrace(worldX, worldY, W);
+    const hit = hitRect(secId, worldX, worldY, W);
     if (!hit) {
       // Клик в пустое место — снимаем активность.
-      S.activeTerraceRect = null;
-      drawTerraceCanvas();
+      setSecActiveIdx(secId, null);
+      redraw();
       return false;
     }
     // Если клик по неактивному rect — сначала активируем его (без drag).
-    if (hit.idx !== S.activeTerraceRect && hit.kind === 'move') {
-      S.activeTerraceRect = hit.idx;
-      drawTerraceCanvas();
+    if (hit.idx !== secActiveIdx(secId) && hit.kind === 'move') {
+      setSecActiveIdx(secId, hit.idx);
+      redraw();
       // Drag разрешаем сразу — пользователь может тащить активный rect.
     }
-    const r = S.terraceRects[hit.idx];
+    const r = secRects(secId)[hit.idx];
     trDrag = hit.kind;
     trDragIdx = hit.idx;
+    trDragSec = secId;
     trDragStart = { mx: worldX, my: worldY, x: r.x, y: r.y, w: r.w, h: r.h };
     return true;
   };
@@ -1629,7 +1641,7 @@ function attachTerraceEvents(wrap) {
   // ── TOUCH ──
   wrap.addEventListener('touchstart', e => {
     e.preventDefault();
-    const cx = CV['terrace']; if (!cx) return;
+    const cx = CV[secId]; if (!cx) return;
     if (e.touches.length === 2) {
       pinchActive = true; trDrag = null; touchId = null;
       cx.lastDist = Math.hypot(
@@ -1646,7 +1658,7 @@ function attachTerraceEvents(wrap) {
 
   wrap.addEventListener('touchmove', e => {
     e.preventDefault();
-    const cx = CV['terrace']; if (!cx) return;
+    const cx = CV[secId]; if (!cx) return;
     if (pinchActive && e.touches.length === 2) {
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
@@ -1662,46 +1674,48 @@ function attachTerraceEvents(wrap) {
       cx.ox = mx - (mx - cx.ox)*(ns/cx.scale);
       cx.oy = my - (my - cx.oy)*(ns/cx.scale);
       cx.scale = ns;
-      drawTerraceCanvas(); return;
+      redraw(); return;
     }
-    if (trDrag && touchId !== null) {
+    if (trDrag && trDragSec === secId && touchId !== null) {
       const t = [...e.touches].find(t => t.identifier === touchId); if (!t) return;
       const {x, y, W} = getWorld(t.clientX, t.clientY);
-      applyTerraceDrag(x, y, W);
+      applyRectDrag(secId, x, y, W);
     }
   }, { passive: false });
 
   wrap.addEventListener('touchend', e => {
     if (e.touches.length < 2) pinchActive = false;
-    if (e.touches.length === 0) { trDrag = null; trDragStart = null; trDragIdx = -1; touchId = null; }
+    if (e.touches.length === 0) {
+      trDrag = null; trDragStart = null; trDragIdx = -1; trDragSec = null; touchId = null;
+    }
   }, { passive: true });
 
   // ── МЫШЬ ──
-  attachMousePan(wrap, 'terrace', drawTerraceCanvas);   // ПКМ — перемещение плана
+  attachMousePan(wrap, secId, redraw);   // ПКМ — перемещение плана
   wrap.addEventListener('mousedown', e => {
-    // Реагируем только когда открыт редактор террасы (слушатель на wrap живёт всегда).
+    // Реагируем только когда открыт СВОЙ редактор (слушатель на wrap живёт всегда).
     if (e.button !== 0) return;                          // ЛКМ — инструмент, ПКМ — pan
-    if (!CV['terrace'] || !document.getElementById('d-canvas-terrace')?.classList.contains('active')) return;
+    if (!CV[secId] || !document.getElementById('d-canvas-' + secId)?.classList.contains('active')) return;
     const {x, y, W} = getWorld(e.clientX, e.clientY);
     if (startDrag(x, y, W)) {
       wrap.style.cursor = (trDrag === 'move') ? 'move' : 'nwse-resize';
     }
   });
   document.addEventListener('mousemove', e => {
-    if (!trDrag) return;
+    if (!trDrag || trDragSec !== secId) return;
     const {x, y, W} = getWorld(e.clientX, e.clientY);
-    applyTerraceDrag(x, y, W);
+    applyRectDrag(secId, x, y, W);
   });
   document.addEventListener('mouseup', () => {
-    if (!trDrag) return;
-    trDrag = null; trDragStart = null; trDragIdx = -1;
+    if (!trDrag || trDragSec !== secId) return;
+    trDrag = null; trDragStart = null; trDragIdx = -1; trDragSec = null;
     wrap.style.cursor = '';   // вернуть курсор из стилей (.d-canvas-area)
   });
 
   // Колесо → zoom
   wrap.addEventListener('wheel', e => {
     e.preventDefault();
-    const cx = CV['terrace']; if (!cx) return;
+    const cx = CV[secId]; if (!cx) return;
     const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio||1;
     const mx = (e.clientX - r.left)*dpr, my = (e.clientY - r.top)*dpr;
     const f = e.deltaY < 0 ? 1.15 : 0.87;
@@ -1709,14 +1723,15 @@ function attachTerraceEvents(wrap) {
     cx.ox = mx - (mx - cx.ox)*(ns/cx.scale);
     cx.oy = my - (my - cx.oy)*(ns/cx.scale);
     cx.scale = ns;
-    drawTerraceCanvas();
+    redraw();
   }, { passive: false });
 }
 
-function drawTerraceCanvas() {
-  const cvEl = document.getElementById('cv-terrace'); if (!cvEl) return;
+function drawRectCanvas(secId) {
+  const cfg = RECT_SECTIONS[secId]; if (!cfg) return;
+  const cvEl = document.getElementById('cv-' + secId); if (!cvEl) return;
   const ctx = cvEl.getContext('2d'), W = planPx(cvEl), H = W;
-  const cx = CV['terrace'] || { scale: 1, ox: 0, oy: 0 };
+  const cx = CV[secId] || { scale: 1, ox: 0, oy: 0 };
   applyTransform(ctx, cx, W, H);
 
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
@@ -1737,19 +1752,20 @@ function drawTerraceCanvas() {
     ctx.fillText(m + 'м', px, H - 3 / cx.scale);
   }
 
-  drawPreviousLayers(ctx, W, H, cx, 'terrace');
+  drawPreviousLayers(ctx, W, H, cx, secId);
 
   // Rects
-  const rects = S.terraceRects || [];
+  const rects = secRects(secId);
+  const act = secActiveIdx(secId);
   // Выбранный объект выделяется акцентным цветом (по макету), остальные —
-  // приглушённым зелёным под цвет террасы.
+  // приглушённым цветом своей секции.
   const COL = DIM_COL;
-  const COL_INACTIVE = '#5a8c5a';
+  const COL_INACTIVE = cfg.stroke;
   for (let i = 0; i < rects.length; i++) {
     const r = rects[i];
-    const isActive = (i === S.activeTerraceRect);
+    const isActive = (i === act);
     const rx = r.x * W, ry = r.y * W, rw = r.w * W, rh = r.h * W;
-    ctx.fillStyle = isActive ? 'rgba(242,114,44,.18)' : 'rgba(0,150,80,.12)';
+    ctx.fillStyle = isActive ? 'rgba(242,114,44,.18)' : cfg.fill;
     ctx.fillRect(rx, ry, rw, rh);
     ctx.strokeStyle = isActive ? COL : COL_INACTIVE;
     ctx.lineWidth = (isActive ? 2.5 : 1.8) / cx.scale;
@@ -1771,12 +1787,12 @@ function drawTerraceCanvas() {
     ctx.fillStyle = COL_INACTIVE;
     ctx.font = `bold ${11 / cx.scale}px ${UI_FONT}`;
     ctx.textAlign = 'center';
-    ctx.fillText('Терраса/Крыльцо', (bx0+bx1)/2*W, (by0+by1)/2*H);
+    ctx.fillText(cfg.label, (bx0+bx1)/2*W, (by0+by1)/2*H);
   }
 
   // Handles только у активного rect
-  if (S.activeTerraceRect !== null && rects[S.activeTerraceRect]) {
-    const r = rects[S.activeTerraceRect];
+  if (act !== null && rects[act]) {
+    const r = rects[act];
     const rx = r.x * W, ry = r.y * W, rw = r.w * W, rh = r.h * W;
     for (const [hpx, hpy] of [[rx,ry], [rx+rw,ry], [rx,ry+rh], [rx+rw,ry+rh]]) {
       ctx.beginPath();
@@ -1791,7 +1807,7 @@ function drawTerraceCanvas() {
     ctx.fillStyle = '#aaa';
     ctx.font = `${13 / cx.scale}px ${UI_FONT}`;
     ctx.textAlign = 'center';
-    ctx.fillText('Нажмите «＋ Прямоугольник» чтобы добавить террасу', W/2, H * 0.92);
+    ctx.fillText('Нажмите «ДОБАВИТЬ» чтобы разметить объект', W/2, H * 0.92);
   }
 
   ctx.restore();
