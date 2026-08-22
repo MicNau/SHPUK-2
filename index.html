@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=17">
+<link rel="stylesheet" href="styles-desktop.css?v=20">
 </head>
 <body>
 
@@ -103,8 +103,11 @@
         <!-- filled dynamically -->
       </div>
       <div class="d-sidebar-divider"></div>
-      <div style="padding: 12px 20px;">
-        <button class="d-btn d-btn-back" style="width:100%; height:40px; font-size:14px;" onclick="dBack()">← Назад</button>
+      <!-- Низ панели: «Назад» всегда, «Дальше» — пока открыт редактор (в него
+           переезжает кнопка подтверждения из футера редактора, см. _dMountEditorControls). -->
+      <div class="d-sidebar-actions">
+        <button class="d-btn d-btn-back" onclick="dBack()">← Назад</button>
+        <div class="d-sb-next hidden" id="d-sb-next"></div>
       </div>
     </div>
 
@@ -125,16 +128,20 @@
           </div>
           <div class="d-canvas-area" id="cw-terrace" style="cursor:default;"><canvas id="cv-terrace"></canvas></div>
           <div class="d-canvas-footer">
-            <div class="bed-h-row">
-              <span class="bed-h-lbl">Высота настила:</span>
-              <input class="d-terrace-h" type="number" id="v-terrace-h" min="10" step="5"
+            <div class="d-param-group">
+              <div class="d-param-head">
+                <span class="d-param-label">Высота настила, см.</span>
+                <input class="d-param-input" type="number" id="v-terrace-h" min="10" step="5"
+                       oninput="dSetTerraceHeight(this.value)">
+              </div>
+              <input class="d-param-range" type="range" id="r-terrace-h" min="10" step="5"
                      oninput="dSetTerraceHeight(this.value)">
-              <span class="bed-h-unit" id="d-terrace-h-hint">см</span>
+              <div class="d-param-unit" id="d-terrace-h-hint"><span>10 см</span><span>80 см</span></div>
             </div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addTerraceRect()">＋ Прямоугольник</button>
-              <button class="d-canvas-btn" onclick="delActiveTerraceRect()">✕ Удалить</button>
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('terrace')">✓ Готово</button>
+              <button class="d-canvas-btn" onclick="addTerraceRect()">Добавить</button>
+              <button class="d-canvas-btn" onclick="delActiveTerraceRect()">Удалить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('terrace')">Дальше →</button>
             </div>
           </div>
         </div>
@@ -151,7 +158,7 @@
             <div class="tg on" onclick="ttg(this)" data-id="steps-railing"><span class="tg-txt">Перила лестницы</span><div class="tg-ind"></div></div>
             <div class="tg" onclick="ttg(this)" data-id="steps-sheathing"><span class="tg-txt">Зашить</span><div class="tg-ind"></div></div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('steps')">✓ Готово</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('steps')">Дальше →</button>
             </div>
           </div>
         </div>
@@ -166,10 +173,10 @@
           <div class="d-canvas-area" id="cw-beds" style="cursor:default;"><canvas id="cv-beds"></canvas></div>
           <div class="d-canvas-footer">
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addBed()">＋ Грядка</button>
-              <button class="d-canvas-btn" onclick="rotateActiveBed()">⟳ Повернуть</button>
-              <button class="d-canvas-btn" onclick="delActiveBed()">✕ Удалить</button>
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('beds')">✓ Готово</button>
+              <button class="d-canvas-btn" onclick="addBed()">Добавить</button>
+              <button class="d-canvas-btn" onclick="rotateActiveBed()">Повернуть</button>
+              <button class="d-canvas-btn" onclick="delActiveBed()">Удалить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('beds')">Дальше →</button>
             </div>
           </div>
         </div>
@@ -185,9 +192,9 @@
           <div class="d-canvas-footer">
             <div class="tg" onclick="ttg(this)"><span class="tg-txt">Ограждение бассейна</span><div class="tg-ind"></div></div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="undoPt('pool_terrace')">↩ Отменить</button>
-              <button class="d-canvas-btn" onclick="clrPts('pool_terrace')">✕ Очистить</button>
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('pool_terrace')">✓ Готово</button>
+              <button class="d-canvas-btn" onclick="undoPt('pool_terrace')">Отменить</button>
+              <button class="d-canvas-btn" onclick="clrPts('pool_terrace')">Очистить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('pool_terrace')">Дальше →</button>
             </div>
           </div>
         </div>
@@ -206,10 +213,10 @@
               <input class="p-inp" type="number" id="v-paths-width" value="120" min="60" max="300" oninput="dOnPathWidth()">
             </div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addBreak('paths')">＋ Новая линия</button>
-              <button class="d-canvas-btn" onclick="undoPt('paths')">↩ Отменить</button>
-              <button class="d-canvas-btn" onclick="clrPts('paths')">✕ Очистить</button>
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('paths')">✓ Готово</button>
+              <button class="d-canvas-btn" onclick="addBreak('paths')">Добавить</button>
+              <button class="d-canvas-btn" onclick="undoPt('paths')">Отменить</button>
+              <button class="d-canvas-btn" onclick="clrPts('paths')">Очистить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('paths')">Дальше →</button>
             </div>
           </div>
         </div>
@@ -226,9 +233,9 @@
             <div class="tg" onclick="ttg(this)"><span class="tg-txt">Перила причала</span><div class="tg-ind"></div></div>
             <div class="tg" onclick="ttg(this)"><span class="tg-txt">Крыша / навес</span><div class="tg-ind"></div></div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="undoPt('pier')">↩ Отменить</button>
-              <button class="d-canvas-btn" onclick="clrPts('pier')">✕ Очистить</button>
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('pier')">✓ Готово</button>
+              <button class="d-canvas-btn" onclick="undoPt('pier')">Отменить</button>
+              <button class="d-canvas-btn" onclick="clrPts('pier')">Очистить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('pier')">Дальше →</button>
             </div>
           </div>
         </div>
@@ -244,10 +251,10 @@
           <div class="d-canvas-footer">
             <span class="d-facade-count" id="d-furniture-info"></span>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addFurniturePoint()">＋ Точка</button>
-              <button class="d-canvas-btn" onclick="rotateActiveFurniture(1)">⟲ Повернуть 90°</button>
-              <button class="d-canvas-btn" onclick="delActiveFurniture()">✕ Удалить точку</button>
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('furniture')">✓ Готово</button>
+              <button class="d-canvas-btn" onclick="addFurniturePoint()">Добавить</button>
+              <button class="d-canvas-btn" onclick="rotateActiveFurniture(1)">Повернуть</button>
+              <button class="d-canvas-btn" onclick="delActiveFurniture()">Удалить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('furniture')">Дальше →</button>
             </div>
           </div>
         </div>
@@ -263,10 +270,10 @@
           <div class="d-canvas-footer">
             <div class="tg" onclick="ttg(this)" data-id="railing-roof"><span class="tg-txt">Навес</span><div class="tg-ind"></div></div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addBreak('railing')">＋ Новая линия</button>
-              <button class="d-canvas-btn" onclick="undoPt('railing')">↩ Отменить</button>
-              <button class="d-canvas-btn" onclick="clrPts('railing')">✕ Очистить</button>
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('railing')">✓ Готово</button>
+              <button class="d-canvas-btn" onclick="addBreak('railing')">Добавить</button>
+              <button class="d-canvas-btn" onclick="undoPt('railing')">Отменить</button>
+              <button class="d-canvas-btn" onclick="clrPts('railing')">Очистить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('railing')">Дальше →</button>
             </div>
           </div>
         </div>
@@ -284,7 +291,7 @@
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="dFacadeSelectAll()">Выбрать всё</button>
               <button class="d-canvas-btn" onclick="dFacadeClear()">Сбросить</button>
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('facade')">✓ Готово</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('facade')">Дальше →</button>
             </div>
           </div>
         </div>
@@ -307,10 +314,10 @@
               <span class="bed-h-unit">м</span>
             </div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addBreak('fence')">＋ Новая линия</button>
-              <button class="d-canvas-btn" onclick="undoPt('fence')">↩ Отменить</button>
-              <button class="d-canvas-btn" onclick="clrPts('fence')">✕ Очистить</button>
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('fence')">✓ Готово</button>
+              <button class="d-canvas-btn" onclick="addBreak('fence')">Добавить</button>
+              <button class="d-canvas-btn" onclick="undoPt('fence')">Отменить</button>
+              <button class="d-canvas-btn" onclick="clrPts('fence')">Очистить</button>
+              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('fence')">Дальше →</button>
             </div>
           </div>
         </div>
@@ -414,6 +421,6 @@
 <script src="viewer3d-railing.js?v=5"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=72"></script>
+<script src="nav-desktop.js?v=74"></script>
 </body>
 </html>

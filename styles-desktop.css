@@ -297,16 +297,21 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 .d-workspace { flex: 1; display: flex; background: var(--bg); }
 
 /* LEFT SIDEBAR — button menu */
+/* Заголовок и кнопки «Назад/Дальше» приколочены, скроллится только список
+   элементов: с раскрытым аккордеоном содержимое перестаёт помещаться. */
 .d-sidebar {
   width: var(--sidebar-w); border-right: 1px solid #e0e0e0;
-  display: flex; flex-direction: column; overflow-y: auto;
+  display: flex; flex-direction: column; overflow: hidden;
 }
 /* Заголовки экранов — 36px обычного веса, как «Выберите тип дома» на первом. */
 .d-sidebar-title {
   font-size: 36px; font-weight: 400; color: var(--text);
   padding: 24px 20px 16px;
 }
-.d-sidebar-list { flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 0 8px; }
+.d-sidebar-list {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 4px; padding: 0 8px;
+}
 /* Кнопки правки и удаления стоят справа от кнопки элемента и выравниваются
    по её верхнему краю (в аккордеоне под кнопкой раскрываются настройки). */
 .d-sb-row { display: flex; gap: 2px; align-items: flex-start; }
@@ -367,6 +372,21 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   pointer-events: auto;
 }
 .d-sidebar-divider { height: 1px; background: #e8e8e8; margin: 8px 20px; }
+/* ── Аккордеон редактора в левой панели ──
+   Настройки открытого элемента раскрываются под его кнопкой, кнопки действий
+   встают колонкой справа, кнопка подтверждения — вниз панели рядом с «Назад».
+   Узлы переносятся из футера редактора (_dMountEditorControls). */
+.d-sb-accordion { padding: 10px 2px 14px; }
+.d-sb-accordion:empty { display: none; }
+.d-sb-actions { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
+.d-sb-actions .d-canvas-btn { height: 48px; white-space: nowrap; }
+.d-sidebar-actions { display: flex; gap: 12px; padding: 12px 20px; flex-shrink: 0; }
+.d-sidebar-actions .d-btn { flex: 1; height: 48px; font-size: 18px; }
+.d-sb-next { flex: 1; display: flex; }
+.d-sb-next.hidden { display: none; }
+.d-sb-next .d-canvas-btn { flex: 1; height: 48px; font-size: 18px; }
+/* Пока управление в панели, футер редактора пуст — убираем его совсем. */
+.d-canvas-footer.moved { display: none; }
 
 /* CENTER — 3D / Canvas editor */
 .d-center {
@@ -401,12 +421,17 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   background: var(--bg); flex-direction: column;
 }
 .d-center-canvas.active { display: flex; }
+/* Инструкция редактора — в левом верхнем углу поверх плана, без подложки и
+   разделителя: по макету заголовка у редактора нет, только текст подсказки. */
 .d-canvas-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 20px; border-bottom: 1px solid #e0e0e0;
+  position: absolute; top: 0; left: 0; z-index: 2;
+  padding: 20px 24px; pointer-events: none;
 }
-.d-canvas-title { font-size: 16px; font-weight: 700; }
-.d-canvas-hint { font-size: 12px; color: #999; }
+.d-canvas-title { display: none; }
+.d-canvas-hint {
+  font-size: 16px; font-weight: 400; color: var(--text);
+  line-height: 1.35; max-width: 440px;
+}
 .d-canvas-actions { display: flex; gap: 8px; }
 /* Кнопки действий редактора — в правый нижний угол (в футере, прижаты вправо). */
 .d-canvas-footer .d-canvas-actions { margin-left: auto; }

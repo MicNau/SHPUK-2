@@ -285,7 +285,9 @@ function _dResetAllConfigurations() {
   dEditorOpen = false;
   // Возвращаем toggle'ы (террасы / крыльца) к дефолтным значениям из HTML
   // (initial-class "on" → ON). Сбрасываем все .tg в их HTML-дефолт + зеркало S.toggles.
-  document.querySelectorAll('.d-center-canvas .tg').forEach(tg => {
+  // Селектор без привязки к .d-center-canvas: пока редактор открыт, переключатели
+  // перенесены в левую панель (_dMountEditorControls).
+  document.querySelectorAll('.tg').forEach(tg => {
     const isInitiallyOn = tg.dataset.initialOn === '1';
     tg.classList.toggle('on', isInitiallyOn);
     if (tg.dataset.id) S.toggles[tg.dataset.id] = isInitiallyOn;
@@ -299,7 +301,7 @@ function _dResetAllConfigurations() {
 // Запоминаем стартовое состояние toggle'ов один раз при инициализации UI
 // (чтобы _dResetAllConfigurations мог их вернуть к этим значениям).
 function _dCacheToggleDefaults() {
-  document.querySelectorAll('.d-center-canvas .tg').forEach(tg => {
+  document.querySelectorAll('.tg').forEach(tg => {
     if (tg.dataset.initialOn === undefined) {
       tg.dataset.initialOn = tg.classList.contains('on') ? '1' : '0';
     }
@@ -563,23 +565,31 @@ function dSetTerraceHeight(cm) {
   const { min, max } = dTerraceHeightRange();
   const v = Math.min(max, Math.max(min, parseFloat(cm) || min));
   S.terraceH = v / 100;
+  // Поле и слайдер — два вида одного значения, держим их синхронными.
   const inp = document.getElementById('v-terrace-h');
   if (inp && String(v) !== inp.value) inp.value = v;
+  const rng = document.getElementById('r-terrace-h');
+  if (rng && String(v) !== rng.value) rng.value = v;
+  if (rng) _dSyncRangeFill(rng);
   if (typeof onParamChange === 'function') onParamChange();
 }
 
 // Подтянуть поле к состоянию (открытие редактора, смена высоты фундамента).
 function _dSyncTerraceHeight() {
   const inp = document.getElementById('v-terrace-h');
+  const rng = document.getElementById('r-terrace-h');
   const hint = document.getElementById('d-terrace-h-hint');
   if (!inp) return;
+  // Потолок зависит от высоты фундамента, поэтому диапазон и границы под
+  // слайдером пересчитываются при каждом открытии редактора.
   const { min, max } = dTerraceHeightRange();
   inp.min = min; inp.max = max;
   const cur = (typeof S.terraceH === 'number') ? Math.round(S.terraceH * 100) : max;
   const v = Math.min(max, Math.max(min, cur));
   inp.value = v;
+  if (rng) { rng.min = min; rng.max = max; rng.value = v; _dSyncRangeFill(rng); }
   S.terraceH = v / 100;
-  if (hint) hint.textContent = `см (${min}–${max})`;
+  if (hint) hint.innerHTML = `<span>${min} см</span><span>${max} см</span>`;
 }
 
 function dSetFenceHeight(m) {
@@ -661,12 +671,66 @@ function _dInitWorkspace() {
 }
 
 // ── SIDEBAR ──
+//
+// Управление редактором собрано в левой панели (аккордеон): настройки открытого
+// элемента раскрываются ПОД его кнопкой, остальные кнопки меню съезжают вниз,
+// «Добавить/Удалить» встают справа от кнопки, «Дальше» — внизу панели.
+//
+// Сами контролы не дублируются: DOM-узлы из футера редактора переносятся в
+// панель и возвращаются обратно при закрытии. Так сохраняются все onclick’и и
+// состояние полей — переписывать десять редакторов не нужно.
+let _dMovedControls = [];   // [{node, home}] — что вынесено в панель
+
+function _dUnmountEditorControls() {
+  // В обратном порядке и перед запомненным соседом — иначе узлы вернутся
+  // в футер в другой последовательности.
+  for (let i = _dMovedControls.length - 1; i >= 0; i--) {
+    const { node, home, before } = _dMovedControls[i];
+    if (!home) continue;
+    home.insertBefore(node, (before && before.parentNode === home) ? before : null);
+  }
+  _dMovedControls = [];
+  document.querySelectorAll('.d-canvas-footer.moved')
+    .forEach(f => f.classList.remove('moved'));
+}
+
+function _dMountEditorControls(secId) {
+  const cv = document.getElementById('d-canvas-' + secId);
+  const footer = cv && cv.querySelector('.d-canvas-footer');
+  const accordion = document.getElementById('d-sb-accordion');
+  const actions = document.getElementById('d-sb-actions');
+  const nextSlot = document.getElementById('d-sb-next');
+  if (!footer || !accordion) return;
+
+  const move = (node, target) => {
+    if (!node || !target) return;
+    _dMovedControls.push({ node, home: node.parentNode, before: node.nextSibling });
+    target.appendChild(node);
+  };
+
+  // «Готово» уходит вниз панели (там оно читается как «Дальше»), остальные
+  // кнопки действий — справа от кнопки элемента.
+  footer.querySelectorAll('.d-canvas-btn').forEach(btn => {
+    move(btn, btn.classList.contains('confirm') ? nextSlot : actions);
+  });
+  // Всё остальное из футера (высота настила, переключатели) — под кнопку.
+  [...footer.children].forEach(node => {
+    if (node.classList.contains('d-canvas-actions')) return;   // опустела выше
+    move(node, accordion);
+  });
+  footer.classList.add('moved');
+  _dSyncAllRangeFills();
+}
+
 function _dRenderSidebar() {
   const list = document.getElementById('d-sidebar-list');
+  // Вернуть перенесённые узлы до перерисовки — innerHTML их бы уничтожил.
+  _dUnmountEditorControls();
   list.innerHTML = D_SIDEBAR_ITEMS.map(item => {
     const isActive = dActiveItem === item.id;
     const isCfg = dConfigured.has(item.id);
     const isLocked = dEditorOpen && dActiveItem !== item.id;
+    const isEditing = dEditorOpen && isActive;
     return `
       <div class="d-sb-row">
         <button class="d-sb-btn ${isActive ? 'active' : ''} ${isCfg ? 'configured' : ''} ${isLocked ? 'locked' : ''}"
@@ -675,12 +739,20 @@ function _dRenderSidebar() {
                 ${isLocked ? 'disabled' : ''}>
           ${item.lbl}
         </button>
-        ${isCfg && item.hasEditor ? `<button class="d-sb-edit ${isLocked ? 'locked' : ''}" title="Редактировать"
+        ${isEditing ? '<div class="d-sb-actions" id="d-sb-actions"></div>' : ''}
+        ${!isEditing && isCfg && item.hasEditor ? `<button class="d-sb-edit ${isLocked ? 'locked' : ''}" title="Редактировать"
             onclick="dEditItem('${item.id}')" ${isLocked ? 'disabled' : ''}><img src="assets/icons/icon_edit.svg" alt=""></button>` : ''}
-        ${isCfg ? `<button class="d-sb-delete ${isLocked ? 'locked' : ''}" title="Удалить настройки"
+        ${!isEditing && isCfg ? `<button class="d-sb-delete ${isLocked ? 'locked' : ''}" title="Удалить настройки"
             onclick="dDeleteItem('${item.id}')" ${isLocked ? 'disabled' : ''}><img src="assets/icons/icon_delete.svg" alt=""></button>` : ''}
-      </div>`;
+      </div>
+      ${isEditing ? '<div class="d-sb-accordion" id="d-sb-accordion"></div>' : ''}`;
   }).join('');
+
+  // Кнопка «Дальше» внизу панели живёт только пока открыт редактор.
+  const nextSlot = document.getElementById('d-sb-next');
+  if (nextSlot) nextSlot.classList.toggle('hidden', !dEditorOpen);
+
+  if (dEditorOpen && dActiveItem) _dMountEditorControls(dActiveItem);
 
   // Правую панель материалов показываем только когда выбран элемент проекта.
   const panel = document.getElementById('d-panel');
