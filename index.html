@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=16">
+<link rel="stylesheet" href="styles-desktop.css?v=17">
 </head>
 <body>
 
@@ -49,21 +49,25 @@
       <div class="d-params-scroll">
       <!-- Глобальные параметры -->
       <div class="d-param-group" id="d-area-group">
-        <div class="d-param-label">Общая площадь дома (кв.м)</div>
-        <input class="d-param-input" type="number" id="v-area" value="80" min="40" max="100"
-               oninput="dOnAreaTotal()">
+        <div class="d-param-head">
+          <span class="d-param-label">Общая площадь дома (кв.м)</span>
+          <input class="d-param-input" type="number" id="v-area" value="80" min="40" max="100"
+                 oninput="dOnAreaTotal()">
+        </div>
         <input class="d-param-range" type="range" id="r-area" value="80" min="40" max="100" step="5"
                oninput="document.getElementById('v-area').value=this.value; dOnAreaTotal()">
-        <div class="d-param-unit" id="d-area-range-hint">40 — 100 кв.м</div>
+        <div class="d-param-unit" id="d-area-range-hint"><span>40 кв.м</span><span>100 кв.м</span></div>
       </div>
 
       <div class="d-param-group">
-        <div class="d-param-label">Высота фундамента (см)</div>
-        <input class="d-param-input" type="number" id="v-found" value="80" min="50" max="120"
-               oninput="dOnParam()">
+        <div class="d-param-head">
+          <span class="d-param-label">Высота фундамента (см)</span>
+          <input class="d-param-input" type="number" id="v-found" value="80" min="50" max="120"
+                 oninput="dOnParam()">
+        </div>
         <input class="d-param-range" type="range" id="r-found" value="80" min="50" max="120" step="10"
                oninput="document.getElementById('v-found').value=this.value; dOnParam()">
-        <div class="d-param-unit">50 — 120 см</div>
+        <div class="d-param-unit"><span>50 см</span><span>120 см</span></div>
       </div>
 
       <!-- Per-floor параметры (генерируются динамически на основе дескриптора) -->
@@ -410,6 +414,6 @@
 <script src="viewer3d-railing.js?v=5"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=71"></script>
+<script src="nav-desktop.js?v=72"></script>
 </body>
 </html>

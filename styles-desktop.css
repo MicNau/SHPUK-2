@@ -187,19 +187,56 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   display: flex; flex-direction: column; gap: 0;
   overflow: hidden;
 }
-.d-params-title { font-size: 24px; font-weight: 700; margin-bottom: 24px; flex: none; }
+.d-params-title { font-size: 36px; font-weight: 400; margin-bottom: 24px; flex: none; }
 /* Заголовок и кнопки «Назад/Дальше» приколочены; скроллится только этот блок. */
 .d-params-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+/* ── Слайдер параметра ──
+   По макету: подпись слева, поле значения 44×44 справа, ниже дорожка 2px с
+   оранжевой заливкой слева от бегунка, под ней — границы диапазона.
+   Используется и в параметрах дома, и в настройках элементов в редакторах. */
 .d-param-group { margin-bottom: 20px; }
-.d-param-label { font-size: 14px; font-weight: 300; color: #666; margin-bottom: 6px; }
-.d-param-input {
-  width: 100%; height: 44px; background: var(--card); border: none; border-radius: var(--r);
-  text-align: center; font-size: 20px; font-weight: 600; outline: none; transition: background .15s;
+.d-floor-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
+.d-param-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
-.d-param-input:focus { background: #c0c0c0; }
-.d-param-unit { font-size: 12px; color: #999; text-align: center; margin-top: 4px; }
+.d-param-label { font-size: 16px; font-weight: 400; color: #999; }
+.d-param-input {
+  width: 44px; height: 44px; flex-shrink: 0;
+  background: var(--btn-off-bg); border: 1px solid var(--btn-border); border-radius: var(--r);
+  text-align: center; font-size: 18px; font-weight: 600; color: var(--text);
+  outline: none; transition: border-color .15s; -moz-appearance: textfield;
+}
+.d-param-input::-webkit-outer-spin-button,
+.d-param-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.d-param-input:focus { border-color: var(--accent); }
+/* Границы диапазона: минимум слева, максимум справа. */
+.d-param-unit {
+  display: flex; justify-content: space-between;
+  font-size: 16px; font-weight: 400; color: #999; margin-top: 8px;
+}
+/* Заливку слева от бегунка нативный range не умеет — долю считает
+   _dSyncRangeFill (nav-desktop.js) и кладёт в --fill. */
 .d-param-range {
-  width: 100%; margin-top: 8px; accent-color: #000;
+  --fill: 0%;
+  width: 100%; height: 24px; margin: 14px 0 0; padding: 0;
+  background: none; -webkit-appearance: none; appearance: none; cursor: pointer;
+}
+.d-param-range::-webkit-slider-runnable-track {
+  height: 2px;
+  background: linear-gradient(to right, var(--accent) var(--fill), var(--border) var(--fill));
+}
+.d-param-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 24px; height: 24px; margin-top: -11px; border: none; border-radius: 50%;
+  background: radial-gradient(circle at center, var(--accent) 0 4px, #fff 4px);
+  box-shadow: 0 0 6px 2px rgba(0,0,0,.25);
+}
+.d-param-range::-moz-range-track { height: 2px; background: var(--border); }
+.d-param-range::-moz-range-progress { height: 2px; background: var(--accent); }
+.d-param-range::-moz-range-thumb {
+  width: 24px; height: 24px; border: none; border-radius: 50%;
+  background: radial-gradient(circle at center, var(--accent) 0 4px, #fff 4px);
+  box-shadow: 0 0 6px 2px rgba(0,0,0,.25);
 }
 .d-params-center {
   flex: 1; display: flex; align-items: stretch; justify-content: center;
@@ -264,9 +301,10 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   width: var(--sidebar-w); border-right: 1px solid #e0e0e0;
   display: flex; flex-direction: column; overflow-y: auto;
 }
+/* Заголовки экранов — 36px обычного веса, как «Выберите тип дома» на первом. */
 .d-sidebar-title {
-  font-size: 13px; font-weight: 600; color: #999; letter-spacing: .08em;
-  text-transform: uppercase; padding: 16px 20px 10px;
+  font-size: 36px; font-weight: 400; color: var(--text);
+  padding: 24px 20px 16px;
 }
 .d-sidebar-list { flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 0 8px; }
 /* Кнопки правки и удаления стоят справа от кнопки элемента и выравниваются
@@ -292,32 +330,25 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   border-color: var(--btn-border); box-shadow: none;
   cursor: not-allowed; pointer-events: none;
 }
-/* Правка и удаление настроенного элемента — квадраты 48×48 справа от кнопки,
-   по верхнему краю ряда. Правка — оранжевая заливка, удаление — контурная.
-   TODO: глифы ✏ / × заменить на иконки из макета, когда их выгрузят из Figma. */
-.d-sb-edit {
-  width: 48px; flex-shrink: 0; background: var(--accent); color: #fff;
-  border: none; border-radius: var(--r); font-size: 20px; cursor: pointer;
+/* Правка и удаление настроенного элемента — оранжевые квадраты 48×48 справа от
+   кнопки, по верхнему краю ряда; иконки белые (assets/icons). */
+.d-sb-edit, .d-sb-delete {
+  width: 48px; height: 48px; flex-shrink: 0; background: var(--accent);
+  border: none; border-radius: var(--r); cursor: pointer; padding: 0;
   display: flex; align-items: center; justify-content: center;
   transition: background .15s;
 }
-.d-sb-edit:hover:not(:disabled) { background: var(--accent-hover); }
-.d-sb-edit.locked, .d-sb-edit:disabled {
-  background: var(--btn-off-bg); color: var(--btn-off-text);
-  cursor: not-allowed; pointer-events: none;
-}
-.d-sb-delete {
-  width: 48px; flex-shrink: 0; background: var(--bg); border: 2px solid var(--btn-border);
-  border-radius: var(--r); font-size: 22px; line-height: 1; cursor: pointer; color: var(--text);
-  display: flex; align-items: center; justify-content: center;
-  transition: box-shadow .2s, color .15s, border-color .15s;
-}
-.d-sb-delete:hover:not(:disabled) { box-shadow: var(--hover-shadow); color: #c53030; }
+.d-sb-edit:hover:not(:disabled),
+.d-sb-delete:hover:not(:disabled) { background: var(--accent-hover); }
+.d-sb-edit.locked, .d-sb-edit:disabled,
 .d-sb-delete.locked, .d-sb-delete:disabled {
-  background: var(--btn-off-bg); color: var(--btn-off-text);
-  border-color: var(--btn-border); box-shadow: none;
-  cursor: not-allowed; pointer-events: none;
+  background: var(--btn-off-bg); cursor: not-allowed; pointer-events: none;
 }
+/* Иконки разного размера — задаём каждой свой, растягивать по общему правилу нельзя. */
+.d-sb-edit img { width: 20px; height: 20px; display: block; }
+.d-sb-delete img { width: 19px; height: 18px; display: block; }
+/* У заблокированной кнопки белая иконка на светлом фоне не видна — гасим её. */
+.d-sb-edit:disabled img, .d-sb-delete:disabled img { filter: brightness(0) invert(.65); }
 
 /* Toast-уведомление (про конфликт крыльцо↔терраса и т.п.) */
 #d-toast {
