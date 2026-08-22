@@ -1118,7 +1118,7 @@ function buildScene3d() {
     // Подкладки (по исходным границам) + настил крыльев (по подрезанным).
     for (const R of tR) {
       if (R.maxX - R.minX < 0.3 || R.maxZ - R.minZ < 0.3) continue;
-      buildConstructionPad(houseGroup, R.minX, R.maxX, R.minZ, R.maxZ, 0.30);
+      buildConstructionPad(houseGroup, R.minX, R.maxX, R.minZ, R.maxZ);
       const foot = [
         { x: R.eMinX, z: R.eMinZ }, { x: R.eMaxX, z: R.eMinZ },
         { x: R.eMaxX, z: R.eMaxZ }, { x: R.eMinX, z: R.eMaxZ },
@@ -1247,9 +1247,15 @@ function buildScene3d() {
   // Навес включается тумблером в редакторе ОГРАЖДЕНИЙ (TODO.md → ОГРАЖДЕНИЯ 3).
   const terraceCanopyOn = tgOn('railing-roof');
   if (terraceCanopyOn && S.sections.includes('terrace')) {
+    // Колонны навеса красятся материалом ограждения (см. buildTerraceCanopies).
+    M.railing = _resolveDeckMat(_baseDeck, 'railing');
+    let _cols = 0;
     try {
-      buildTerraceCanopies(houseGroup, M, terraceRectPolys, terraceLevel, houseL, houseW);
+      _cols = buildTerraceCanopies(houseGroup, M, terraceRectPolys, terraceLevel, houseL, houseW);
     } catch (e) { console.error('[buildTerraceCanopies]', e); }
+    // Колонн не построили (ограждение держит навес само) — заготовку освобождаем.
+    if (!_cols && M.railing && M.railing !== _baseDeck) M.railing.dispose();
+    M.railing = null;
   }
 
   // Ограждение — отдельный элемент проекта: строится по НАРИСОВАННОЙ ломаной

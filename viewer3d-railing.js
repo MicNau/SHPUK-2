@@ -510,7 +510,11 @@ function _buildCanopySlab(parent, foot, params, deckHeight, canopyT, matRoof) {
 function buildTerraceCanopies(parent, M, rectPolys, deckHeight, houseL, houseW) {
   const canopyT = 0.06, colT = 0.14;
   const matRoof = M.roof || M.deck;
-  const matPost = M.post || M.step;
+  // Колонны навеса — из материала ОГРАЖДЕНИЯ (M.railing): навес и ограждение — одна
+  // конструкция, и стойка со стоковым цветом GLB рядом с товарным ограждением
+  // читалась как «без материала». Нет материала ограждения — прежний M.post.
+  const matPost = M.railing || M.post || M.step;
+  let colBuilt = 0;
   const rects = rectPolys.map(pp => {
     const wp = canvasToWorld(pp.filter(p => !p.break), houseL, houseW);
     return { wp, P: _terraceCanopyParams(wp, houseL, houseW) };
@@ -596,6 +600,7 @@ function buildTerraceCanopies(parent, M, rectPolys, deckHeight, houseL, houseW) 
                      && _houseCache.modules
                      && _houseCache.modules.porch_column);
   if (!railingOn) for (const p of colPts) {
+    colBuilt++;
     if (useGlbCol) {
       HouseBuilder.placeScaledGlb(
         parent, _houseCache.modules, 'porch_column',
@@ -603,6 +608,12 @@ function buildTerraceCanopies(parent, M, rectPolys, deckHeight, houseL, houseW) 
         p.x, deckHeight + p.h / 2, p.z,
         0, 'mat_porch_column', PORCH_COLUMN_COLOR
       );
+      // placeScaledGlb только переименовывает материалы модуля, цвет остаётся из GLB —
+      // накладываем материал ограждения на только что добавленную обёртку.
+      if (matPost) {
+        const w = parent.children[parent.children.length - 1];
+        if (w) w.traverse(c => { if (c.isMesh) c.material = matPost; });
+      }
     } else {
       const col = new THREE.Mesh(new THREE.BoxGeometry(colT, p.h, colT), matPost);
       col.position.set(p.x, deckHeight + p.h / 2, p.z);
@@ -611,6 +622,7 @@ function buildTerraceCanopies(parent, M, rectPolys, deckHeight, houseL, houseW) 
       threeState.canopyMeshes.push(col);
     }
   }
+  return colBuilt;
 }
 
 

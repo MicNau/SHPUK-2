@@ -261,13 +261,19 @@ function _buildTerracePoly(parent, M, foot, deckHeight, plankAlongX, meshArrayNa
 // (HouseBuilder строит его по контуру). Перекрытие с pad-ом дома и соседними
 // подкладками допустимо — одинаковый цвет/высота дают бесшовную тёмную зону.
 // НЕ кладётся в deckMeshes: иначе смена deck-материала перекрасила бы подкладку.
+// Подкладка выступает из-под конструкции на PAD_OFFSET (10 см — по требованию
+// 2026-08-22; было 30 см, из-за чего у террасы и лестницы она читалась как отдельная
+// площадка) и красится нейтрально-серым.
 // Материал создаётся per-build и диспозится в clearGroup(houseGroup, true).
+const PAD_OFFSET = 0.10;      // выступ подкладки за габарит конструкции, м
+const PAD_COLOR  = 0x808080;  // нейтрально-серый
 function buildConstructionPad(parent, minX, maxX, minZ, maxZ, offset) {
   const padThick = 0.05;
-  const W = (maxX - minX) + 2 * offset;
-  const D = (maxZ - minZ) + 2 * offset;
+  const off = (offset === undefined) ? PAD_OFFSET : offset;
+  const W = (maxX - minX) + 2 * off;
+  const D = (maxZ - minZ) + 2 * off;
   if (W < 0.3 || D < 0.3) return;
-  const mat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.95, metalness: 0.0 });
+  const mat = new THREE.MeshStandardMaterial({ color: PAD_COLOR, roughness: 0.95, metalness: 0.0 });
   mat.name = 'mat_construction_pad';
   const m = new THREE.Mesh(new THREE.BoxGeometry(W, padThick, D), mat);
   m.position.set((minX + maxX) / 2, padThick / 2, (minZ + maxZ) / 2);
@@ -1075,7 +1081,11 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         const topExt = RAIL_INSET * slopeLen0 / run;
         const u = slope0.clone().multiplyScalar(1 / slopeLen0);       // единичный вектор вниз по скату
         const A = P0.clone().addScaledVector(u, -topExt);             // верх с продлением
+        // Низ ПРОДЛЕВАЕМ по скату до земли: P1 лежит на уровне последней проступи
+        // (realRise над грунтом), и столб-ньюэл там висел в воздухе — перед лестницей
+        // проступей уже нет. Идём по тому же уклону, пока Y не станет 0.
         const B = P1.clone();
+        if (u.y < -1e-6 && B.y > 1e-4) B.addScaledVector(u, B.y / -u.y);
 
         // ── Перила (rails) под рейк: ось X — вдоль ската (наклон), Y — вертикаль (сдвиг) ──
         const slopeVec = new THREE.Vector3().subVectors(B, A);
@@ -1087,7 +1097,7 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         mRail.multiply(new THREE.Matrix4().makeScale(L, ky, 1));       // длина ската × высота модуля
         placeGeo(RC.rails, mRail);
 
-        // ── Нижний столб-ньюэл (post), вертикальный, на последней проступи ──
+        // ── Нижний столб-ньюэл (post), вертикальный, стоит НА ЗЕМЛЕ (B продлён до Y=0) ──
         const mPost = new THREE.Matrix4().makeBasis(headX, up, crossH);
         mPost.setPosition(B.x, B.y, B.z);
         mPost.multiply(new THREE.Matrix4().makeScale(1, ky, 1));
@@ -1121,7 +1131,7 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   stairGroup.updateMatrixWorld(true);
   const _sb = new THREE.Box3().setFromObject(stairGroup);
   if (isFinite(_sb.min.x) && _sb.max.x > _sb.min.x) {
-    buildConstructionPad(parent, _sb.min.x, _sb.max.x, _sb.min.z, _sb.max.z, 0.30);
+    buildConstructionPad(parent, _sb.min.x, _sb.max.x, _sb.min.z, _sb.max.z);
   }
 }
 
