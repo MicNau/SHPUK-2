@@ -639,6 +639,7 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   transition: background .15s;
 }
 .d-mat-zoom:hover { background: var(--accent); }
+.d-mat-zoom img { width: 13px; height: 13px; display: block; }
 /* Фото товара: затемнение такое же, как у окна сметы. */
 .d-photo-overlay {
   display: none; position: fixed; inset: 0; z-index: 300;
@@ -786,6 +787,13 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 .est-total { font-size:16px; }
 .est-note { font-size:11px; color:#999; margin-top:8px; }
 /* Кнопка выгрузки сметы в PDF + статус фоновой задачи рядом с ней. */
+/* Смета проекта: раздел на каждый объект и общий итог под ними. */
+.est-obj-title { font-size:14px; font-weight:600; margin:18px 0 6px; }
+.est-project-total {
+  display:flex; justify-content:space-between; align-items:baseline;
+  margin-top:16px; padding-top:10px; border-top:2px solid #333;
+  font-size:16px; font-weight:700;
+}
 .est-actions { display:flex; align-items:center; gap:12px; margin-top:12px; }
 .est-actions .est-note { margin-top:0; }
 
