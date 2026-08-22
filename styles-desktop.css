@@ -1,13 +1,23 @@
 /* DESKTOP STYLES — 3-column layout for configurator */
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-/* Без скруглений: острые углы у всех элементов интерфейса. */
-*, *::before, *::after { border-radius: 0 !important; }
+/* Скругления по макету: R=4 у всего, кроме карточек — они остаются прямоугольными
+   (см. .d-house-card / .d-mat-card ниже). Селектор * имеет нулевую специфичность,
+   поэтому любое явное правило — круги 50%, прямые углы карточек — его перекрывает. */
+*, *::before, *::after { border-radius: var(--r); }
 :root {
   --bg: #fff;
   --card: #d9d9d9;
   --card-hover: #ccc;
   --text: #000;
-  --r: 0;
+  --r: 4px;
+  /* Кнопки по макету: первичная — оранжевая с белой надписью; второстепенная —
+     белая с обводкой 2px; неактивная — серый фон с тёмно-серой надписью. */
+  --btn-border: #e0e0e0;
+  --btn-off-bg: #f8f8f8;
+  --btn-off-text: #999999;
+  --radio-off-border: #d9d9d9;
+  /* Реакция на наведение у белых кнопок и карточек. */
+  --hover-shadow: 0 0 4px 4px rgba(0,0,0,.12);
   /* Акцент кнопок действий (бывшая чёрная заливка). Тот же цвет — выбранная
      карточка дома в макете Figma. */
   --accent: #f2722c;
@@ -18,8 +28,8 @@
   --center-bg: #f0f0f0;  /* color/center-bg — фон карточки загрузки фото */
   --center-bg-hover: #e8e8e8;
   --border: #e0e0e0;     /* color/border */
-  --sidebar-w: 300px;
-  --panel-w: 340px;
+  --sidebar-w: 364px;
+  --panel-w: 364px;
 }
 /* Шрифт интерфейса — Segoe UI (как в макетах Figma). Roboto оставлен запасным
    вариантом для систем без Segoe UI. Подписи на canvas используют UI_FONT
@@ -90,9 +100,10 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   border: 4px solid #e0e0e0; border-top-color: #666; border-radius: 50%;
   animation: d-spin 0.9s linear infinite;
 }
-/* Карточка дома 240×180: белый фон, рамка 1px, подпись поверх превью снизу слева. */
+/* Карточка дома 240×180: белый фон, рамка 1px, подпись поверх превью снизу слева.
+   Углы прямые — карточки единственное, что не скругляется (см. правило * выше). */
 .d-house-card {
-  position: relative; height: 180px; background: var(--bg);
+  position: relative; height: 180px; background: var(--bg); border-radius: 0;
   border: 1px solid var(--separator); margin: 0 -1px -1px 0;
   cursor: pointer; overflow: hidden;
   transition: border-color .2s, box-shadow .2s;
@@ -127,7 +138,7 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 .d-house-extra { display: flex; gap: 0; flex-shrink: 0; }
 .d-house-card-empty {
   position: relative; flex: 0 0 240px; height: 180px; background: var(--bg);
-  border: 1px solid var(--gray); cursor: pointer; overflow: hidden;
+  border-radius: 0; border: 1px solid var(--gray); cursor: pointer; overflow: hidden;
   transition: border-color .2s, box-shadow .2s;
 }
 .d-house-card-empty:hover { z-index: 1; box-shadow: 0 0 4px 4px rgba(0,0,0,.12); }
@@ -147,7 +158,7 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   font-size: 20px; font-weight: 600; line-height: 20px; color: var(--text);
 }
 .d-upload-card {
-  position: relative; flex: 0 0 240px; height: 180px;
+  position: relative; flex: 0 0 240px; height: 180px; border-radius: 0;
   background: var(--center-bg); border: 1px solid var(--border);
   cursor: pointer; overflow: hidden; transition: background .2s;
 }
@@ -182,7 +193,7 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 .d-param-group { margin-bottom: 20px; }
 .d-param-label { font-size: 14px; font-weight: 300; color: #666; margin-bottom: 6px; }
 .d-param-input {
-  width: 100%; height: 44px; background: var(--card); border: none; border-radius: 8px;
+  width: 100%; height: 44px; background: var(--card); border: none; border-radius: var(--r);
   text-align: center; font-size: 20px; font-weight: 600; outline: none; transition: background .15s;
 }
 .d-param-input:focus { background: #c0c0c0; }
@@ -217,14 +228,31 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 .d-params-actions {
   display: flex; gap: 12px; flex: none; padding-top: 24px;
 }
+/* Обводку задаёт вариант кнопки (.d-btn-back / .d-btn-next), поэтому здесь
+   border не сбрасываем — иначе он перебивает вариант по специфичности. */
 .d-params-actions .d-btn {
-  flex: 1; height: 48px; border: none; border-radius: var(--r);
-  font-size: 16px; font-weight: 700; cursor: pointer; transition: background .15s;
+  flex: 1; height: 48px; border-radius: var(--r);
+  font-size: 18px; cursor: pointer; transition: background .15s, box-shadow .2s;
 }
-.d-btn-back { background: var(--card); color: var(--text); }
-.d-btn-back:hover { background: var(--card-hover); }
-.d-btn-next { background: var(--accent); color: #fff; }
+/* Второстепенная кнопка: белая, обводка 2px, надпись Semibold. */
+.d-btn-back {
+  background: var(--bg); color: var(--text);
+  border: 2px solid var(--btn-border); font-weight: 600;
+}
+.d-btn-back:hover { box-shadow: var(--hover-shadow); }
+/* Первичная кнопка: оранжевая заливка, белая надпись Bold. Обводка в цвет
+   заливки — чтобы внутренняя коробка совпадала со второстепенной кнопкой. */
+.d-btn-next {
+  background: var(--accent); color: #fff; font-weight: 700;
+  border: 2px solid var(--accent);
+}
 .d-btn-next:hover { background: var(--accent-hover); }
+/* Неактивная: серый фон, тёмно-серая надпись. */
+.d-btn:disabled, .d-btn.locked {
+  background: var(--btn-off-bg); color: var(--btn-off-text);
+  border-color: var(--btn-border); box-shadow: none;
+  cursor: not-allowed; pointer-events: none;
+}
 
 /* ═══════════════════════════════════════════
    STEP 3 — WORKSPACE (left + center + right)
@@ -241,50 +269,61 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   text-transform: uppercase; padding: 16px 20px 10px;
 }
 .d-sidebar-list { flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 0 8px; }
-.d-sb-row { display: flex; gap: 4px; align-items: stretch; }
+/* Кнопки правки и удаления стоят справа от кнопки элемента и выравниваются
+   по её верхнему краю (в аккордеоне под кнопкой раскрываются настройки). */
+.d-sb-row { display: flex; gap: 2px; align-items: flex-start; }
 .d-sb-btn {
-  flex: 1; height: 44px; background: var(--card); border: 2px solid transparent;
-  border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer;
+  flex: 1; height: 48px; background: var(--bg); border: 2px solid var(--btn-border);
+  border-radius: var(--r); font-size: 18px; font-weight: 600; cursor: pointer;
   text-align: left; padding: 0 14px;
-  transition: background .15s, border-color .2s, opacity .15s;
+  transition: border-color .2s, box-shadow .2s, background .15s;
   user-select: none;
 }
-.d-sb-btn:hover:not(:disabled) { background: var(--card-hover); }
-.d-sb-btn.active { border-color: #000; background: #f0f0f0; font-weight: 700; }
+.d-sb-btn:hover:not(:disabled) { box-shadow: var(--hover-shadow); }
+/* Выбранный пункт меню: белый фон, оранжевая обводка и надпись. */
+.d-sb-btn.active {
+  border-color: var(--accent); color: var(--accent); font-weight: 700;
+}
+/* Галочка «настроено» больше не нужна: у настроенного элемента появляются
+   кнопки правки и удаления справа (.d-sb-edit / .d-sb-delete). */
 .d-sb-btn.configured { position: relative; }
-.d-sb-btn.configured::before {
-  content: '✓'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
-  font-size: 13px; color: #4a4; font-weight: 700;
-}
 .d-sb-btn.locked, .d-sb-btn:disabled {
-  opacity: 0.35; cursor: not-allowed; pointer-events: none;
+  background: var(--btn-off-bg); color: var(--btn-off-text);
+  border-color: var(--btn-border); box-shadow: none;
+  cursor: not-allowed; pointer-events: none;
 }
+/* Правка и удаление настроенного элемента — квадраты 48×48 справа от кнопки,
+   по верхнему краю ряда. Правка — оранжевая заливка, удаление — контурная.
+   TODO: глифы ✏ / × заменить на иконки из макета, когда их выгрузят из Figma. */
 .d-sb-edit {
-  width: 44px; flex-shrink: 0; background: var(--card); border: 2px solid transparent;
-  border-radius: 10px; font-size: 16px; cursor: pointer;
+  width: 48px; flex-shrink: 0; background: var(--accent); color: #fff;
+  border: none; border-radius: var(--r); font-size: 20px; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  transition: background .15s, opacity .15s;
+  transition: background .15s;
 }
-.d-sb-edit:hover:not(:disabled) { background: var(--card-hover); }
+.d-sb-edit:hover:not(:disabled) { background: var(--accent-hover); }
 .d-sb-edit.locked, .d-sb-edit:disabled {
-  opacity: 0.35; cursor: not-allowed; pointer-events: none;
+  background: var(--btn-off-bg); color: var(--btn-off-text);
+  cursor: not-allowed; pointer-events: none;
 }
 .d-sb-delete {
-  width: 36px; flex-shrink: 0; background: var(--card); border: 2px solid transparent;
-  border-radius: 10px; font-size: 20px; line-height: 1; cursor: pointer; color: #999;
+  width: 48px; flex-shrink: 0; background: var(--bg); border: 2px solid var(--btn-border);
+  border-radius: var(--r); font-size: 22px; line-height: 1; cursor: pointer; color: var(--text);
   display: flex; align-items: center; justify-content: center;
-  transition: background .15s, color .15s, border-color .15s, opacity .15s;
+  transition: box-shadow .2s, color .15s, border-color .15s;
 }
-.d-sb-delete:hover:not(:disabled) { background: #fde7e7; color: #c53030; border-color: #fcc; }
+.d-sb-delete:hover:not(:disabled) { box-shadow: var(--hover-shadow); color: #c53030; }
 .d-sb-delete.locked, .d-sb-delete:disabled {
-  opacity: 0.35; cursor: not-allowed; pointer-events: none;
+  background: var(--btn-off-bg); color: var(--btn-off-text);
+  border-color: var(--btn-border); box-shadow: none;
+  cursor: not-allowed; pointer-events: none;
 }
 
 /* Toast-уведомление (про конфликт крыльцо↔терраса и т.п.) */
 #d-toast {
   position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
   background: rgba(20, 20, 20, 0.92); color: #fff;
-  padding: 14px 22px; border-radius: 10px;
+  padding: 14px 22px; border-radius: var(--r);
   font-size: 14px; font-weight: 500; line-height: 1.3;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
   z-index: 9999; max-width: 420px;
@@ -341,13 +380,23 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 /* Кнопки действий редактора — в правый нижний угол (в футере, прижаты вправо). */
 .d-canvas-footer .d-canvas-actions { margin-left: auto; }
 .d-canvas-btn {
-  height: 32px; padding: 0 14px; background: var(--card); border: none;
-  border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;
-  transition: background .15s;
+  height: 40px; padding: 0 16px; background: var(--bg);
+  border: 2px solid var(--btn-border); border-radius: var(--r);
+  font-size: 16px; font-weight: 600; cursor: pointer;
+  transition: box-shadow .2s, background .15s;
 }
-.d-canvas-btn:hover { background: var(--card-hover); }
-.d-canvas-btn.confirm { background: var(--accent); color: #fff; }
-.d-canvas-btn.confirm:hover { background: var(--accent-hover); }
+.d-canvas-btn:hover { box-shadow: var(--hover-shadow); }
+.d-canvas-btn.confirm {
+  background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700;
+}
+.d-canvas-btn.confirm:hover {
+  background: var(--accent-hover); border-color: var(--accent-hover); box-shadow: none;
+}
+.d-canvas-btn:disabled {
+  background: var(--btn-off-bg); color: var(--btn-off-text);
+  border-color: var(--btn-border); box-shadow: none;
+  cursor: not-allowed; pointer-events: none;
+}
 .d-canvas-area {
   flex: 1; position: relative; overflow: hidden; touch-action: none; cursor: crosshair;
   display: flex; align-items: center; justify-content: center;
@@ -386,7 +435,7 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 .bed-h-row { display: flex; align-items: center; gap: 10px; }
 .bed-h-lbl { font-size: 14px; font-weight: 700; }
 .bed-h-unit { font-size: 13px; color: #888; }
-.bed-h-seg { display: inline-flex; border: 1px solid #ccc; border-radius: 8px; overflow: hidden; }
+.bed-h-seg { display: inline-flex; border: 1px solid #ccc; border-radius: var(--r); overflow: hidden; }
 .bed-h-btn {
   border: none; background: var(--card, #e8e8e8); color: #333;
   padding: 7px 14px; font-size: 14px; font-weight: 600; cursor: pointer;
@@ -425,7 +474,7 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 }
 .d-sub-btn {
   flex: 1; height: 34px; background: var(--card); border: 2px solid transparent;
-  border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
+  border-radius: var(--r); font-size: 13px; font-weight: 600; cursor: pointer;
   transition: background .15s, border-color .2s;
 }
 .d-sub-btn:hover { background: var(--card-hover); }
@@ -436,7 +485,7 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 .d-section-row:empty { display: none; }
 .d-section-lbl { font-size: 13px; font-weight: 700; color: #333; white-space: nowrap; }
 .d-section-select {
-  flex: 1; height: 36px; padding: 0 10px; border: 1px solid #ccc; border-radius: 8px;
+  flex: 1; height: 36px; padding: 0 10px; border: 1px solid #ccc; border-radius: var(--r);
   background: var(--card, #f0f0f0); font-size: 14px; color: #222; cursor: pointer;
 }
 .d-section-select:focus { outline: none; border-color: #000; }
@@ -473,17 +522,20 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 
 /* Material cards in panel */
 .d-mat-list { display: flex; flex-direction: column; gap: 8px; }
+/* Карточка товара: прямые углы, белый фон, обводка как у кнопок; при наведении
+   тень, у выбранной — оранжевая обводка (как у карточки дома). */
 .d-mat-card {
-  background: var(--card); border-radius: var(--r); overflow: hidden;
-  border: 2px solid transparent; transition: border-color .2s;
+  background: var(--bg); border-radius: 0; overflow: hidden;
+  border: 2px solid var(--btn-border);
+  transition: border-color .2s, box-shadow .2s;
 }
-.d-mat-card.selected { border-color: #000; }
-.d-mat-card:hover { border-color: #aaa; }
+.d-mat-card:hover { box-shadow: var(--hover-shadow); }
+.d-mat-card.selected { border-color: var(--accent); }
 .d-mat-head {
   display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; cursor: pointer;
 }
 .d-mat-thumb {
-  width: 52px; height: 52px; background: #bbb; border-radius: 8px; flex-shrink: 0;
+  width: 52px; height: 52px; background: #bbb; border-radius: var(--r); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center; font-size: 20px;
 }
 .d-mat-info { flex: 1; min-width: 0; }
@@ -504,7 +556,7 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 .d-mat-desc { font-size: 12px; font-weight: 300; color: #444; line-height: 1.6; margin-bottom: 10px; }
 .d-mat-actions { display: flex; gap: 8px; }
 .d-mat-btn {
-  flex: 1; height: 34px; border: none; border-radius: 8px;
+  flex: 1; height: 34px; border: none; border-radius: var(--r);
   font-size: 12px; font-weight: 700; cursor: pointer; transition: background .15s;
 }
 .d-mat-btn-apply { background: var(--accent); color: #fff; }
@@ -514,13 +566,32 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 
 /* Price filter in panel */
 .d-price-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
-.d-price-btn {
-  height: 48px; background: var(--card); border: 2px solid transparent;
-  border-radius: var(--r); font-size: 13px; font-weight: 700; cursor: pointer;
-  transition: border-color .2s, background .15s; line-height: 1.3; padding: 4px 8px;
+/* ── Radio: квадрат 24×24, при выборе оранжевый с галочкой ──
+   Заменил тумблеры и кнопки-плитки. Логика прежняя (одиночный выбор у цены,
+   независимые вкл/выкл у настроек) — по макету меняется только вид. */
+.d-radio {
+  width: 24px; height: 24px; flex-shrink: 0; border-radius: var(--r);
+  background: var(--btn-off-bg); border: 1px solid var(--radio-off-border);
+  position: relative; transition: background .15s, border-color .15s;
 }
-.d-price-btn:hover { background: var(--card-hover); }
-.d-price-btn.selected { border-color: #000; background: #f0f0f0; }
+/* Галочка — две стороны рамки, повёрнутые на 45°. */
+.d-radio::after {
+  content: ''; position: absolute; left: 8px; top: 4px;
+  width: 6px; height: 11px; border: solid #fff; border-width: 0 2px 2px 0;
+  transform: rotate(45deg); opacity: 0; transition: opacity .15s;
+}
+.selected > .d-radio, .on > .d-radio {
+  background: var(--accent); border-color: var(--accent);
+}
+.selected > .d-radio::after, .on > .d-radio::after { opacity: 1; }
+
+.d-price-btn {
+  display: flex; align-items: flex-start; gap: 8px; text-align: left;
+  background: none; border: none; padding: 0; cursor: pointer;
+}
+.d-price-lbl { display: flex; flex-direction: column; gap: 2px; }
+.d-price-btn { font-size: 18px; font-weight: 600; color: var(--text); line-height: 1.15; }
+.d-price-sub { font-size: 14px; font-weight: 400; color: #999; }
 
 .d-filter-divider { height: 1px; background: #e8e8e8; margin: 14px 0; }
 
@@ -551,7 +622,7 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 }
 
 /* Reuse swatch styles from mobile */
-.swatch { width:64px; height:64px; background:var(--card); border-radius:10px;
+.swatch { width:64px; height:64px; background:var(--card); border-radius:var(--r);
   border:2px solid #ccc; display:flex; align-items:center; justify-content:center;
   flex-direction:column; gap:3px; cursor:pointer; position:relative; }
 .swatch-name { font-size:8px; font-weight:600; color:#555; text-align:center;
@@ -562,22 +633,25 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 .swatch-active { box-shadow:0 0 0 3px #fff, 0 0 0 5px #000; border-color:#000 !important; }
 
 /* Reuse toggle styles */
-.tg { display:flex; align-items:center; justify-content:space-between;
-  height:44px; padding:0 14px; background:var(--card);
-  border-radius:var(--r); cursor:pointer; border:2px solid transparent;
-  transition:border-color .2s; user-select:none; margin-bottom:6px; }
-.tg.on { border-color:#000; }
-.tg-txt { font-size:14px; font-weight:700; }
-.tg-ind { width:36px; height:18px; background:#bbb; border-radius:9px; position:relative; transition:background .2s; }
-.tg.on .tg-ind { background:#000; }
-.tg-ind::after { content:''; position:absolute; top:2px; left:2px;
-  width:14px; height:14px; background:#fff; border-radius:50%; transition:transform .2s; }
-.tg.on .tg-ind::after { transform:translateX(18px); }
+/* Переключатель настройки — тот же radio, что у фильтров цены: квадрат слева,
+   подпись справа. Тумблер-пилюля убран по макету. */
+.tg { display:flex; align-items:center; gap:8px;
+  height:40px; cursor:pointer; user-select:none; margin-bottom:6px;
+  background:none; border:none; padding:0; }
+.tg-txt { font-size:18px; font-weight:600; order:1; }
+.tg-ind { width:24px; height:24px; flex-shrink:0; border-radius:var(--r);
+  background:var(--btn-off-bg); border:1px solid var(--radio-off-border);
+  position:relative; transition:background .15s, border-color .15s; }
+.tg-ind::after { content:''; position:absolute; left:8px; top:4px;
+  width:6px; height:11px; border:solid #fff; border-width:0 2px 2px 0;
+  transform:rotate(45deg); opacity:0; transition:opacity .15s; }
+.tg.on .tg-ind { background:var(--accent); border-color:var(--accent); }
+.tg.on .tg-ind::after { opacity:1; }
 
 /* Reuse param row from mobile */
 .p-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; gap:10px; }
 .p-lbl { font-size:14px; font-weight:300; flex:1; }
-.p-inp { width:70px; height:36px; background:var(--card); border:none; border-radius:8px;
+.p-inp { width:70px; height:36px; background:var(--card); border:none; border-radius:var(--r);
   text-align:center; font-size:16px; outline:none; flex-shrink:0; transition:background .15s; }
 .p-inp:focus { background:#c0c0c0; }
 
