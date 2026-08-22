@@ -30,6 +30,11 @@ const ROOF_EAVE           = 0.30;  // свес карниза за стену
 // рендеру — 0x808080 → ≈205, 0x585858 → ≈160, 0x3C3C3C → ≈130 (то, что нужно).
 // Тот же источник читает buildConstructionPad (viewer3d-builders.js).
 const PAD_COLOR = 0x3c3c3c;
+// Отметка ВЕРХА подкладки. Плита «притоплена»: над землёй остаётся 5 мм, остальное
+// уходит вниз. Так не видно её торца (раньше 5 см тёмной боковины у террасы и
+// лестницы) и нет z-fighting'а с дорожками: у них верх на 0.05, низ на 0 —
+// совпадающих граней больше нет.
+const PAD_TOP_Y = 0.005;
 const SS_EPS              = 1e-6;
 
 // Cache-busting для GLB-модулей. Браузер агрессивно кэширует .glb, и при пересборке
@@ -1021,7 +1026,7 @@ function buildPorch(parent, desc, outlineFloor0, modulesDef, materialsMap, baseH
   padMat.name = 'mat_porch_pad';
   const padGeo = new THREE.BoxGeometry(padSizeX, padThick, padSizeZ);
   const padMesh = new THREE.Mesh(padGeo, padMat);
-  padMesh.position.set(padCx, padThick / 2, padCz);
+  padMesh.position.set(padCx, PAD_TOP_Y - padThick / 2, padCz);
   padMesh.rotation.y = ry;
   padMesh.receiveShadow = true;
   parent.add(padMesh);
@@ -2495,14 +2500,17 @@ function buildFlatRoofPoly(parent, baseY, outline, eave) {
 //     корректно и для вогнутых углов Г/П-форм).
 // Это важно: материал отмостки FrontSide, и при «вывернутой» нормали грань
 // отсекалась бы (culling) — под домом сквозь pad был бы виден газон.
-function buildPadSlab(parent, outline, offset, thick, mat) {
+// yTopOverride — отметка верхней плоскости плиты (по умолчанию thick, т.е. плита
+// лежит НА земле). Подкладки строятся притопленными: yTop = PAD_TOP_Y.
+function buildPadSlab(parent, outline, offset, thick, mat, yTopOverride) {
   const src = (offset > 0) ? inflateOrthoOutline(outline, offset) : outline;
   const corners = src.items.filter(i => i.type === 'pillar');
   if (corners.length < 3) { log('[pad] <3 corners, skip', 'warn'); return; }
   const pts = corners.map(c => new THREE.Vector2(c.x, c.z)); // .x = x, .y = z
   const triangles = THREE.ShapeUtils.triangulateShape(pts, []);
   const N = pts.length;
-  const yTop = thick, yBot = 0;
+  const yTop = (yTopOverride === undefined) ? thick : yTopOverride;
+  const yBot = yTop - thick;
   const positions = [], indices = [];
   for (const p of pts) positions.push(p.x, yTop, p.y); // 0..N-1   — верх
   for (const p of pts) positions.push(p.x, yBot, p.y); // N..2N-1  — низ
@@ -3535,7 +3543,7 @@ function buildHouseFromDescriptor(houseGroup, desc, modules, params, options = {
   if (firstOutline && firstOutline.items) {
     const padMat = new THREE.MeshStandardMaterial({ color: PAD_COLOR, roughness: 0.95, metalness: 0.0 });
     padMat.name = 'mat_house_pad';
-    buildPadSlab(houseGroup, firstOutline, 0.30, 0.05, padMat);
+    buildPadSlab(houseGroup, firstOutline, 0.30, 0.05, padMat, PAD_TOP_Y);
   }
 
   // Крыльцо привязывается к двери 1-го этажа.
@@ -3761,6 +3769,7 @@ global.HouseBuilder = {
   FOUNDATION_OVERHANG,
   ROOF_EAVE,
   PAD_COLOR,
+  PAD_TOP_Y,
 };
 
 })(typeof window !== 'undefined' ? window : globalThis);

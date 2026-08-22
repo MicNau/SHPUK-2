@@ -263,14 +263,18 @@ function _buildTerracePoly(parent, M, foot, deckHeight, plankAlongX, meshArrayNa
 // НЕ кладётся в deckMeshes: иначе смена deck-материала перекрасила бы подкладку.
 // Подкладка выступает из-под конструкции на PAD_OFFSET (10 см — по требованию
 // 2026-08-22; было 30 см, из-за чего у террасы и лестницы она читалась как отдельная
-// площадка) и красится нейтрально-серым.
+// площадка), красится нейтрально-серым и ПРИТОПЛЕНА (верх на PAD_TOP_Y = 5 мм):
+// иначе торчал её 5-сантиметровый торец и верх совпадал с верхом дорожки (z-fighting).
 // Материал создаётся per-build и диспозится в clearGroup(houseGroup, true).
 const PAD_OFFSET = 0.10;      // выступ подкладки за габарит конструкции, м
 // Цвет — из HouseBuilder (единый источник для отмостки дома, крыльца и конструкций);
 // читаем при вызове, а не при загрузке файла: house-builder подключается раньше,
 // но константа нужна только в момент сборки сцены.
 const _padColor = () => ((typeof HouseBuilder !== 'undefined' && HouseBuilder.PAD_COLOR)
-                          || 0x585858);
+                          || 0x3c3c3c);
+// Отметка верха плиты — тоже из HouseBuilder: подкладка притоплена (см. PAD_TOP_Y).
+const _padTopY = () => ((typeof HouseBuilder !== 'undefined' && HouseBuilder.PAD_TOP_Y !== undefined)
+                          ? HouseBuilder.PAD_TOP_Y : 0.005);
 function buildConstructionPad(parent, minX, maxX, minZ, maxZ, offset) {
   const padThick = 0.05;
   const off = (offset === undefined) ? PAD_OFFSET : offset;
@@ -280,7 +284,7 @@ function buildConstructionPad(parent, minX, maxX, minZ, maxZ, offset) {
   const mat = new THREE.MeshStandardMaterial({ color: _padColor(), roughness: 0.95, metalness: 0.0 });
   mat.name = 'mat_construction_pad';
   const m = new THREE.Mesh(new THREE.BoxGeometry(W, padThick, D), mat);
-  m.position.set((minX + maxX) / 2, padThick / 2, (minZ + maxZ) / 2);
+  m.position.set((minX + maxX) / 2, _padTopY() - padThick / 2, (minZ + maxZ) / 2);
   m.receiveShadow = true;
   parent.add(m);
 }
