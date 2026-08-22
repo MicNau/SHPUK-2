@@ -6,6 +6,58 @@
 const CV = {};
 // Шрифт подписей на canvas — тот же, что у интерфейса (см. body в styles-desktop.css).
 const UI_FONT = "'Segoe UI', system-ui, Roboto, sans-serif";
+
+// ── Размеры настраиваемых элементов на плане ──
+// По макету подписываются габариты: у площадных объектов (терраса, ступени,
+// терраса у бассейна, причал) — стороны, у линейных (дорожки, забор,
+// ограждение) — общая длина. Дом, грядки и мебель не подписываются.
+const DIM_COL = '#f2722c';
+
+// «12 м», «3.5 м» — дробная часть только когда она есть.
+function _fmtM(m) {
+  const r = Math.round(m * 10) / 10;
+  return (Number.isInteger(r) ? r : r.toFixed(1)) + ' м';
+}
+
+function _dimLabel(ctx, cx, text, x, y, align, baseline) {
+  ctx.fillStyle = DIM_COL;
+  ctx.font = `${12 / cx.scale}px ${UI_FONT}`;
+  ctx.textAlign = align;
+  ctx.textBaseline = baseline;
+  ctx.fillText(text, x, y);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+}
+
+// Стороны прямоугольника: ширина под нижней кромкой, высота слева от левой.
+// Координаты нормированные (0..1 поля плана), W — сторона поля в пикселях.
+function drawRectDims(ctx, cx, W, nx, ny, nw, nh) {
+  if (!(nw > 0) || !(nh > 0)) return;
+  const pad = 8 / cx.scale;
+  const x = nx * W, y = ny * W, w = nw * W, h = nh * W;
+  _dimLabel(ctx, cx, _fmtM(nw * GRID), x + w / 2, y + h + pad, 'center', 'top');
+  _dimLabel(ctx, cx, _fmtM(nh * GRID), x - pad, y + h / 2, 'right', 'middle');
+}
+
+// Общая длина ломаных: подпись у середины самого длинного отрезка, сдвинутая
+// по нормали — так она не ложится на саму линию.
+function drawPolylineDims(ctx, cx, W, segments) {
+  let total = 0, best = null, bestLen = -1;
+  for (const seg of segments) {
+    for (let i = 1; i < seg.length; i++) {
+      const dx = (seg[i].x - seg[i-1].x) * GRID, dy = (seg[i].y - seg[i-1].y) * GRID;
+      const len = Math.hypot(dx, dy);
+      total += len;
+      if (len > bestLen) { bestLen = len; best = [seg[i-1], seg[i]]; }
+    }
+  }
+  if (!best || total <= 0) return;
+  const mx = (best[0].x + best[1].x) / 2 * W, my = (best[0].y + best[1].y) / 2 * W;
+  const dx = best[1].x - best[0].x, dy = best[1].y - best[0].y;
+  const len = Math.hypot(dx, dy) || 1;
+  const off = 14 / cx.scale;
+  _dimLabel(ctx, cx, _fmtM(total), mx - dy / len * off, my + dx / len * off, 'center', 'middle');
+}
 const GRID = 32;       // total meters (canvas area)
 const SNAP = 0.25;     // шаг КУРСОРА (снап), м
 const GRID_STEP = 0.5; // шаг РАЗМЕТКИ (точки сетки), м — крупнее снапа, специально
@@ -508,8 +560,11 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
     const realPts = tp.filter(p=>!p.break);
     if (realPts.length < 2) continue;
 
-    if (secId === 'fence') {
-      // Забор: несколько линий (разделены break)
+    if (secId === 'fence' || secId === 'railing') {
+      // Забор и ограждение террасы — ломаные из нескольких линий (разделены break).
+      // Раньше ограждение попадало в ветку полигонов: контур замыкался и разрывы
+      // игнорировались, поэтому на плане (в том числе в редакторе ступеней, где
+      // ограждение нужно видеть) оно рисовалось неверно.
       const segs = splitAtBreaks(tp);
       for (const seg of segs) {
         if (seg.length < 2) continue;
@@ -652,6 +707,16 @@ function drawSnapCanvas(name) {
       ctx.fillStyle=color; ctx.font=`bold ${10/cx.scale}px ${UI_FONT}`; ctx.textAlign='center';
       ctx.fillText(ptNum,p.x*W,p.y*H+4/cx.scale);
     });
+
+    // Размеры: у линейных объектов общая длина, у площадных — стороны габарита.
+    if (name === 'paths' || name === 'fence' || name === 'railing') {
+      drawPolylineDims(ctx, cx, W, segments);
+    } else if (realPts.length > 2) {
+      const xs = realPts.map(p => p.x), ys = realPts.map(p => p.y);
+      const x0 = Math.min(...xs), x1 = Math.max(...xs);
+      const y0 = Math.min(...ys), y1 = Math.max(...ys);
+      drawRectDims(ctx, cx, W, x0, y0, x1 - x0, y1 - y0);
+    }
   }
 
   ctx.restore();
@@ -1259,6 +1324,7 @@ function drawStepsCanvas() {
   const { x, y, w, h } = getStepsRectPx(W);
   ctx.fillStyle = 'rgba(220,140,0,.22)';
   ctx.fillRect(x, y, w, h);
+  drawRectDims(ctx, cx, W, x / W, y / W, w / W, h / W);
   // Полоски-ступеньки для визуальной подсказки направления (по короткой стороне).
   const longAxisX = w >= h;
   const nStripes = 5;
@@ -1674,13 +1740,15 @@ function drawTerraceCanvas() {
 
   // Rects
   const rects = S.terraceRects || [];
-  const COL = '#0064DC';        // активный
-  const COL_INACTIVE = '#5a8c5a'; // неактивный (зеленоватый под цвет террасы)
+  // Выбранный объект выделяется акцентным цветом (по макету), остальные —
+  // приглушённым зелёным под цвет террасы.
+  const COL = DIM_COL;
+  const COL_INACTIVE = '#5a8c5a';
   for (let i = 0; i < rects.length; i++) {
     const r = rects[i];
     const isActive = (i === S.activeTerraceRect);
     const rx = r.x * W, ry = r.y * W, rw = r.w * W, rh = r.h * W;
-    ctx.fillStyle = isActive ? 'rgba(0,100,220,.18)' : 'rgba(0,150,80,.12)';
+    ctx.fillStyle = isActive ? 'rgba(242,114,44,.18)' : 'rgba(0,150,80,.12)';
     ctx.fillRect(rx, ry, rw, rh);
     ctx.strokeStyle = isActive ? COL : COL_INACTIVE;
     ctx.lineWidth = (isActive ? 2.5 : 1.8) / cx.scale;
@@ -1688,6 +1756,9 @@ function drawTerraceCanvas() {
     ctx.strokeRect(rx, ry, rw, rh);
     ctx.setLineDash([]);
   }
+  // Размеры каждого прямоугольника
+  for (const r of rects) drawRectDims(ctx, cx, W, r.x, r.y, r.w, r.h);
+
   // Подпись общая
   if (rects.length) {
     let bx0=Infinity, by0=Infinity, bx1=-Infinity, by1=-Infinity;

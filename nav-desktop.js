@@ -285,7 +285,9 @@ function _dResetAllConfigurations() {
   dEditorOpen = false;
   // Возвращаем toggle'ы (террасы / крыльца) к дефолтным значениям из HTML
   // (initial-class "on" → ON). Сбрасываем все .tg в их HTML-дефолт + зеркало S.toggles.
-  document.querySelectorAll('.d-center-canvas .tg').forEach(tg => {
+  // Селектор без привязки к .d-center-canvas: пока редактор открыт, переключатели
+  // перенесены в левую панель (_dMountEditorControls).
+  document.querySelectorAll('.tg').forEach(tg => {
     const isInitiallyOn = tg.dataset.initialOn === '1';
     tg.classList.toggle('on', isInitiallyOn);
     if (tg.dataset.id) S.toggles[tg.dataset.id] = isInitiallyOn;
@@ -299,7 +301,7 @@ function _dResetAllConfigurations() {
 // Запоминаем стартовое состояние toggle'ов один раз при инициализации UI
 // (чтобы _dResetAllConfigurations мог их вернуть к этим значениям).
 function _dCacheToggleDefaults() {
-  document.querySelectorAll('.d-center-canvas .tg').forEach(tg => {
+  document.querySelectorAll('.tg').forEach(tg => {
     if (tg.dataset.initialOn === undefined) {
       tg.dataset.initialOn = tg.classList.contains('on') ? '1' : '0';
     }
@@ -419,7 +421,7 @@ function _dRenderFloorParams() {
     const aVal = (keepValues && prevArea) ? prevArea : a.default;
     if (aInp) { aInp.min = a.min; aInp.max = a.max; aInp.value = aVal; }
     if (aRng) { aRng.min = a.min; aRng.max = a.max; aRng.step = a.step || 5; aRng.value = aVal; }
-    if (hint) hint.textContent = `${a.min} — ${a.max} кв.м`;
+    if (hint) hint.innerHTML = `<span>${a.min} кв.м</span><span>${a.max} кв.м</span>`;
   }
   // Per-floor: для каждого этажа — высота этажа + площадь этажа.
   desc.floors.forEach((floor, fi) => {
@@ -437,23 +439,58 @@ function _dRenderFloorParams() {
     wrap.className = 'd-param-group';
     wrap.style.borderTop = '1px solid #e0e0e0';
     wrap.style.paddingTop = '8px';
+    const hMin = hConstr?.min ?? 270, hMax = hConstr?.max ?? 360;
+    const aMin = aConstr?.min ?? 40,  aMax = aConstr?.max ?? 140;
     wrap.innerHTML = `
-      <div class="d-param-label" style="font-weight: 600; margin-bottom: 6px;">${label}</div>
-      <div class="d-param-sublabel" style="font-size: 12px; color: #666; margin-bottom: 4px;">Высота этажа (см)</div>
-      <input class="d-param-input" type="number" id="v-floor-${fi}" value="${hVal}" min="${hConstr?.min ?? 270}" max="${hConstr?.max ?? 360}"
-             oninput="dOnFloorParam(${fi})">
-      <input class="d-param-range" type="range" id="r-floor-${fi}" value="${hVal}" min="${hConstr?.min ?? 270}" max="${hConstr?.max ?? 360}" step="${hConstr?.step ?? 10}"
+      <div class="d-floor-title">${label}</div>
+      <div class="d-param-head">
+        <span class="d-param-label">Высота этажа (см)</span>
+        <input class="d-param-input" type="number" id="v-floor-${fi}" value="${hVal}" min="${hMin}" max="${hMax}"
+               oninput="dOnFloorParam(${fi})">
+      </div>
+      <input class="d-param-range" type="range" id="r-floor-${fi}" value="${hVal}" min="${hMin}" max="${hMax}" step="${hConstr?.step ?? 10}"
              oninput="document.getElementById('v-floor-${fi}').value=this.value; dOnFloorParam(${fi})">
-      <div class="d-param-sublabel" style="font-size: 12px; color: #666; margin: 8px 0 4px;">Площадь этажа (кв.м)</div>
-      <input class="d-param-input" type="number" id="v-area-${fi}" value="${aVal}" min="${aConstr?.min ?? 40}" max="${aConstr?.max ?? 140}"
-             oninput="dOnFloorParam(${fi})">
-      <input class="d-param-range" type="range" id="r-area-${fi}" value="${aVal}" min="${aConstr?.min ?? 40}" max="${aConstr?.max ?? 140}" step="${aConstr?.step ?? 5}"
+      <div class="d-param-unit"><span>${hMin} см</span><span>${hMax} см</span></div>
+      <div class="d-param-head" style="margin-top:18px">
+        <span class="d-param-label">Площадь этажа (кв.м)</span>
+        <input class="d-param-input" type="number" id="v-area-${fi}" value="${aVal}" min="${aMin}" max="${aMax}"
+               oninput="dOnFloorParam(${fi})">
+      </div>
+      <input class="d-param-range" type="range" id="r-area-${fi}" value="${aVal}" min="${aMin}" max="${aMax}" step="${aConstr?.step ?? 5}"
              oninput="document.getElementById('v-area-${fi}').value=this.value; dOnFloorParam(${fi})">
+      <div class="d-param-unit"><span>${aMin} кв.м</span><span>${aMax} кв.м</span></div>
     `;
     cont.appendChild(wrap);
   });
   _dFloorParamsType = S.houseType;
+  _dSyncAllRangeFills();
 }
+
+// ── Заливка слайдеров ──
+// У нативного input[type=range] нет «пройденной» части дорожки, поэтому долю
+// считаем сами и кладём в CSS-переменную --fill (см. .d-param-range в стилях).
+// Значения меняются и программно (dOnAreaTotal, загрузка дескриптора), поэтому
+// одного обработчика input мало — после таких правок зовём _dSyncAllRangeFills.
+function _dSyncRangeFill(el) {
+  const min = parseFloat(el.min) || 0;
+  const max = parseFloat(el.max);
+  const val = parseFloat(el.value);
+  if (!isFinite(max) || !isFinite(val) || max <= min) { el.style.setProperty('--fill', '0%'); return; }
+  const pct = Math.min(100, Math.max(0, ((val - min) / (max - min)) * 100));
+  el.style.setProperty('--fill', pct + '%');
+}
+
+function _dSyncAllRangeFills() {
+  document.querySelectorAll('.d-param-range').forEach(_dSyncRangeFill);
+}
+
+document.addEventListener('input', e => {
+  const el = e.target;
+  if (el && el.classList && el.classList.contains('d-param-range')) _dSyncRangeFill(el);
+  // Значение можно править и в поле рядом — тогда двигается связанный слайдер.
+  if (el && el.classList && el.classList.contains('d-param-input')) _dSyncAllRangeFills();
+});
+document.addEventListener('DOMContentLoaded', _dSyncAllRangeFills);
 
 // Изменение глобального area: распространяется на все этажи по их area_factor.
 function dOnAreaTotal() {
@@ -528,23 +565,31 @@ function dSetTerraceHeight(cm) {
   const { min, max } = dTerraceHeightRange();
   const v = Math.min(max, Math.max(min, parseFloat(cm) || min));
   S.terraceH = v / 100;
+  // Поле и слайдер — два вида одного значения, держим их синхронными.
   const inp = document.getElementById('v-terrace-h');
   if (inp && String(v) !== inp.value) inp.value = v;
+  const rng = document.getElementById('r-terrace-h');
+  if (rng && String(v) !== rng.value) rng.value = v;
+  if (rng) _dSyncRangeFill(rng);
   if (typeof onParamChange === 'function') onParamChange();
 }
 
 // Подтянуть поле к состоянию (открытие редактора, смена высоты фундамента).
 function _dSyncTerraceHeight() {
   const inp = document.getElementById('v-terrace-h');
+  const rng = document.getElementById('r-terrace-h');
   const hint = document.getElementById('d-terrace-h-hint');
   if (!inp) return;
+  // Потолок зависит от высоты фундамента, поэтому диапазон и границы под
+  // слайдером пересчитываются при каждом открытии редактора.
   const { min, max } = dTerraceHeightRange();
   inp.min = min; inp.max = max;
   const cur = (typeof S.terraceH === 'number') ? Math.round(S.terraceH * 100) : max;
   const v = Math.min(max, Math.max(min, cur));
   inp.value = v;
+  if (rng) { rng.min = min; rng.max = max; rng.value = v; _dSyncRangeFill(rng); }
   S.terraceH = v / 100;
-  if (hint) hint.textContent = `см (${min}–${max})`;
+  if (hint) hint.innerHTML = `<span>${min} см</span><span>${max} см</span>`;
 }
 
 function dSetFenceHeight(m) {
@@ -626,12 +671,66 @@ function _dInitWorkspace() {
 }
 
 // ── SIDEBAR ──
+//
+// Управление редактором собрано в левой панели (аккордеон): настройки открытого
+// элемента раскрываются ПОД его кнопкой, остальные кнопки меню съезжают вниз,
+// «Добавить/Удалить» встают справа от кнопки, «Дальше» — внизу панели.
+//
+// Сами контролы не дублируются: DOM-узлы из футера редактора переносятся в
+// панель и возвращаются обратно при закрытии. Так сохраняются все onclick’и и
+// состояние полей — переписывать десять редакторов не нужно.
+let _dMovedControls = [];   // [{node, home}] — что вынесено в панель
+
+function _dUnmountEditorControls() {
+  // В обратном порядке и перед запомненным соседом — иначе узлы вернутся
+  // в футер в другой последовательности.
+  for (let i = _dMovedControls.length - 1; i >= 0; i--) {
+    const { node, home, before } = _dMovedControls[i];
+    if (!home) continue;
+    home.insertBefore(node, (before && before.parentNode === home) ? before : null);
+  }
+  _dMovedControls = [];
+  document.querySelectorAll('.d-canvas-footer.moved')
+    .forEach(f => f.classList.remove('moved'));
+}
+
+function _dMountEditorControls(secId) {
+  const cv = document.getElementById('d-canvas-' + secId);
+  const footer = cv && cv.querySelector('.d-canvas-footer');
+  const accordion = document.getElementById('d-sb-accordion');
+  const actions = document.getElementById('d-sb-actions');
+  const nextSlot = document.getElementById('d-sb-next');
+  if (!footer || !accordion) return;
+
+  const move = (node, target) => {
+    if (!node || !target) return;
+    _dMovedControls.push({ node, home: node.parentNode, before: node.nextSibling });
+    target.appendChild(node);
+  };
+
+  // «Готово» уходит вниз панели (там оно читается как «Дальше»), остальные
+  // кнопки действий — справа от кнопки элемента.
+  footer.querySelectorAll('.d-canvas-btn').forEach(btn => {
+    move(btn, btn.classList.contains('confirm') ? nextSlot : actions);
+  });
+  // Всё остальное из футера (высота настила, переключатели) — под кнопку.
+  [...footer.children].forEach(node => {
+    if (node.classList.contains('d-canvas-actions')) return;   // опустела выше
+    move(node, accordion);
+  });
+  footer.classList.add('moved');
+  _dSyncAllRangeFills();
+}
+
 function _dRenderSidebar() {
   const list = document.getElementById('d-sidebar-list');
+  // Вернуть перенесённые узлы до перерисовки — innerHTML их бы уничтожил.
+  _dUnmountEditorControls();
   list.innerHTML = D_SIDEBAR_ITEMS.map(item => {
     const isActive = dActiveItem === item.id;
     const isCfg = dConfigured.has(item.id);
     const isLocked = dEditorOpen && dActiveItem !== item.id;
+    const isEditing = dEditorOpen && isActive;
     return `
       <div class="d-sb-row">
         <button class="d-sb-btn ${isActive ? 'active' : ''} ${isCfg ? 'configured' : ''} ${isLocked ? 'locked' : ''}"
@@ -640,12 +739,20 @@ function _dRenderSidebar() {
                 ${isLocked ? 'disabled' : ''}>
           ${item.lbl}
         </button>
-        ${isCfg && item.hasEditor ? `<button class="d-sb-edit ${isLocked ? 'locked' : ''}" title="Редактировать"
-            onclick="dEditItem('${item.id}')" ${isLocked ? 'disabled' : ''}>✏</button>` : ''}
-        ${isCfg ? `<button class="d-sb-delete ${isLocked ? 'locked' : ''}" title="Удалить настройки"
-            onclick="dDeleteItem('${item.id}')" ${isLocked ? 'disabled' : ''}>×</button>` : ''}
-      </div>`;
+        ${isEditing ? '<div class="d-sb-actions" id="d-sb-actions"></div>' : ''}
+        ${!isEditing && isCfg && item.hasEditor ? `<button class="d-sb-edit ${isLocked ? 'locked' : ''}" title="Редактировать"
+            onclick="dEditItem('${item.id}')" ${isLocked ? 'disabled' : ''}><img src="assets/icons/icon_edit.svg" alt=""></button>` : ''}
+        ${!isEditing && isCfg ? `<button class="d-sb-delete ${isLocked ? 'locked' : ''}" title="Удалить настройки"
+            onclick="dDeleteItem('${item.id}')" ${isLocked ? 'disabled' : ''}><img src="assets/icons/icon_delete.svg" alt=""></button>` : ''}
+      </div>
+      ${isEditing ? '<div class="d-sb-accordion" id="d-sb-accordion"></div>' : ''}`;
   }).join('');
+
+  // Кнопка «Дальше» внизу панели живёт только пока открыт редактор.
+  const nextSlot = document.getElementById('d-sb-next');
+  if (nextSlot) nextSlot.classList.toggle('hidden', !dEditorOpen);
+
+  if (dEditorOpen && dActiveItem) _dMountEditorControls(dActiveItem);
 
   // Правую панель материалов показываем только когда выбран элемент проекта.
   const panel = document.getElementById('d-panel');
@@ -853,7 +960,12 @@ function _dSyncSummaryBtn() {
   const btn = document.getElementById('d-btn-summary');
   if (!btn) return;
   const hasProduct = !!(S.estimate && Object.keys(S.estimate).length);
-  btn.style.display = (dStep === 3 && hasProduct) ? '' : 'none';
+  const show = (dStep === 3 && hasProduct);
+  btn.style.display = show ? '' : 'none';
+  // Кнопка живёт внизу правой панели: прячем и контейнер, иначе остаются
+  // его отступы пустой полосой под списком товаров.
+  const footer = btn.closest('.d-panel-footer');
+  if (footer) footer.classList.toggle('hidden', !show);
 }
 
 // ══════════════════════════════════════════════
@@ -1248,6 +1360,35 @@ function dShowResults() {
   }
 }
 
+// ── Лупа на миниатюре товара ──
+// По макету на тамбнэйле стоит иконка лупы, по клику открывается большая
+// картинка на затемнении. В выгрузке из Figma миниатюра — цельный SVG вместе с
+// лупой, отдельной иконки нет, поэтому глиф нарисован инлайном; когда иконку
+// выгрузят отдельно, подставить её сюда.
+const D_ZOOM_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+  <circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/>
+  <path d="M10 7v6M7 10h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M15 15l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+</svg>`;
+
+function dShowPhoto(ev, url) {
+  if (ev) ev.stopPropagation();   // клик по лупе не должен сворачивать карточку
+  const ov = document.getElementById('d-photo-overlay');
+  const img = document.getElementById('d-photo-img');
+  if (!ov || !img) return;
+  img.src = url;
+  ov.classList.add('active');
+}
+
+function dHidePhoto() {
+  const ov = document.getElementById('d-photo-overlay');
+  if (ov) ov.classList.remove('active');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') dHidePhoto();
+});
+
 // URL картинки из поля каталога. Битрикс отдаёт такие поля по-разному: строкой-URL,
 // объектом ({src|url|path}) или числовым id файла — id адресом не является, его
 // отбрасываем. Кавычки вырезаем: URL подставляется внутрь style="…url('…')".
@@ -1286,10 +1427,13 @@ function _dRenderRealResults(allProducts) {
     const price = _productPrice(p);
     const thumbStyle = _productThumbStyle(p);
     const desc = (p.previewText && p.previewTextType !== 'html') ? p.previewText : '';
+    const bigPic = _pictureUrl(p.detailPicture) || _pictureUrl(p.previewPicture)
+      || (p.textureUrls && p.textureUrls.textures_dpc_diffusion) || '';
     return `
     <div class="d-mat-card" id="dmc-${p.id}">
       <div class="d-mat-head" onclick="dToggleMatCard(${p.id})">
-        <div class="d-mat-thumb" style="${thumbStyle}"></div>
+        <div class="d-mat-thumb" style="${thumbStyle}">${bigPic ? `<button class="d-mat-zoom" title="Показать фото"
+             onclick="dShowPhoto(event, '${bigPic.replace(/'/g, "\\'")}')">${D_ZOOM_ICON}</button>` : ''}</div>
         <div class="d-mat-info">
           <div class="d-mat-name">${p.name || ''}</div>
           <div class="d-mat-price">${price != null ? 'от ' + Math.round(price) + ' ₽' : 'цена по запросу'}</div>

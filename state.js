@@ -74,11 +74,13 @@ const ELEMENT_COLOR_NAMES = {
 // теги dpk/mpk/walls/fences: 250–1305 ₽/м.пог с разрывами на ~500 и ~900).
 // Границы фильтра — в _filterRealByPrice (nav-desktop.js), держать в синхроне
 // с подписями. Старые подписи «₽/м²» и «от 10 000» были из эпохи заглушек.
+// Подписи короткие: фильтр стоит в две колонки по ~140px, длинные названия
+// («Сбалансировано», «Премиальное качество») там обрезались. Формулировки — из макета.
 const PRICE_TIERS = [
-  {id:'budget',    lbl:'Бюджетно',             sub:'до 500 ₽/м.пог'},
-  {id:'balanced',  lbl:'Сбалансировано',        sub:'500 – 900 ₽/м.пог'},
-  {id:'premium',   lbl:'Премиальное качество',  sub:'от 900 ₽/м.пог'},
-  {id:'mpk',       lbl:'Доска из МПК',          sub:'≈ 800 – 1 300 ₽/м.пог'},
+  {id:'budget',    lbl:'Бюджетно',      sub:'до 500 ₽/м.пог'},
+  {id:'balanced',  lbl:'Баланс',        sub:'500 – 900 ₽/м.пог'},
+  {id:'premium',   lbl:'Премиум',       sub:'от 900 ₽/м.пог'},
+  {id:'mpk',       lbl:'Доска из МПК',  sub:'≈ 800 – 1 300 ₽/м.пог'},
 ];
 
 // Реальные разделы каталога API (bitrix_id). Курируем подмножество «товарных»
@@ -262,7 +264,7 @@ const S = {
   catShowResults: false,
   estimate: {},        // elementId -> { id, name, price } — выбранный в смету товар по элементу
   // Тумблеры canvas-редакторов (id из data-id → bool): 'railing-roof',
-  // 'steps-railing', 'steps-sheathing'… Зеркалируются из DOM
+  // 'steps-railing', 'railing-roof'… Зеркалируются из DOM
   // в ttg/_dCacheToggleDefaults — 3D-слой читает ТОЛЬКО отсюда (tgOn), не DOM.
   toggles: {},
   pathWidth: 120,      // ширина дорожки, см (инпут v-paths-width зеркалится сюда)
