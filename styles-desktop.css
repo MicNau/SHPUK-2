@@ -4,6 +4,18 @@
    (см. .d-house-card / .d-mat-card ниже). Селектор * имеет нулевую специфичность,
    поэтому любое явное правило — круги 50%, прямые углы карточек — его перекрывает. */
 *, *::before, *::after { border-radius: var(--r); }
+/* Панели и окна — прямоугольные, скругляются только контролы. */
+.d-sidebar, .d-panel, .d-3d-container, .d-center-canvas,
+.d-summary-box, .d-3d-loading, #d-toast { border-radius: 0; }
+
+/* Полоса прокрутки: серая линия 2px по центру жёлоба, оранжевый движок 4px. */
+* { scrollbar-width: thin; scrollbar-color: var(--accent) transparent; }
+*::-webkit-scrollbar { width: 4px; height: 4px; }
+*::-webkit-scrollbar-track {
+  background: linear-gradient(to right, transparent 1px, var(--border) 1px 3px, transparent 3px);
+}
+*::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 0; }
+*::-webkit-scrollbar-corner { background: transparent; }
 :root {
   --bg: #fff;
   --card: #d9d9d9;
@@ -189,7 +201,13 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 }
 .d-params-title { font-size: 36px; font-weight: 400; margin-bottom: 24px; flex: none; }
 /* Заголовок и кнопки «Назад/Дальше» приколочены; скроллится только этот блок. */
-.d-params-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+/* Отступ сверху — чтобы первый слайдер не упирался в кромку скролла и не
+   срезался; по бокам 2px с компенсацией margin’ом: тень бегунка в крайних
+   положениях выходит за дорожку, а ширина содержимого остаётся прежней. */
+.d-params-scroll {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 8px 2px 0; margin: 0 -2px;
+}
 /* ── Слайдер параметра ──
    По макету: подпись слева, поле значения 44×44 справа, ниже дорожка 2px с
    оранжевой заливкой слева от бегунка, под ней — границы диапазона.
@@ -238,12 +256,14 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   background: radial-gradient(circle at center, var(--accent) 0 4px, #fff 4px);
   box-shadow: 0 0 6px 2px rgba(0,0,0,.25);
 }
+/* 3D-вид занимает всю правую часть: рамки вокруг него по макету нет, поэтому
+   ни отступа, ни отдельного фона у контейнера. */
 .d-params-center {
   flex: 1; display: flex; align-items: stretch; justify-content: center;
-  padding: 20px; background: #f0f0f0; position: relative;
+  padding: 0; background: var(--bg); position: relative;
 }
 .d-3d-container {
-  flex: 1; background: var(--card); border-radius: var(--r);
+  flex: 1; background: var(--bg);
   position: relative; overflow: hidden; cursor: grab; touch-action: none;
 }
 .d-3d-hint {
@@ -574,7 +594,11 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   box-shadow: 0 1px 3px rgba(0,0,0,.2);
 }
 .d-color-dot:hover { transform: scale(1.1); }
-.d-color-dot.selected { border-color: #000; box-shadow: 0 0 0 3px #fff, 0 0 0 5px #000; }
+/* Выбранный цвет обводится оранжевым (геометрия та же, менялся только цвет). */
+.d-color-dot.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--accent);
+}
 
 /* Material cards in panel */
 .d-mat-list { display: flex; flex-direction: column; gap: 8px; }
