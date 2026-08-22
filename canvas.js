@@ -660,8 +660,9 @@ function drawSnapCanvas(name) {
 
   // Контур текущей секции
   if (realPts.length > 0) {
-    const color = {terrace:'#000',pool_terrace:'#0050CC',pier:'#1a7acc',paths:'#336600',
-                   fence:'#000',railing:'#7a4b23'}[name]||'#000';
+    // Редактируемый элемент рисуется акцентным цветом — как выбранные
+    // прямоугольники террасы (TODO: активные элементы показываем оранжевым).
+    const color = DIM_COL;
     // Ломаные (могут состоять из нескольких линий через {break:true}).
     const segments = (name==='paths'||name==='fence'||name==='railing') ? splitAtBreaks(pts) : [realPts];
 
@@ -670,7 +671,7 @@ function drawSnapCanvas(name) {
       for (const seg of segments) {
         if (seg.length < 1) continue;
         // Полоса
-        ctx.strokeStyle='rgba(51,102,0,.25)'; ctx.lineWidth=pathW; ctx.lineCap='butt'; ctx.lineJoin='miter';
+        ctx.strokeStyle='rgba(242,114,44,.22)'; ctx.lineWidth=pathW; ctx.lineCap='butt'; ctx.lineJoin='miter';
         ctx.beginPath(); ctx.moveTo(seg[0].x*W, seg[0].y*H);
         for(let i=1;i<seg.length;i++) ctx.lineTo(seg[i].x*W, seg[i].y*H);
         ctx.stroke();
@@ -1034,8 +1035,8 @@ function drawFacadeCanvas() {
         const sel = !!S.wallZones[it.segId];
         const isWall = it.type === 'wall';
         ctx.strokeStyle = isWall
-          ? (sel ? 'rgba(47,111,216,.9)'  : 'rgba(70,70,70,.32)')
-          : (sel ? 'rgba(47,111,216,.45)' : 'rgba(70,70,70,.14)');
+          ? (sel ? 'rgba(242,114,44,.9)'  : 'rgba(70,70,70,.32)')
+          : (sel ? 'rgba(242,114,44,.45)' : 'rgba(70,70,70,.14)');
         ctx.lineWidth = bandW; ctx.lineCap = 'butt';
         ctx.beginPath(); ctx.moveTo(a.x * W, a.y * H); ctx.lineTo(b.x * W, b.y * H); ctx.stroke();
         // Поперечные штрихи на границах элемента (видно, где элементы делятся)
@@ -1058,7 +1059,7 @@ function drawFacadeCanvas() {
       const on = zonesN > 0 && (!!S.wallZones[lastOf(eP)] || !!S.wallZones[firstOf(eN)]);
       const c = T.toNorm(p.cx, p.cz);
       const half = Math.max(p.ps / GRID * W, 6 / cx.scale) / 2 * 1.6;
-      ctx.fillStyle = on ? 'rgba(47,111,216,.9)' : 'rgba(70,70,70,.32)';
+      ctx.fillStyle = on ? 'rgba(242,114,44,.9)' : 'rgba(70,70,70,.32)';
       ctx.fillRect(c.x * W - half, c.y * H - half, half * 2, half * 2);
     }
     // Счётчик в футере редактора

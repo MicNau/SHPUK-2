@@ -277,7 +277,7 @@ function _dResetAllConfigurations() {
   S.elementMat = {};
   S.estimate = {};
   S.catColors = new Set();
-  S.catPrice = null;
+  S.catPrices = new Set();
   S.catSection = null;
   S.curSec = 0;
   dConfigured.clear();
@@ -736,19 +736,21 @@ function _dRenderSidebar() {
     const isEditing = dEditorOpen && isActive;
     return `
       <div class="d-sb-row">
-        <button class="d-sb-btn ${isActive ? 'active' : ''} ${isCfg ? 'configured' : ''} ${isLocked ? 'locked' : ''}"
-                data-id="${item.id}"
-                onclick="dClickItem('${item.id}')"
-                ${isLocked ? 'disabled' : ''}>
-          ${item.lbl}
-        </button>
+        <div class="d-sb-main">
+          <button class="d-sb-btn ${isActive ? 'active' : ''} ${isCfg ? 'configured' : ''} ${isLocked ? 'locked' : ''}"
+                  data-id="${item.id}"
+                  onclick="dClickItem('${item.id}')"
+                  ${isLocked ? 'disabled' : ''}>
+            ${item.lbl}
+          </button>
+          ${isEditing ? '<div class="d-sb-accordion" id="d-sb-accordion"></div>' : ''}
+        </div>
         ${isEditing ? '<div class="d-sb-actions" id="d-sb-actions"></div>' : ''}
         ${!isEditing && isCfg && item.hasEditor ? `<button class="d-sb-edit ${isLocked ? 'locked' : ''}" title="Редактировать"
             onclick="dEditItem('${item.id}')" ${isLocked ? 'disabled' : ''}><img src="assets/icons/icon_edit.svg" alt=""></button>` : ''}
         ${!isEditing && isCfg ? `<button class="d-sb-delete ${isLocked ? 'locked' : ''}" title="Удалить настройки"
             onclick="dDeleteItem('${item.id}')" ${isLocked ? 'disabled' : ''}><img src="assets/icons/icon_delete.svg" alt=""></button>` : ''}
-      </div>
-      ${isEditing ? '<div class="d-sb-accordion" id="d-sb-accordion"></div>' : ''}`;
+      </div>`;
   }).join('');
 
   // Кнопка «Дальше» внизу панели живёт только пока открыт редактор.
@@ -1140,6 +1142,24 @@ function _elementColors(elId) {
   return names.map(n => ({ id: n, hex: hexMap[n] || '#999999', label: n }));
 }
 
+// Цвета палитры элемента, у которых есть товары в текущем разделе каталога.
+// Совпадение считается тем же способом, что и фильтрация (_itemColors), иначе
+// чип мог бы остаться при пустой выдаче.
+function _availableColors(elId) {
+  const all = _elementColors(elId);
+  const products = _catalogCache[_activeSectionId()];
+  if (!Array.isArray(products) || !products.length) return all;
+  const present = new Set();
+  for (const p of products) {
+    const cs = _itemColors(x => [x.color || '', x.name || '', x.previewText || ''], p);
+    for (const c of cs) present.add(c);
+  }
+  const found = all.filter(c => present.has(c.id));
+  // Если не распознан ни один цвет (например, у товаров пустые поля) — оставляем
+  // палитру как есть: пустой фильтр хуже лишних чипов.
+  return found.length ? found : all;
+}
+
 function _dRenderColorGrid() {
   const grid = document.getElementById('d-color-grid');
   if (!grid) return;
@@ -1149,7 +1169,11 @@ function _dRenderColorGrid() {
   const isFurniture = (dActiveItem === 'furniture');
   if (sect) sect.style.display = isFurniture ? 'none' : '';
   if (isFurniture) { S.catColors = new Set(); grid.innerHTML = ''; return; }
-  grid.innerHTML = _elementColors(dActiveItem).map(c =>
+  // Показываем только те цвета палитры, под которые в разделе есть товары:
+  // раньше в фильтре висели цвета из COLORS.md, обнулявшие выдачу. Пока каталог
+  // не загружен, палитра показывается целиком — иначе фильтр мигал бы пустым.
+  const colors = _availableColors(dActiveItem);
+  grid.innerHTML = colors.map(c =>
     `<div class="d-color-dot ${S.catColors.has(c.id) ? 'selected' : ''}"
           title="${c.label}" style="background:${c.hex};"
           onclick="dToggleColor('${c.id.replace(/'/g, "\\'")}')"></div>`
@@ -1164,9 +1188,9 @@ function _dRenderPriceGrid() {
   const sect = document.getElementById('d-price-section');
   const isFurniture = (dActiveItem === 'furniture');
   if (sect) sect.style.display = isFurniture ? 'none' : '';
-  if (isFurniture) { S.catPrice = null; grid.innerHTML = ''; return; }
+  if (isFurniture) { S.catPrices = new Set(); grid.innerHTML = ''; return; }
   grid.innerHTML = PRICE_TIERS.map(t =>
-    `<button class="d-price-btn ${S.catPrice === t.id ? 'selected' : ''}"
+    `<button class="d-price-btn ${S.catPrices.has(t.id) ? 'selected' : ''}"
              onclick="dSelectPrice('${t.id}')">
        <span class="d-radio"></span>
        <span class="d-price-lbl">${t.lbl}<span class="d-price-sub">${t.sub}</span></span>
@@ -1238,8 +1262,10 @@ function _filterByColors(items, textsOf) {
   });
 }
 
+// Тиры можно включать вместе: выдача — объединение, как у фильтра цвета.
 function dSelectPrice(tid) {
-  S.catPrice = S.catPrice === tid ? null : tid;
+  if (S.catPrices.has(tid)) S.catPrices.delete(tid);
+  else                      S.catPrices.add(tid);
   _dRenderPriceGrid();
   dShowResults();
 }
@@ -1305,17 +1331,27 @@ function _productPrice(p) {
 // Клиентский фильтр по выбранному ценовому тиру. Границы — по реальному
 // распределению цен каталога (₽/м.пог, ревизия 2026-07-31: 250–1305 с разрывами
 // на ~500 и ~900); подписи тиров — PRICE_TIERS в state.js, держать в синхроне.
+// Предикаты тиров. МПК: надёжный признак — принадлежность разделу 2329
+// «Террасная доска из МПК» (тег mpk, ревизия API 2026-07-31); подстрока в
+// названии — fallback.
+const PRICE_TIER_MATCH = {
+  budget:   p => (_productPrice(p) ?? 0) < 500,
+  balanced: p => { const v = _productPrice(p) ?? 0; return v >= 500 && v <= 900; },
+  premium:  p => (_productPrice(p) ?? 0) > 900,
+  mpk:      p => (p.sections || []).includes(2329) || /мпк/i.test(p.name || ''),
+};
+
+// Несколько выбранных тиров объединяются: товар проходит, если подошёл хотя бы
+// под один. Раньше тир был один и включение второго снимало первый.
 function _filterRealByPrice(products) {
-  if (!S.catPrice) return products;
-  const num = p => _productPrice(p) ?? 0;
-  if (S.catPrice === 'budget')   return products.filter(p => num(p) < 500);
-  if (S.catPrice === 'balanced') return products.filter(p => num(p) >= 500 && num(p) <= 900);
-  if (S.catPrice === 'premium')  return products.filter(p => num(p) > 900);
-  // МПК: надёжный признак — принадлежность разделу 2329 «Террасная доска из МПК»
-  // (тег mpk, ревизия API 2026-07-31); подстрока в названии — fallback.
-  if (S.catPrice === 'mpk')      return products.filter(p =>
-    (p.sections || []).includes(2329) || /мпк/i.test(p.name || ''));
-  return products;
+  if (!S.catPrices.size) return products;
+  return products.filter(p => {
+    for (const t of S.catPrices) {
+      const m = PRICE_TIER_MATCH[t];
+      if (m && m(p)) return true;
+    }
+    return false;
+  });
 }
 
 // Селектор раздела каталога (реальные разделы API из CATALOG_SECTIONS).
@@ -1457,16 +1493,23 @@ function _dRenderRealResults(allProducts) {
 
 function _dRenderStubResults() {
   let results = [...STUB_RESULTS];
-  if (S.catPrice === 'budget')        results = results.filter(r => r.id === 4);
-  else if (S.catPrice === 'balanced') results = results.filter(r => [1, 4].includes(r.id));
-  else if (S.catPrice === 'premium')  results = results.filter(r => [2, 3].includes(r.id));
-  else if (S.catPrice === 'mpk')      results = [{
-    id: 99, name: 'Deckron МПК Классик 145×22',
-    short: 'Массив прессованного кедра, премиум',
-    detail: 'Массив прессованного кедра (МПК) — натуральный кедр под давлением 800 атм. Плотность выше дуба. Не гниёт, не трескается, не требует обработки.',
-    price: 'от 10 000 ₽/м²', color: '#A0522D',
-    url: 'https://outdoor-mebel.ru/catalog/terrasnaya_doska_iz_dpk/doska_dpk_universalnaya/deckron',
-  }];
+  // Заглушки фильтруются по тем же тирам; выбранные объединяются.
+  const STUB_TIER_IDS = { budget: [4], balanced: [1, 4], premium: [2, 3] };
+  const picked = [...S.catPrices];
+  if (picked.length && !picked.includes('mpk')) {
+    const ids = new Set(picked.flatMap(t => STUB_TIER_IDS[t] || []));
+    results = results.filter(r => ids.has(r.id));
+  } else if (picked.includes('mpk')) {
+    const ids = new Set(picked.flatMap(t => STUB_TIER_IDS[t] || []));
+    results = results.filter(r => ids.has(r.id));
+    results.push({
+      id: 99, name: 'Deckron МПК Классик 145×22',
+      short: 'Массив прессованного кедра, премиум',
+      detail: 'Массив прессованного кедра (МПК) — натуральный кедр под давлением 800 атм. Плотность выше дуба. Не гниёт, не трескается, не требует обработки.',
+      price: 'от 10 000 ₽/м²', color: '#A0522D',
+      url: 'https://outdoor-mebel.ru/catalog/terrasnaya_doska_iz_dpk/doska_dpk_universalnaya/deckron',
+    });
+  }
   // Цвета заглушек: сначала название, затем текст («Цвета: тик, венге, серый…»).
   results = _filterByColors(results, m => [m.name, `${m.short || ''} ${m.detail || ''}`]);
 

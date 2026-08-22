@@ -261,7 +261,7 @@ const S = {
   // matSubMode удалён вместе с переключателем ТЕРРАСА/ОГРАЖДЕНИЕ в каталоге:
   // ограждение — отдельный элемент проекта со своим разделом каталога.
   catColors: new Set(),
-  catPrice: null,
+  catPrices: new Set(),  // выбранные ценовые тиры (можно несколько)
   catSection: null,    // выбранный раздел каталога (bitrix_id) или null = дефолт по элементу
   catShowResults: false,
   estimate: {},        // elementId -> { id, name, price } — выбранный в смету товар по элементу
