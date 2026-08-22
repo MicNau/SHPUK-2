@@ -560,8 +560,11 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
     const realPts = tp.filter(p=>!p.break);
     if (realPts.length < 2) continue;
 
-    if (secId === 'fence') {
-      // Забор: несколько линий (разделены break)
+    if (secId === 'fence' || secId === 'railing') {
+      // Забор и ограждение террасы — ломаные из нескольких линий (разделены break).
+      // Раньше ограждение попадало в ветку полигонов: контур замыкался и разрывы
+      // игнорировались, поэтому на плане (в том числе в редакторе ступеней, где
+      // ограждение нужно видеть) оно рисовалось неверно.
       const segs = splitAtBreaks(tp);
       for (const seg of segs) {
         if (seg.length < 2) continue;

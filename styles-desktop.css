@@ -51,11 +51,12 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 /* ═══════════════════════════════════════════
    FLOATING "ИТОГ" BUTTON (правый нижний угол; хедер убран)
    ═══════════════════════════════════════════ */
+/* «СМЕТА» — во всю ширину внизу правой панели (была плавающей в углу экрана). */
 .d-fab-summary {
-  position: fixed; right: 24px; bottom: 24px; z-index: 150;
-  height: 48px; padding: 0 24px; background: var(--accent); color: #fff;
-  border: none; font-size: 15px; font-weight: 700; cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0,0,0,.25); transition: background .15s;
+  width: 100%; height: 48px; background: var(--accent); color: #fff;
+  border: none; border-radius: var(--r);
+  font-size: 36px; font-weight: 600; line-height: 1; cursor: pointer;
+  transition: background .15s;
 }
 .d-fab-summary:hover { background: var(--accent-hover); }
 
@@ -532,7 +533,7 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 20px 12px; border-bottom: 1px solid #e8e8e8; flex-shrink: 0;
 }
-.d-panel-title { font-size: 18px; font-weight: 700; }
+.d-panel-title { font-size: 36px; font-weight: 400; color: var(--accent); }
 .d-panel-close {
   width: 32px; height: 32px; background: none; border: none;
   border-radius: 50%; font-size: 18px; cursor: pointer;
@@ -540,9 +541,15 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   transition: background .15s;
 }
 .d-panel-close:hover { background: #e8e8e8; }
+/* Тело панели само не скроллится: фильтры приколочены сверху, «СМЕТА» — снизу,
+   прокручивается только список карточек товаров. */
 .d-panel-body {
-  flex: 1; overflow-y: auto; padding: 16px 20px;
+  flex: 1; min-height: 0; overflow: hidden; padding: 16px 20px 0;
+  display: flex; flex-direction: column;
 }
+.d-panel-filters { flex-shrink: 0; }
+.d-panel-footer { flex-shrink: 0; padding: 12px 20px; }
+.d-panel-footer.hidden { display: none; }
 
 /* Sub-toggle in panel (Терраса / Ограждение) */
 .d-panel-sub-toggle {
@@ -601,12 +608,16 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 }
 
 /* Material cards in panel */
-.d-mat-list { display: flex; flex-direction: column; gap: 8px; }
+.d-mat-list {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 14px 0;
+}
 /* Карточка товара: прямые углы, белый фон, обводка как у кнопок; при наведении
    тень, у выбранной — оранжевая обводка (как у карточки дома). */
 .d-mat-card {
   background: var(--bg); border-radius: 0; overflow: hidden;
-  border: 2px solid var(--btn-border);
+  border: 2px solid var(--btn-border); flex-shrink: 0;
   transition: border-color .2s, box-shadow .2s;
 }
 .d-mat-card:hover { box-shadow: var(--hover-shadow); }
@@ -615,8 +626,28 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; cursor: pointer;
 }
 .d-mat-thumb {
+  position: relative;
   width: 52px; height: 52px; background: #bbb; border-radius: var(--r); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center; font-size: 20px;
+}
+/* Лупа на миниатюре: открывает фото товара поверх всего. */
+.d-mat-zoom {
+  position: absolute; left: 2px; bottom: 2px;
+  width: 22px; height: 22px; border-radius: 50%; padding: 0; border: none;
+  background: rgba(0,0,0,.55); color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s;
+}
+.d-mat-zoom:hover { background: var(--accent); }
+/* Фото товара: затемнение такое же, как у окна сметы. */
+.d-photo-overlay {
+  display: none; position: fixed; inset: 0; z-index: 300;
+  background: rgba(0,0,0,.5); align-items: center; justify-content: center;
+  padding: 40px; cursor: zoom-out;
+}
+.d-photo-overlay.active { display: flex; }
+.d-photo-overlay img {
+  max-width: 100%; max-height: 100%; object-fit: contain; background: var(--bg);
 }
 .d-mat-info { flex: 1; min-width: 0; }
 .d-mat-name { font-size: 13px; font-weight: 700; margin-bottom: 2px; }

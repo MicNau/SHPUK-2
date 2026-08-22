@@ -4,13 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=22">
+<link rel="stylesheet" href="styles-desktop.css?v=24">
 </head>
 <body>
-
-<!-- Плавающая кнопка «СМЕТА» — правый нижний угол; видна на шаге 3 и только когда
-     в смете есть хотя бы один товар (_dSyncSummaryBtn). -->
-<button class="d-fab-summary" id="d-btn-summary" onclick="dShowSummary()" style="display:none">СМЕТА</button>
 
 <!-- ═══ STEP 1: House type selection (fullscreen) ═══ -->
 <div class="d-screen active" id="d-screen-1">
@@ -156,7 +152,6 @@
           <div class="d-canvas-area" id="cw-steps" style="cursor:default;"><canvas id="cv-steps"></canvas></div>
           <div class="d-canvas-footer">
             <div class="tg on" onclick="ttg(this)" data-id="steps-railing"><span class="tg-txt">Перила лестницы</span><div class="tg-ind"></div></div>
-            <div class="tg" onclick="ttg(this)" data-id="steps-sheathing"><span class="tg-txt">Зашить</span><div class="tg-ind"></div></div>
             <div class="d-canvas-actions">
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('steps')">Дальше →</button>
             </div>
@@ -338,36 +333,42 @@
       <div class="d-panel-header">
         <div class="d-panel-title" id="d-panel-title">Материалы</div>
       </div>
+      <!-- Фильтры приколочены, скроллится только список карточек. -->
       <div class="d-panel-body" id="d-panel-body">
-        <!-- Sub-toggle (Терраса / Ограждение — only for terrace) -->
-        <div class="d-panel-sub-toggle" id="d-panel-sub-toggle" style="display:none;"></div>
+        <div class="d-panel-filters">
+          <!-- Sub-toggle (Терраса / Ограждение — only for terrace) -->
+          <div class="d-panel-sub-toggle" id="d-panel-sub-toggle" style="display:none;"></div>
 
+          <!-- Color filter. Скрывается для мебели: у её товаров поле color пустое. -->
+          <div class="d-color-section" id="d-color-section">
+            <div class="d-color-title">Цвет:</div>
+            <div class="d-color-grid" id="d-color-grid"></div>
+          </div>
 
-        <!-- Color filter. Скрывается для мебели: у её товаров поле color пустое. -->
-        <div class="d-color-section" id="d-color-section">
-          <div class="d-color-title">Цвет:</div>
-          <div class="d-color-grid" id="d-color-grid"></div>
+          <!-- Price filter. Скрывается для мебели: тиры заданы в ₽/м.пог (доска),
+               у мебели цена за изделие — фильтр по ним бессмыслен. -->
+          <div class="d-color-section" style="margin-top:6px;" id="d-price-section">
+            <div class="d-color-title">Цена:</div>
+            <div class="d-price-grid" id="d-price-grid"></div>
+          </div>
         </div>
 
-        <!-- Price filter. Скрывается для мебели: тиры заданы в ₽/м.пог (доска),
-             у мебели цена за изделие — фильтр по ним бессмыслен. -->
-        <div class="d-color-section" style="margin-top:6px;" id="d-price-section">
-          <div class="d-color-title">Цена:</div>
-          <div class="d-price-grid" id="d-price-grid"></div>
-        </div>
-
-        <div class="d-filter-divider"></div>
-
-        <!-- Results (auto-shown) -->
+        <!-- Results (auto-shown) — единственный скроллящийся блок панели -->
         <div class="d-mat-list" id="d-mat-list"></div>
-
-        <div class="d-filter-divider"></div>
-
-        <!-- Samples -->
+      </div>
+      <!-- «СМЕТА» приколочена внизу панели; видна на шаге 3, когда в смете
+           есть хотя бы один товар (_dSyncSummaryBtn). -->
+      <div class="d-panel-footer">
+        <button class="d-fab-summary" id="d-btn-summary" onclick="dShowSummary()" style="display:none">СМЕТА</button>
       </div>
     </div>
 
   </div>
+</div>
+
+<!-- ═══ PHOTO OVERLAY (лупа на карточке товара) ═══ -->
+<div class="d-photo-overlay" id="d-photo-overlay" onclick="dHidePhoto()">
+  <img id="d-photo-img" src="" alt="">
 </div>
 
 <!-- ═══ SUMMARY OVERLAY ═══ -->
@@ -393,8 +394,8 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=41"></script>
-<script src="canvas.js?v=40"></script>
+<script src="state.js?v=42"></script>
+<script src="canvas.js?v=41"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=82"></script>
 <!-- Каталожный API: домен выбирается по хосту.
@@ -417,10 +418,10 @@
 <!-- 3D viewer: core (сцена/материалы/оркестратор) → builders (конструкции) →
      railing (ограждение/навесы). Общая глобальная область, порядок важен. -->
 <script src="viewer3d-core.js?v=126"></script>
-<script src="viewer3d-builders.js?v=10"></script>
+<script src="viewer3d-builders.js?v=11"></script>
 <script src="viewer3d-railing.js?v=5"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=74"></script>
+<script src="nav-desktop.js?v=75"></script>
 </body>
 </html>

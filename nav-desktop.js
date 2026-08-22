@@ -960,7 +960,12 @@ function _dSyncSummaryBtn() {
   const btn = document.getElementById('d-btn-summary');
   if (!btn) return;
   const hasProduct = !!(S.estimate && Object.keys(S.estimate).length);
-  btn.style.display = (dStep === 3 && hasProduct) ? '' : 'none';
+  const show = (dStep === 3 && hasProduct);
+  btn.style.display = show ? '' : 'none';
+  // Кнопка живёт внизу правой панели: прячем и контейнер, иначе остаются
+  // его отступы пустой полосой под списком товаров.
+  const footer = btn.closest('.d-panel-footer');
+  if (footer) footer.classList.toggle('hidden', !show);
 }
 
 // ══════════════════════════════════════════════
@@ -1355,6 +1360,35 @@ function dShowResults() {
   }
 }
 
+// ── Лупа на миниатюре товара ──
+// По макету на тамбнэйле стоит иконка лупы, по клику открывается большая
+// картинка на затемнении. В выгрузке из Figma миниатюра — цельный SVG вместе с
+// лупой, отдельной иконки нет, поэтому глиф нарисован инлайном; когда иконку
+// выгрузят отдельно, подставить её сюда.
+const D_ZOOM_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+  <circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/>
+  <path d="M10 7v6M7 10h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M15 15l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+</svg>`;
+
+function dShowPhoto(ev, url) {
+  if (ev) ev.stopPropagation();   // клик по лупе не должен сворачивать карточку
+  const ov = document.getElementById('d-photo-overlay');
+  const img = document.getElementById('d-photo-img');
+  if (!ov || !img) return;
+  img.src = url;
+  ov.classList.add('active');
+}
+
+function dHidePhoto() {
+  const ov = document.getElementById('d-photo-overlay');
+  if (ov) ov.classList.remove('active');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') dHidePhoto();
+});
+
 // URL картинки из поля каталога. Битрикс отдаёт такие поля по-разному: строкой-URL,
 // объектом ({src|url|path}) или числовым id файла — id адресом не является, его
 // отбрасываем. Кавычки вырезаем: URL подставляется внутрь style="…url('…')".
@@ -1393,10 +1427,13 @@ function _dRenderRealResults(allProducts) {
     const price = _productPrice(p);
     const thumbStyle = _productThumbStyle(p);
     const desc = (p.previewText && p.previewTextType !== 'html') ? p.previewText : '';
+    const bigPic = _pictureUrl(p.detailPicture) || _pictureUrl(p.previewPicture)
+      || (p.textureUrls && p.textureUrls.textures_dpc_diffusion) || '';
     return `
     <div class="d-mat-card" id="dmc-${p.id}">
       <div class="d-mat-head" onclick="dToggleMatCard(${p.id})">
-        <div class="d-mat-thumb" style="${thumbStyle}"></div>
+        <div class="d-mat-thumb" style="${thumbStyle}">${bigPic ? `<button class="d-mat-zoom" title="Показать фото"
+             onclick="dShowPhoto(event, '${bigPic.replace(/'/g, "\\'")}')">${D_ZOOM_ICON}</button>` : ''}</div>
         <div class="d-mat-info">
           <div class="d-mat-name">${p.name || ''}</div>
           <div class="d-mat-price">${price != null ? 'от ' + Math.round(price) + ' ₽' : 'цена по запросу'}</div>
