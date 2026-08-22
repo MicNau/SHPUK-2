@@ -1362,14 +1362,8 @@ function dShowResults() {
 
 // ── Лупа на миниатюре товара ──
 // По макету на тамбнэйле стоит иконка лупы, по клику открывается большая
-// картинка на затемнении. В выгрузке из Figma миниатюра — цельный SVG вместе с
-// лупой, отдельной иконки нет, поэтому глиф нарисован инлайном; когда иконку
-// выгрузят отдельно, подставить её сюда.
-const D_ZOOM_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-  <circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/>
-  <path d="M10 7v6M7 10h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-  <path d="M15 15l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-</svg>`;
+// картинка на затемнении. Иконка белая, поэтому лежит на тёмном кружке.
+const D_ZOOM_ICON = '<img src="assets/icons/icon_lens.svg" alt="">';
 
 function dShowPhoto(ev, url) {
   if (ev) ev.stopPropagation();   // клик по лупе не должен сворачивать карточку
@@ -1779,6 +1773,128 @@ function _mainDoorDirection() {
   return _compassFromVec(-nx, -ny);
 }
 
+// ══════════════════════════════════════════════
+// РАСЧЁТ ПРОЕКТА (POST /api/v1/calculate_project/)
+//
+// Одна ручка считает все объекты сразу и отдаёт смету по каждому. Раньше на
+// бэкенде считалась только терраса, остальное прикидывал _computeEstimate.
+// mergeMaterials: false — нужен разбор по элементам, как в таблице «Итог»;
+// общую стоимость складывает сам Calculator.getTotalCost.
+// ══════════════════════════════════════════════
+
+// Нормированные координаты плана (0..1 поля) → миллиметры, как ждёт API.
+function _ptsToMm(pts) {
+  const k = _GRIDm() * 1000;
+  return pts.map(p => ({ x: Math.round(p.x * k), y: Math.round(p.y * k) }));
+}
+
+// Ломаные элемента: разрывы (break) делят разметку на отдельные линии.
+function _linesToMm(name) {
+  const pts = S.pts[name] || [];
+  const segs = (typeof splitAtBreaks === 'function')
+    ? splitAtBreaks(pts)
+    : [pts.filter(p => !p.break)];
+  return segs.filter(s => s.length >= 2).map(_ptsToMm);
+}
+
+// id товара, выбранного для элемента: сначала явный выбор «В смету», затем
+// применённый к элементу материал. null — бэкенд возьмёт товар по умолчанию.
+function _elementProductId(el) {
+  const est = S.estimate && S.estimate[el];
+  if (est && est.id) return est.id;
+  const mat = S.elementMat && S.elementMat[el];
+  return (mat && mat.productId) || null;
+}
+
+// Вершина лежит на кромке террасы? От этого зависит vertexType ступеней:
+// ступеням неоткуда начинаться, если фигура не примыкает к террасе.
+function _vertexOnTerrace(pt, tol) {
+  for (const r of (S.terraceRects || [])) {
+    const insideX = pt.x >= r.x - tol && pt.x <= r.x + r.w + tol;
+    const insideY = pt.y >= r.y - tol && pt.y <= r.y + r.h + tol;
+    if (!insideX || !insideY) continue;
+    const dEdge = Math.min(
+      Math.abs(pt.x - r.x), Math.abs(pt.x - (r.x + r.w)),
+      Math.abs(pt.y - r.y), Math.abs(pt.y - (r.y + r.h)));
+    if (dEdge <= tol) return true;
+  }
+  return false;
+}
+
+// Ступени — прямоугольник на плане; высота подъёма = высота настила террасы.
+function _stepsProjectObject(name) {
+  const s = S.steps;
+  if (!s || !(s.w > 0) || !(s.h > 0)) return null;
+  const tol = 0.15 / _GRIDm();          // 15 см в долях поля, как у примыкания к дому
+  const corners = [
+    { x: s.x, y: s.y }, { x: s.x + s.w, y: s.y },
+    { x: s.x + s.w, y: s.y + s.h }, { x: s.x, y: s.y + s.h },
+  ];
+  const k = _GRIDm() * 1000;
+  const vertices = corners.map(c => ({
+    x: Math.round(c.x * k), y: Math.round(c.y * k),
+    vertexType: _vertexOnTerrace(c, tol) ? 'terrace' : 'free',
+  }));
+  // Без примыкания к террасе расчёт ступеней заведомо падает («ступеням неоткуда
+  // начинаться»), а ошибка одного объекта роняет весь проект. Поэтому такие
+  // ступени в запрос не кладём — лучше смета без них, чем никакой.
+  if (!vertices.some(v => v.vertexType === 'terrace')) return null;
+  const height = Math.round((typeof S.terraceH === 'number' ? S.terraceH : 0.8) * 1000);
+  return { type: CalculationType.STEPS, name, vertices, height,
+           stepProductId: _elementProductId('steps') };
+}
+
+// Мебель — состав изделий: id товара → количество точек с ним.
+function _furnitureProjectObject(name) {
+  const items = {};
+  for (const p of (S.furniture || [])) {
+    if (!p.product || !p.product.id) continue;
+    items[p.product.id] = (items[p.product.id] || 0) + 1;
+  }
+  return Object.keys(items).length
+    ? { type: CalculationType.FURNITURE, name, items }
+    : null;
+}
+
+// Объекты проекта. Терраса у бассейна и причал не попадают: своих типов в API
+// у них нет. Дорожки тоже пока нет — API ждёт замкнутый контур ленты с
+// отмеченной стартовой стороной, а у нас хранится осевая линия с шириной.
+function _projectObjects() {
+  const lbl = id => (D_SIDEBAR_ITEMS.find(i => i.id === id) || {}).lbl || id;
+  const objs = [];
+
+  if (S.sections.includes('terrace')) {
+    const req = buildTerraceCalcRequest();
+    if (req.payload) objs.push({ type: CalculationType.TERRACE, name: lbl('terrace'), ...req.payload });
+  }
+  if (S.sections.includes('steps')) {
+    const o = _stepsProjectObject(lbl('steps'));
+    if (o) objs.push(o);
+  }
+  for (const el of ['railing', 'fence']) {
+    if (!S.sections.includes(el)) continue;
+    const lines = _linesToMm(el);
+    if (!lines.length) continue;
+    const o = { type: el === 'fence' ? CalculationType.FENCE : CalculationType.RAILING,
+                name: lbl(el), lines, sectionProductId: _elementProductId(el) };
+    // Калитки в разметке не учитываются — отдельного инструмента для них нет.
+    if (el === 'fence') { o.gateCount = 0; o.picketProductId = null; }
+    objs.push(o);
+  }
+  if (S.sections.includes('furniture')) {
+    const o = _furnitureProjectObject(lbl('furniture'));
+    if (o) objs.push(o);
+  }
+  return objs;
+}
+
+// Тело запроса или причина, по которой считать нечего.
+function buildProjectCalcRequest() {
+  const objects = _projectObjects();
+  if (!objects.length) return { error: 'Разметьте конструкции, чтобы рассчитать смету.' };
+  return { payload: { objects, mergeMaterials: false } };
+}
+
 // id террасной доски для расчёта: сначала явный выбор «В смету», затем применённый
 // к террасе товар (S.elementMat.terrace.productId пишется в _applySampleToActive).
 function _deckingBoardProductId() {
@@ -1835,7 +1951,7 @@ function buildTerraceCalcRequest() {
 // Сетевую часть держит обёртка бэкендера (backend_API/Calculator.js): адрес,
 // метод, разбор ответа и ошибок. Свой fetch убран, чтобы формат запроса жил в
 // одном месте — в их библиотеке и calculation_api.md.
-let _terraceCalc = null;    // { key, state:'loading'|'ok'|'err', data, error }
+let _projectCalc = null;    // { key, state:'loading'|'ok'|'err', data, error }
 let _calculator = null;
 
 function _dCalculator() {
@@ -1859,41 +1975,41 @@ function _calcErrorText(e) {
 }
 
 // Запускает расчёт, если тело запроса изменилось; перерисовывает блок по готовности.
-function _ensureTerraceCalc() {
-  const req = buildTerraceCalcRequest();
-  if (req.error) { _terraceCalc = { key: 'x', state: 'err', error: req.error }; return; }
+function _ensureProjectCalc() {
+  const req = buildProjectCalcRequest();
+  if (req.error) { _projectCalc = { key: 'x', state: 'err', error: req.error }; return; }
   const calc = _dCalculator();
-  if (!calc) { _terraceCalc = { key: 'x', state: 'err', error: 'Сервис расчёта не подключён.' }; return; }
+  if (!calc) { _projectCalc = { key: 'x', state: 'err', error: 'Сервис расчёта не подключён.' }; return; }
   const key = JSON.stringify(req.payload);
-  if (_terraceCalc && _terraceCalc.key === key && _terraceCalc.state !== 'err') return;
-  _terraceCalc = { key, state: 'loading' };
-  calc.getCalculation(CalculationType.TERRACE, req.payload)
-    .then(data => { _terraceCalc = { key, state: 'ok', data }; _dRenderTerraceCalc(); })
+  if (_projectCalc && _projectCalc.key === key && _projectCalc.state !== 'err') return;
+  _projectCalc = { key, state: 'loading' };
+  calc.getCalculation(CalculationType.PROJECT, req.payload)
+    .then(data => { _projectCalc = { key, state: 'ok', data }; _dRenderProjectCalc(); })
     .catch(e => {
-      console.warn('[calculate_terrace]', e);
-      _terraceCalc = { key, state: 'err', error: _calcErrorText(e) };
-      _dRenderTerraceCalc();
+      console.warn('[calculate_project]', e);
+      _projectCalc = { key, state: 'err', error: _calcErrorText(e) };
+      _dRenderProjectCalc();
     });
 }
 
-// ── Смета террасы в PDF ──
+// ── Смета проекта в PDF ──
 //
 // Собирается фоновой задачей: Calculator ставит её, опрашивает состояние и
-// отдаёт ссылку на файл. Тело запроса — то же, что у расчёта. Смета всегда по
-// ОДНОМУ объекту: общей сметы на проект в контракте нет, поэтому кнопка живёт
-// в блоке террасы, а не в окне «Итог».
-async function dTerraceReport() {
-  const btn = document.getElementById('d-terrace-pdf');
-  const state = document.getElementById('d-terrace-pdf-state');
+// отдаёт ссылку на файл. Тело запроса — то же, что у расчёта. Раньше PDF был
+// только по одному объекту; в новой версии API тип project поддерживается и
+// здесь, поэтому смета выгружается на проект целиком.
+async function dProjectReport() {
+  const btn = document.getElementById('d-project-pdf');
+  const state = document.getElementById('d-project-pdf-state');
   const setState = t => { if (state) state.textContent = t; };
-  const req = buildTerraceCalcRequest();
+  const req = buildProjectCalcRequest();
   const calc = _dCalculator();
   if (req.error || !calc) { setState(req.error || 'Сервис расчёта не подключён.'); return; }
 
   if (btn) btn.disabled = true;
   setState('Ставим задачу…');
   try {
-    const url = await calc.getReport(CalculationType.TERRACE, req.payload,
+    const url = await calc.getReport(CalculationType.PROJECT, req.payload,
       s => setState(s === ReportStatus.PENDING ? 'Готовим смету…' : ''));
     // Ссылка приходит относительной (/api/v1/calculation_report/file/…). На хосте
     // без прокси статика и API — разные домены, поэтому разворачиваем по домену API.
@@ -1908,29 +2024,29 @@ async function dTerraceReport() {
   }
 }
 
-function terraceCalcTotal(data) {
-  if (!data) return 0;
-  const mats = Object.values(data.materials || {}).reduce((s, m) => s + (m.totalCost || 0), 0);
-  const works = (data.works || []).reduce((s, w) => s + (w.cost || 0), 0);
+// Итог по объекту: материалы + работы.
+function _objectCalcTotal(obj) {
+  if (!obj) return 0;
+  const mats = Object.values(obj.materials || {}).reduce((s, m) => s + (m.totalCost || 0), 0);
+  const works = (obj.works || []).reduce((s, w) => s + (w.cost || 0), 0);
   return mats + works;
 }
 
-function _dRenderTerraceCalc() {
-  const host = document.getElementById('d-terrace-calc');
+function _dRenderProjectCalc() {
+  const host = document.getElementById('d-project-calc');
   if (!host) return;
-  const c = _terraceCalc;
-  const head = '<div class="est-title">Терраса — расчёт по спецификации</div>';
+  const c = _projectCalc;
+  const head = '<div class="est-title">Расчёт по спецификации</div>';
   if (!c || c.state === 'err') {
     host.innerHTML = head + `<div class="est-empty">${(c && c.error) || 'Расчёт недоступен.'}</div>`;
     return;
   }
   if (c.state === 'loading') {
-    host.innerHTML = head + '<div class="d-cat-loading"><div class="d-cat-spinner"></div>Считаем террасу…</div>';
+    host.innerHTML = head + '<div class="d-cat-loading"><div class="d-cat-spinner"></div>Считаем проект…</div>';
     return;
   }
-  const mats = Object.values(c.data.materials || {});
-  const works = c.data.works || [];
-  if (!mats.length && !works.length) {
+  const objects = (c.data && c.data.objects) || [];
+  if (!objects.length) {
     host.innerHTML = head + '<div class="est-empty">Бэкенд вернул пустой расчёт.</div>';
     return;
   }
@@ -1942,24 +2058,36 @@ function _dRenderTerraceCalc() {
       <td class="est-r">${price != null ? _fmtRub(price) : '—'}</td>
       <td class="est-r">${cost != null ? _fmtRub(cost) : '—'}</td>
     </tr>`;
-  host.innerHTML = head + `
-    <table class="est-table">
-      <thead><tr><th>Позиция</th><th>Наименование</th><th class="est-r">Кол-во</th><th class="est-r">Цена</th><th class="est-r">Сумма</th></tr></thead>
-      <tbody>
-        ${mats.map(m => row(m.name, m.ruTag, m.totalDimensionCount, m.dimension,
-                            m.pricePerDimension, m.totalCost)).join('')}
-        ${works.map(w => row(w.name, 'Работы', null, '', null, w.cost)).join('')}
-      </tbody>
-      <tfoot><tr><td colspan="4" class="est-r">Итого по террасе:</td><td class="est-r est-total">${_fmtRub(terraceCalcTotal(c.data))}</td></tr></tfoot>
-    </table>
+
+  let total = 0;
+  const sections = objects.map(o => {
+    const mats = Object.values(o.materials || {});
+    const works = o.works || [];
+    const sum = _objectCalcTotal(o);
+    total += sum;
+    return `
+      <div class="est-obj-title">${o.name || o.type || ''}</div>
+      <table class="est-table">
+        <thead><tr><th>Позиция</th><th>Наименование</th><th class="est-r">Кол-во</th><th class="est-r">Цена</th><th class="est-r">Сумма</th></tr></thead>
+        <tbody>
+          ${mats.map(m => row(m.name, m.ruTag, m.totalDimensionCount, m.dimension,
+                              m.pricePerDimension, m.totalCost)).join('')}
+          ${works.map(w => row(w.name, 'Работы', null, '', null, w.cost)).join('')}
+        </tbody>
+        <tfoot><tr><td colspan="4" class="est-r">Итого:</td><td class="est-r est-total">${_fmtRub(sum)}</td></tr></tfoot>
+      </table>`;
+  }).join('');
+
+  host.innerHTML = head + sections + `
+    <div class="est-project-total">Итого по проекту: <span class="est-total">${_fmtRub(total)}</span></div>
     <div class="est-actions">
-      <button class="d-canvas-btn" id="d-terrace-pdf" onclick="dTerraceReport()">Смета террасы в PDF</button>
-      <span class="est-note" id="d-terrace-pdf-state"></span>
+      <button class="d-canvas-btn" id="d-project-pdf" onclick="dProjectReport()">Смета проекта в PDF</button>
+      <span class="est-note" id="d-project-pdf-state"></span>
     </div>
-    <div class="est-note">Спецификация и работы посчитаны бэкендом по контуру террасы и высоте настила.
-    Строка «Терраса» в таблице выше — стоимость «голой» доски по площади; здесь —
-    полная спецификация: подконструкция, крепёж и работы. Пока в каталоге не заполнены
-    характеристики товаров, расчёт идёт на товарах по умолчанию, а не на выбранной доске.</div>`;
+    <div class="est-note">Спецификация и работы посчитаны бэкендом по разметке: подконструкция,
+    крепёж и работы. Таблица выше — стоимость «голого» материала по объёму. Терраса у бассейна,
+    причал и дорожки сюда не входят: своих типов расчёта у них в API пока нет. Пока в каталоге
+    не заполнены характеристики товаров, расчёт идёт на товарах по умолчанию, а не на выбранных.</div>`;
 }
 
 // ══════════════════════════════════════════════
@@ -2014,19 +2142,19 @@ function dShowSummary() {
       <div class="est-note">Расчёт ориентировочный: цены из каталога; расход доски с запасом 10%, забора — 5%.</div>`;
   }
 
-  // Блок расчёта террасы бэкендом — заполняется асинхронно (_dRenderTerraceCalc).
+  // Блок расчёта проекта бэкендом — заполняется асинхронно (_dRenderProjectCalc).
   document.getElementById('d-sum-body').innerHTML =
-    infoHTML + estHTML + '<div id="d-terrace-calc"></div>';
+    infoHTML + estHTML + '<div id="d-project-calc"></div>';
   // Расчёт не должен ломать «Итог»: исключение при сборке запроса раньше обрывало
-  // dShowSummary до _dRenderTerraceCalc, и блок оставался пустым — без заголовка и
-  // без сообщения, то есть неотличимо от «фичи вообще нет в этой сборке».
+  // dShowSummary до рендера, и блок оставался пустым — без заголовка и без
+  // сообщения, то есть неотличимо от «фичи вообще нет в этой сборке».
   try {
-    _ensureTerraceCalc();
+    _ensureProjectCalc();
   } catch (e) {
-    console.error('[terrace calc] не удалось собрать запрос', e);
-    _terraceCalc = { key: 'x', state: 'err', error: 'Не удалось собрать запрос: ' + e.message };
+    console.error('[project calc] не удалось собрать запрос', e);
+    _projectCalc = { key: 'x', state: 'err', error: 'Не удалось собрать запрос: ' + e.message };
   }
-  _dRenderTerraceCalc();
+  _dRenderProjectCalc();
   document.getElementById('d-summary-overlay').classList.add('active');
 }
 
