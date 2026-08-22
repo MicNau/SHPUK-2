@@ -809,7 +809,7 @@ function initFurnitureCanvas() {
   });
   document.addEventListener('mouseup', e => {
     if (!furnDrag || e.button !== 0) return;
-    furnDrag = false; furnDragIdx = -1; wrap.style.cursor = 'default';
+    furnDrag = false; furnDragIdx = -1; wrap.style.cursor = '';   // вернуть курсор из стилей (.d-canvas-area)
     if (typeof onParamChange === 'function') onParamChange();   // пересборка 3D
   });
 
@@ -1284,7 +1284,7 @@ function attachStepsEvents(wrap) {
   });
   document.addEventListener('mouseup', () => {
     if (!stepsDrag) return;
-    stepsDrag = null; stepsDragStart = null; wrap.style.cursor = 'default';
+    stepsDrag = null; stepsDragStart = null; wrap.style.cursor = '';   // вернуть курсор из стилей (.d-canvas-area)
   });
 
   wrap.addEventListener('wheel', e => {
@@ -1694,7 +1694,7 @@ function attachTerraceEvents(wrap) {
   document.addEventListener('mouseup', () => {
     if (!trDrag) return;
     trDrag = null; trDragStart = null; trDragIdx = -1;
-    wrap.style.cursor = 'default';
+    wrap.style.cursor = '';   // вернуть курсор из стилей (.d-canvas-area)
   });
 
   // Колесо → zoom
@@ -2032,7 +2032,7 @@ function attachBedsEvents(wrap) {
   });
   document.addEventListener('mouseup', () => {
     if (!bedDrag) return;
-    bedDrag = null; bedDragStart = null; bedDragIdx = -1; wrap.style.cursor = 'default';
+    bedDrag = null; bedDragStart = null; bedDragIdx = -1; wrap.style.cursor = '';   // вернуть курсор из стилей (.d-canvas-area)
   });
 
   wrap.addEventListener('wheel', e => {

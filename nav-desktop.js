@@ -1360,10 +1360,9 @@ function dShowResults() {
   }
 }
 
-// ── Лупа на миниатюре товара ──
-// По макету на тамбнэйле стоит иконка лупы, по клику открывается большая
-// картинка на затемнении. Иконка белая, поэтому лежит на тёмном кружке.
-const D_ZOOM_ICON = '<img src="assets/icons/icon_lens.svg" alt="">';
+// ── Фото товара ──
+// Открывается кнопкой «Посмотреть» в развёрнутой карточке (лупа с миниатюры
+// убрана по TODO). Затемнение — как у окна сметы.
 
 function dShowPhoto(ev, url) {
   if (ev) ev.stopPropagation();   // клик по лупе не должен сворачивать карточку
@@ -1406,6 +1405,13 @@ function _productThumbStyle(p) {
   return 'background:#bbb;';
 }
 
+// Товар уже применён к активному элементу? По нему кнопка «Применить» гаснет.
+function _isProductApplied(pid) {
+  const el = dActiveItem;
+  const em = el && S.elementMat ? S.elementMat[el] : null;
+  return !!(em && em.productId === pid);
+}
+
 function _dRenderRealResults(allProducts) {
   const list = document.getElementById('d-mat-list');
   if (!list) return;
@@ -1426,8 +1432,7 @@ function _dRenderRealResults(allProducts) {
     return `
     <div class="d-mat-card" id="dmc-${p.id}">
       <div class="d-mat-head" onclick="dToggleMatCard(${p.id})">
-        <div class="d-mat-thumb" style="${thumbStyle}">${bigPic ? `<button class="d-mat-zoom" title="Показать фото"
-             onclick="dShowPhoto(event, '${bigPic.replace(/'/g, "\\'")}')">${D_ZOOM_ICON}</button>` : ''}</div>
+        <div class="d-mat-thumb" style="${thumbStyle}"></div>
         <div class="d-mat-info">
           <div class="d-mat-name">${p.name || ''}</div>
           <div class="d-mat-price">${price != null ? 'от ' + Math.round(price) + ' ₽' : 'цена по запросу'}</div>
@@ -1437,7 +1442,10 @@ function _dRenderRealResults(allProducts) {
       <div class="d-mat-body"><div class="d-mat-detail">
         <div class="d-mat-desc">${desc}</div>
         <div class="d-mat-actions">
-          <button class="d-mat-btn d-mat-btn-apply" onclick="dApplyRealMat(event, ${p.id})">Применить</button>
+          ${bigPic ? `<button class="d-mat-btn d-mat-btn-view"
+             onclick="dShowPhoto(event, '${bigPic.replace(/'/g, "\\'")}')">Посмотреть</button>` : ''}
+          <button class="d-mat-btn d-mat-btn-apply" onclick="dApplyRealMat(event, ${p.id})"
+                  ${_isProductApplied(p.id) ? 'disabled' : ''}>Применить</button>
         </div>
       </div></div>
     </div>`;
@@ -1518,8 +1526,12 @@ async function dApplyRealMat(e, pid) {
                          colorName: product.color || '',
                          price: _productPrice(product) });
 
-  btn.textContent = '✓'; btn.style.background = '#444';
-  setTimeout(() => { btn.textContent = orig; btn.style.background = '#000'; }, 700);
+  // Применённый товар нельзя применить повторно: кнопка гаснет, у остальных
+  // карточек — снова активна (применить можно только один товар на элемент).
+  btn.textContent = orig;
+  const list = document.getElementById('d-mat-list');
+  if (list) list.querySelectorAll('.d-mat-btn-apply').forEach(b => { b.disabled = false; });
+  btn.disabled = true;
 }
 
 function dToggleMatCard(mid) {
