@@ -1077,6 +1077,9 @@ function initStepsCanvas() {
   // Но глубину/разворот приводим сразу: они зависят от фундамента и разметки террасы,
   // которые могли поменяться с прошлого открытия редактора.
   _stepsNormalize();
+  // И довешиваем «залипание» к столбам: ограждение могли разметить ПОСЛЕ ступеней,
+  // тогда при открытии редактора перила сами приходят в ближайший столб.
+  _stepsSnapToRailPost('move');
 
   const newCv = cv.cloneNode(false);
   wrap.replaceChild(newCv, cv);
@@ -1185,38 +1188,75 @@ function _stepsRailOffsetNorm(widthNorm) {
   return Math.max(0.10 / GRID, widthNorm / 2 - inset);
 }
 
-// TODO.md 10: «залипание» ступеней к ограждению террасы — двигаем лестницу поперёк
-// спуска так, чтобы одно из её перил пришло ОСЬЮ в ближайший столб ограждения.
-// Работает только при перемещении (не при resize) и только если ограждение
-// размечено: без столбов ступени ведут себя как раньше.
-function _stepsSnapToRailPost() {
+// TODO.md 10: «залипание» ступеней к ограждению террасы. Перила лестницы идут НЕ по
+// кромке, а внутрь от неё (см. _stepsRailOffsetNorm) — притягиваем так, чтобы ОСЬ
+// перила пришла в ближайший столб, а не кромка лестницы.
+//   kind = 'move'  → двигаем лестницу целиком (обе стороны равнозначны);
+//   kind = resize  → тянем ТОЛЬКО перетаскиваемую кромку: её перило = кромка ∓
+//                    STAIR_RAIL_INSET, противоположная кромка остаётся на месте.
+// Без размеченного ограждения ступени ведут себя как раньше.
+function _stepsSnapToRailPost(kind) {
   const s = S.steps; if (!s) return;
   const posts = _railingPostsNorm();
   if (!posts.length) return;
   const D = _stepsDepthNorm();
   // Ось спуска = та, по которой размер равен расчётной глубине (_stepsNormalize).
   const alongY = Math.abs(s.h - D) <= Math.abs(s.w - D);
-  const lat = alongY ? 'x' : 'y';                 // поперёк спуска — там стоят перила
-  const size = alongY ? s.w : s.h;
-  const c = (alongY ? s.x : s.y) + size / 2;      // ось лестницы
+  const size = alongY ? s.w : s.h;                // ширина лестницы (поперёк спуска)
+  const lo = alongY ? s.x : s.y;                  // ближняя кромка по поперечной оси
+  const c = lo + size / 2;                        // ось лестницы
   const off = _stepsRailOffsetNorm(size);
+  const inset = ((typeof STAIR_RAIL_INSET !== 'undefined') ? STAIR_RAIL_INSET : 0.12) / GRID;
+  const mn = SNAP / GRID;
   // Столбы берём только те, что напротив лестницы: по оси спуска не дальше её глубины
   // (иначе притягивало бы к перилам на другом краю террасы).
   const runLo = (alongY ? s.y : s.x) - D, runHi = (alongY ? s.y : s.x) + (alongY ? s.h : s.w) + D;
   const thr = EDGE_SNAP_DIST / GRID;
-  let bestShift = null, bestD = thr;
+  const near = [];
   for (const p of posts) {
     const run = alongY ? p.y : p.x;
     if (run < runLo || run > runHi) continue;
-    const v = alongY ? p.x : p.y;
-    for (const rail of [c - off, c + off]) {
-      const d = Math.abs(v - rail);
-      if (d < bestD) { bestD = d; bestShift = v - rail; }
-    }
+    near.push(alongY ? p.x : p.y);
   }
-  if (bestShift === null) return;
-  if (alongY) s.x = Math.max(0, Math.min(1 - s.w, s.x + bestShift));
-  else        s.y = Math.max(0, Math.min(1 - s.h, s.y + bestShift));
+  if (!near.length) return;
+  const nearest = target => {
+    let best = null, bd = thr;
+    for (const v of near) { const d = Math.abs(v - target); if (d < bd) { best = v; bd = d; } }
+    return best === null ? null : { v: best, d: bd };
+  };
+
+  if (kind === 'move' || !kind) {
+    let hit = null;
+    for (const rail of [c - off, c + off]) {
+      const r = nearest(rail);
+      if (r && (!hit || r.d < hit.d)) hit = { shift: r.v - rail, d: r.d };
+    }
+    if (!hit) return;
+    if (alongY) s.x = Math.max(0, Math.min(1 - s.w, s.x + hit.shift));
+    else        s.y = Math.max(0, Math.min(1 - s.h, s.y + hit.shift));
+    return;
+  }
+
+  // resize: перетаскиваемая кромка — левая/верхняя для 'nw'/'sw' по X и 'nw'/'ne' по Y.
+  const movingHi = alongY ? (kind === 'ne' || kind === 'se') : (kind === 'sw' || kind === 'se');
+  const hiEdge = lo + size;
+  const railMoving = movingHi ? (hiEdge - inset) : (lo + inset);
+  // Узкая лестница: перила упёрлись в минимальный отступ 0.10 м от оси — тогда их
+  // положение от кромки не зависит и подтягивать нечего.
+  if (off <= 0.10 / GRID + 1e-9) return;
+  const r = nearest(railMoving);
+  if (!r) return;
+  const shift = r.v - railMoving;
+  if (movingHi) {
+    const newHi = Math.min(1, hiEdge + shift);
+    if (newHi - lo < mn) return;
+    if (alongY) s.w = newHi - lo; else s.h = newHi - lo;
+  } else {
+    const newLo = Math.max(0, lo + shift);
+    if (hiEdge - newLo < mn) return;
+    if (alongY) { s.x = newLo; s.w = hiEdge - newLo; }
+    else        { s.y = newLo; s.h = hiEdge - newLo; }
+  }
 }
 
 function getStepsRectPx(W) {
@@ -1245,10 +1285,9 @@ function applyStepsDrag(wx, wy, W) {
   const res = snapDraggedRect(stepsDrag, ds, dx, dy, -1);
   s.x = res.x; s.y = res.y; s.w = res.w; s.h = res.h;
   _stepsNormalize();     // глубину и разворот пользователь не задаёт
-  // Перемещение — довешиваем «залипание» к столбу ограждения (TODO.md 10).
-  // При resize не трогаем: там пользователь тянет кромку, сдвиг всей лестницы
-  // выглядел бы как срыв захвата.
-  if (stepsDrag === 'move') _stepsSnapToRailPost();
+  // «Залипание» к столбу ограждения (TODO.md 10): при перемещении двигаем лестницу
+  // целиком, при resize подтягиваем перетаскиваемую кромку.
+  _stepsSnapToRailPost(stepsDrag);
   drawStepsCanvas();
 }
 

@@ -908,8 +908,12 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
     const rcz = topZ + dirZ * riserOffset;
     const rdimX = (bestSide.axisAlong === 'X') ? stairWidth : RISER_THICKNESS;
     const rdimZ = (bestSide.axisAlong === 'X') ? RISER_THICKNESS : stairWidth;
-    const riser = mesh(box(rdimX, riserH, rdimZ), matStep);
+    // Подступенок — материал ТЕРРАСЫ (M.terraceSide), доски ГОРИЗОНТАЛЬНО:
+    // боковые грани box-UV дают именно горизонтальные грувы; ребро UV-бокса — как
+    // у боковин террасы (TERRACE_SIDE_TILE), чтобы доска была одного размера.
+    const riser = mesh(box(rdimX, riserH, rdimZ), M.terraceSide || matStep);
     riser.position.set(rcx, riserCenterY, rcz);
+    if (typeof _applyBoxUV === 'function') _applyBoxUV(riser, TERRACE_SIDE_TILE);
     stairGroup.add(riser);
     threeState.stepMeshes.push(riser);
   }
@@ -981,11 +985,23 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       const idx = [];
       for (const tri of tris) idx.push(tri[0], tri[1], tri[2]);
 
+      // UV щеки — как у боковины («юбки») террасы: U по высоте, V вдоль спуска
+      // (доски вертикально), ребро UV-бокса TERRACE_SIDE_TILE. Раньше UV не было
+      // вовсе — текстура товара на щёки просто не ложилась.
+      const TSc = TERRACE_SIDE_TILE;
+      const uvs = [];
+      for (let k = 0; k < verts3D.length; k += 3) {
+        const along = (bestSide.axisAlong === 'X') ? verts3D[k + 2] : verts3D[k];
+        uvs.push(verts3D[k + 1] / TSc, along / TSc);
+      }
+
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(verts3D, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
       geo.setIndex(idx);
       geo.computeVertexNormals();
-      const cheekMat = matStep.clone ? matStep.clone() : new THREE.MeshStandardMaterial({ color: 0x9aa2a8, roughness: 0.85 });
+      const cheekBase = M.terraceSide || matStep;
+      const cheekMat = cheekBase.clone ? cheekBase.clone() : new THREE.MeshStandardMaterial({ color: 0x9aa2a8, roughness: 0.85 });
       cheekMat.side = THREE.DoubleSide;
       const cheek = new THREE.Mesh(geo, cheekMat);
       cheek.castShadow = cheek.receiveShadow = true;
@@ -1010,10 +1026,16 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       // Перила лестницы всегда из того же материала, что ограждение террасы:
       // это одна конструкция, разные материалы у них выглядели бы ошибкой.
       // _resolveDeckMat подставит текстуры или цвет выбранного товара (S.elementMat.railing).
-      const stairRailBase = new THREE.MeshStandardMaterial({ color: PORCH_COLUMN_COLOR, roughness: 0.72, metalness: 0.04 });
-      const stairRailMat = (typeof _resolveDeckMat === 'function')
-        ? _resolveDeckMat(stairRailBase, 'railing')
-        : stairRailBase;
+      // M.railing приходит из buildScene3d уже разрешённым — ровно тот материал,
+      // которым строится ограждение террасы (одна база, одни карты). Отдельная база
+      // здесь давала другой цвет и блеск: у товара без PBR-текстур клонируется база,
+      // а она была своя.
+      const stairRailMat = M.railing
+        ? M.railing.clone()
+        : (typeof _resolveDeckMat === 'function'
+            ? _resolveDeckMat(new THREE.MeshStandardMaterial(
+                { color: PORCH_COLUMN_COLOR, roughness: 0.72, metalness: 0.04 }), 'railing')
+            : new THREE.MeshStandardMaterial({ color: PORCH_COLUMN_COLOR, roughness: 0.72, metalness: 0.04 }));
       stairRailMat.name = 'mat_railing';
       const up = new THREE.Vector3(0, 1, 0);
       // Тот же масштаб по высоте, что у ограждения террасы (столб → RAIL_POST_H),

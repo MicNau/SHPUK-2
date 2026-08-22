@@ -1175,10 +1175,20 @@ function buildScene3d() {
   // Ступени — отдельная секция. Глубина в плане пересчитывается из bh.
   if (S.sections.includes('steps') && S.steps) {
     M.deck = _resolveDeckMat(_baseDeck, 'steps');
+    // Перила лестницы — ТОТ ЖЕ материал, что у ограждения террасы: одна конструкция,
+    // и собирать его отдельно от своей базы значит получить другой цвет/блеск
+    // (у товара без PBR-текстур база вообще решает всё).
+    M.railing = _resolveDeckMat(_baseDeck, 'railing');
+    // Зашивка (щёки) и подступенки — материал ТЕРРАСЫ, как её боковины.
+    M.terraceSide = _resolveDeckMat(_baseDeck, 'terrace');
     try {
       // Подкладку строит сам buildSteps3d по реальному footprint лестницы.
       buildSteps3d(houseGroup, M, S.steps, terraceLevel, houseL, houseW);
     } catch (e) { console.error('[buildSteps3d]', e); }
+    // M.railing сам к мешам не привязан (перила лестницы берут его клон) — клон-заготовку
+    // освобождаем сразу, иначе на каждой пересборке остаётся висячий материал.
+    if (M.railing && M.railing !== _baseDeck) M.railing.dispose();
+    M.railing = null;
   }
 
   // Грядки. Модель planter нужна только когда выбран товар; до этого (и пока GLB
