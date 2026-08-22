@@ -35,6 +35,7 @@ const calculator = new Calculator('https://sollersdev.ru/api/v1/');
 | Оградка | `RAILING` | `{lines, sectionProductId}` |
 | Дорожка | `PATH` | `{vertices, deckingBoardProductId}` |
 | Мебель | `FURNITURE` | `{items}` |
+| Проект | `PROJECT` | `{objects, mergeMaterials}` |
 
 Идентификатор товара можно не передавать или прислать `null` — тогда расчёт
 возьмёт товар по умолчанию.
@@ -80,6 +81,8 @@ const materialsCost = await calculator.getTotalCost(
 Основные материалы заданы в `MAIN_MATERIALS`: у террасы доска и полуступень, у
 ступеней ступень, подступенок и фасадная доска, у забора секции и штакетник, у
 оградки секции, у дорожки доска. У мебели основными считаются все позиции.
+У проекта опция применяется к каждому объекту по его типу; в объединённой
+смете роли теряются при сложении по товарам, и она отдаётся целиком.
 
 Двух опций сразу быть не может, неизвестное значение опции или типа объекта
 тоже не пройдёт — всё это отбивается до запроса.
@@ -230,6 +233,44 @@ const furniture = await calculator.getCalculation(
     {items: cart},
 );
 ```
+
+### Проект целиком
+
+Объекты передаются массивом, у каждого свой тип, имя и тело своего расчёта.
+
+```js
+const project = await calculator.getCalculation(CalculationType.PROJECT, {
+    objects: [
+        {type: CalculationType.TERRACE, name: 'Терраса у входа', vertices, doorDirection: 'N'},
+        {type: CalculationType.STEPS, name: 'Спуск в сад', vertices: stepsVertices, height: 450},
+    ],
+    mergeMaterials: true,
+});
+```
+
+С `mergeMaterials: true` приходит обычный `{materials, works}`, только позиции
+ключуются идентификатором товара: одинаковые материалы разных объектов
+сложены в одну строку, а запас и округление взяты один раз от суммы.
+
+Без объединения ответ содержит `objects` — по одному на каждый объект
+запроса, с его типом, именем и своей сметой:
+
+```js
+const project = await calculator.getCalculation(CalculationType.PROJECT, {
+    objects: [...],
+    mergeMaterials: false,
+});
+
+for (const object of project.objects) {
+    console.log(object.name, Object.keys(object.materials));
+}
+```
+
+`getTotalCost` работает в обоих случаях: при разложении по объектам он
+складывает их сметы сам.
+
+Смета в PDF у проекта тоже своя: `getReport(CalculationType.PROJECT, ...)`
+собирает файл, где видно имя каждого объекта.
 
 ### Стоимость дорожки без работ
 

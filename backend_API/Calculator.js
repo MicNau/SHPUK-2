@@ -47,6 +47,7 @@ const CalculationType = {
     RAILING: 'railing',
     PATH: 'path',
     FURNITURE: 'furniture',
+    PROJECT: 'project',
 };
 
 const CALCULATION_PATHS = {
@@ -56,8 +57,12 @@ const CALCULATION_PATHS = {
     railing: 'calculate_railing/',
     path: 'calculate_path/',
     furniture: 'calculate_furniture/',
+    project: 'calculate_project/',
 };
 
+// Основные материалы объекта: по ним работает onlyMainMaterials. У мебели
+// ролей нет вовсе, у проекта с объединёнными материалами они теряются при
+// сложении по товарам, поэтому в обоих случаях смета отдаётся целиком.
 const MAIN_MATERIALS = {
     terrace: ['deckingBoard', 'halfStep'],
     steps: ['step', 'riser', 'facadeBoard'],
@@ -65,6 +70,7 @@ const MAIN_MATERIALS = {
     railing: ['section'],
     path: ['deckingBoard'],
     furniture: null,
+    project: null,
 };
 
 class CalculationError extends Error {
@@ -100,12 +106,14 @@ class Calculator {
      *   fence     - {lines, gateCount, sectionProductId, picketProductId};
      *   railing   - {lines, sectionProductId};
      *   path      - {vertices, deckingBoardProductId};
-     *   furniture - {items}.
+     *   furniture - {items};
+     *   project   - {objects, mergeMaterials}.
      *
      * @param {string} type - значение CalculationType.
      * @param {object} request - тело запроса как в API.
      * @param {string|null} option - значение CalculationOption.
-     * @returns {Promise<object>} {materials, works} с учётом опции.
+     * @returns {Promise<object>} {materials, works} с учётом опции. У проекта
+     *   без объединения материалов — {objects} со сметой каждого объекта.
      * @throws {CalculationError}
      */
     async getCalculation(type, request, option = null) {
@@ -317,6 +325,18 @@ class Calculator {
      * @returns {object}
      */
     static _shape(result, type, option) {
+        // Проект без объединения материалов отдаёт смету по объектам: опция
+        // применяется к каждому со своим типом, тип и имя остаются на месте.
+        if (result.objects) {
+            return {
+                objects: result.objects.map(object => ({
+                    type: object.type,
+                    name: object.name,
+                    ...Calculator._shape(object, object.type, option),
+                })),
+            };
+        }
+
         const materials = result.materials || {};
         const works = result.works || [];
 
@@ -351,6 +371,13 @@ class Calculator {
      */
     static _totalCost(result) {
         let total = 0;
+
+        // У проекта без объединения материалов общей сметы нет: стоимость
+        // набирается по объектам.
+        for (const object of result.objects || []) {
+            total += Calculator._totalCost(object);
+        }
+
         for (const material of Object.values(result.materials || {})) {
             total += material.totalCost || 0;
         }
