@@ -147,19 +147,21 @@ const HOUSE_MATERIALS = {
       { id: 'metal_red',   img: 'assets/roof_diff_03.jpg' }, // металл красный
     ],
   },
+  // Фундамент и стены — только цвет, без текстур (TODO). Значения продублированы
+  // в _houseTexSet (viewer3d-core.js) — менять синхронно, иначе образец в UI
+  // разойдётся с цветом в 3D.
   base: {
-    label: 'Материал фундамента',
+    label: 'Цвет фундамента',
     items: [
-      { id: 'concrete', color: '#9a9a9a' },                  // бетон (без текстуры, серый)
-      { id: 'stone',    img: 'assets/base_diff_01.jpg' },    // камень
+      { id: 'beige',    color: '#d9c9a8' },                  // бежевый
+      { id: 'brown',    color: '#7a5533' },                  // коричневый
+      { id: 'darkgray', color: '#4a4a4a' },                  // тёмно-серый
     ],
   },
   wall: {
-    label: 'Материал стен',
+    label: 'Цвет стен',
     items: [
-      { id: 'stucco', color: '#efe2c8' },                    // штукатурка (без текстуры, св.-бежевая)
-      { id: 'brick',  img: 'assets/wall_diff_01.jpg' },      // кирпич
-      { id: 'siding', img: 'assets/wall_diff_02.jpg' },      // сайдинг
+      { id: 'stucco', color: '#efe2c8' },                    // светло-бежевая штукатурка
     ],
   },
   // Рамы окон и полотна дверей (меши с материалами mat_frame*/mat_door). Текстур нет,
@@ -281,8 +283,8 @@ const S = {
   wallZones: {},
   // Материалы дома (шаг «Параметры дома»).
   roofMat: 'tile',     // tile | metal_green | metal_red
-  baseMat: 'concrete', // concrete | stone
-  wallMat: 'stucco',   // stucco | brick | siding
+  baseMat: 'beige',    // beige | brown | darkgray (только цвет, без текстур)
+  wallMat: 'stucco',   // только цвет, без текстур
   frameMat: 'wood',    // wood | white | dark — рамы окон и двери
 };
 // (TOTAL и глобальный step удалены — прогресс-бар мобильного wizard'а.)

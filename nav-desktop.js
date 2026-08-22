@@ -550,6 +550,9 @@ function dOnParam() {
 function dOnPathWidth() {
   const v = parseFloat(document.getElementById('v-paths-width')?.value);
   if (!isNaN(v) && v > 0) S.pathWidth = v;
+  // Поле и слайдер — два вида одного значения, держим их синхронными.
+  const rng = document.getElementById('r-paths-width');
+  if (rng && !isNaN(v) && String(v) !== rng.value) { rng.value = v; _dSyncRangeFill(rng); }
   if (typeof drawSnapCanvas === 'function') drawSnapCanvas('paths');
   if (typeof onParamChange === 'function') onParamChange();
 }

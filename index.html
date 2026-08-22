@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=26">
+<link rel="stylesheet" href="styles-desktop.css?v=27">
 </head>
 <body>
 
@@ -94,7 +94,6 @@
       <div class="d-sidebar-list" id="d-sidebar-list">
         <!-- filled dynamically -->
       </div>
-      <div class="d-sidebar-divider"></div>
       <!-- Низ панели: «Назад» всегда, «Дальше» — пока открыт редактор (в него
            переезжает кнопка подтверждения из футера редактора, см. _dMountEditorControls). -->
       <div class="d-sidebar-actions">
@@ -181,7 +180,6 @@
           </div>
           <div class="d-canvas-area" id="cw-pool_terrace"><canvas id="cv-pool_terrace"></canvas></div>
           <div class="d-canvas-footer">
-            <div class="tg" onclick="ttg(this)"><span class="tg-txt">Ограждение бассейна</span><div class="tg-ind"></div></div>
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="undoPt('pool_terrace')">Отменить</button>
               <button class="d-canvas-btn" onclick="clrPts('pool_terrace')">Очистить</button>
@@ -199,9 +197,15 @@
           </div>
           <div class="d-canvas-area" id="cw-paths"><canvas id="cv-paths"></canvas></div>
           <div class="d-canvas-footer">
-            <div class="p-row" style="margin:0; max-width:280px;">
-              <div class="p-lbl">Ширина дорожки (см):</div>
-              <input class="p-inp" type="number" id="v-paths-width" value="120" min="60" max="300" oninput="dOnPathWidth()">
+            <div class="d-param-group">
+              <div class="d-param-head">
+                <span class="d-param-label">Ширина дорожки, см.</span>
+                <input class="d-param-input" type="number" id="v-paths-width" value="120" min="60" max="300"
+                       oninput="dOnPathWidth()">
+              </div>
+              <input class="d-param-range" type="range" id="r-paths-width" value="120" min="60" max="300" step="10"
+                     oninput="document.getElementById('v-paths-width').value=this.value; dOnPathWidth()">
+              <div class="d-param-unit"><span>60 см</span><span>300 см</span></div>
             </div>
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="addBreak('paths')">Добавить</button>
@@ -240,9 +244,7 @@
           </div>
           <div class="d-canvas-area" id="cw-furniture"><canvas id="cv-furniture"></canvas></div>
           <div class="d-canvas-footer">
-            <span class="d-facade-count" id="d-furniture-info"></span>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addFurniturePoint()">Добавить</button>
               <button class="d-canvas-btn" onclick="rotateActiveFurniture(1)">Повернуть</button>
               <button class="d-canvas-btn" onclick="delActiveFurniture()">Удалить</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('furniture')">Дальше →</button>
@@ -278,7 +280,6 @@
           </div>
           <div class="d-canvas-area" id="cw-facade" style="cursor:pointer;"><canvas id="cv-facade"></canvas></div>
           <div class="d-canvas-footer">
-            <span class="d-facade-count" id="d-facade-plan-count"></span>
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="dFacadeSelectAll()">Выбрать всё</button>
               <button class="d-canvas-btn" onclick="dFacadeClear()">Сбросить</button>
@@ -390,7 +391,7 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=42"></script>
+<script src="state.js?v=43"></script>
 <script src="canvas.js?v=42"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=82"></script>
@@ -413,11 +414,11 @@
 <script src="backend_API/Calculator.js?v=2"></script>
 <!-- 3D viewer: core (сцена/материалы/оркестратор) → builders (конструкции) →
      railing (ограждение/навесы). Общая глобальная область, порядок важен. -->
-<script src="viewer3d-core.js?v=126"></script>
+<script src="viewer3d-core.js?v=127"></script>
 <script src="viewer3d-builders.js?v=12"></script>
 <script src="viewer3d-railing.js?v=5"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=77"></script>
+<script src="nav-desktop.js?v=78"></script>
 </body>
 </html>

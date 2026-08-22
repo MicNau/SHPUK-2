@@ -387,7 +387,7 @@ function getHouseMats() {
     envMap:          env,
     envMapIntensity: eI * 0.4,
   });
-  _assignHouseMatTex(base, _houseTexSet('base', (typeof S !== 'undefined' && S.baseMat) || 'concrete'));
+  _assignHouseMatTex(base, _houseTexSet('base', (typeof S !== 'undefined' && S.baseMat) || 'beige'));
 
   // Крыша — черепица / металл (зелёный/красный).
   const roof = new THREE.MeshStandardMaterial({
@@ -706,12 +706,11 @@ function _houseTexSet(kind, variant) {
     },
     wall: {
       stucco: { c: 0xefe2c8 },
-      brick:  { c: 0xffffff, d: 'wall_diff_01', n: 'wall_norm_01', r: 'wall_roug_01' },
-      siding: { c: 0xffffff, d: 'wall_diff_02', n: 'wall_norm_02', r: 'wall_roug_02' },
     },
     base: {
-      concrete: { c: 0x9a9a9a },
-      stone:    { c: 0xffffff, d: 'base_diff_01', n: 'base_norm', r: 'base_roug_01' },
+      beige:    { c: 0xd9c9a8 },
+      brown:    { c: 0x7a5533 },
+      darkgray: { c: 0x4a4a4a },
     },
     // Рамы окон и двери — только цвет. Дублируется в HOUSE_MATERIALS.frame (state.js),
     // откуда рисуются образцы в UI; менять синхронно.
@@ -824,7 +823,7 @@ function _applyHouseMaterials(parent) {
   if (!parent) return;
   const roofT = _houseTexSet('roof', (typeof S !== 'undefined' && S.roofMat) || 'tile');
   const wallT = _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'stucco');
-  const baseT = _houseTexSet('base', (typeof S !== 'undefined' && S.baseMat) || 'concrete');
+  const baseT = _houseTexSet('base', (typeof S !== 'undefined' && S.baseMat) || 'beige');
   const frameC = _houseTexSet('frame', (typeof S !== 'undefined' && S.frameMat) || 'wood').color;
   parent.traverse(o => {
     if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
