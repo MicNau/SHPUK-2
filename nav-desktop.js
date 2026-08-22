@@ -815,9 +815,8 @@ function dDeleteItem(secId) {
   if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
   S.sections = S.sections.filter(s => s !== secId);
   if (S.mats && S.mats[secId]) delete S.mats[secId];
-  // Материал общий у трёх террас — чистим его, только когда удаляют саму террасу.
-  if (matKey(secId) === secId && S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
-  if (matKey(secId) === secId && S.estimate && S.estimate[secId]) delete S.estimate[secId];
+  if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
+  if (S.estimate && S.estimate[secId]) delete S.estimate[secId];
   dConfigured.delete(secId);
 
   // Если удаляемая позиция активна — сбрасываем активность
@@ -1043,9 +1042,7 @@ function _applySampleToActive(sample) {
                    colorName: sample.colorName || '',
                    // modelUrl: у забора по нему берётся GLB товара (TODO.md → ЗАБОР 2).
                    modelUrl: sample.modelUrl || '' };
-    // matKey: терраса у бассейна и причал пишут материал в ключ террасы — доска
-    // у всех трёх одна (state.js, MAT_ALIAS).
-    S.elementMat[matKey(dActiveItem)] = sample.textures ? { textures: sample.textures, ...meta }
+    S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures, ...meta }
                               : (sample.color ? { color: sample.color, ...meta } : null);
     // Грядки: высота борта — свойство товара (150/200/225/270/300 мм, см. TODO.md),
     // поэтому забираем её из названия и отдаём в 3D.
@@ -1452,7 +1449,7 @@ function _productThumbStyle(p) {
 // Товар уже применён к активному элементу? По нему кнопка «Применить» гаснет.
 function _isProductApplied(pid) {
   const el = dActiveItem;
-  const em = el && S.elementMat ? S.elementMat[matKey(el)] : null;
+  const em = el && S.elementMat ? S.elementMat[el] : null;
   return !!(em && em.productId === pid);
 }
 
@@ -1623,9 +1620,8 @@ function _setEstimateForActive(sample) {
   if (!dActiveItem) return;
   if (!('price' in sample)) return;   // источник цены не передал — строку сметы не трогаем
   const price = _parsePriceNum(sample.price);
-  const key = matKey(dActiveItem);
-  if (price == null) { delete S.estimate[key]; _dSyncSummaryBtn(); return; }
-  S.estimate[key] = { id: sample.id, name: sample.name, price };
+  if (price == null) { delete S.estimate[dActiveItem]; _dSyncSummaryBtn(); return; }
+  S.estimate[dActiveItem] = { id: sample.id, name: sample.name, price };
   _dSyncSummaryBtn();
 }
 
@@ -1702,7 +1698,7 @@ function _computeEstimate() {
     const metric = _elementMetric(el);
     if (!metric || metric.value <= 0) continue;
     const lbl = (D_SIDEBAR_ITEMS.find(i => i.id === el) || {}).lbl || el;
-    const mat = S.estimate[matKey(el)] || null;
+    const mat = S.estimate[el] || null;
     let qtyUnits = null, subtotal = null;
     if (mat && mat.price) {
       if (metric.kind === 'deck') {
@@ -1852,10 +1848,9 @@ function _linesToMm(name) {
 // id товара, выбранного для элемента: сначала явный выбор «В смету», затем
 // применённый к элементу материал. null — бэкенд возьмёт товар по умолчанию.
 function _elementProductId(el) {
-  const key = matKey(el);                 // бассейн/причал → товар террасы
-  const est = S.estimate && S.estimate[key];
+  const est = S.estimate && S.estimate[el];
   if (est && est.id) return est.id;
-  const mat = S.elementMat && S.elementMat[key];
+  const mat = S.elementMat && S.elementMat[el];
   return (mat && mat.productId) || null;
 }
 

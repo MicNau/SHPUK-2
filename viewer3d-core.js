@@ -671,17 +671,15 @@ function _applyDeckProductTextures(M, textures) {
   return applied; // false → у товара нет PBR-текстур (напр. мебель), деке не трогаем
 }
 
-// Деко-элементы с настилом. Материал берётся из S.elementMat[matKey(el)]: у террасы
-// у бассейна и причала он общий с террасой (MAT_ALIAS в state.js).
+// Деко-элементы, у каждого свой материал настила (S.elementMat[el]): терраса у бассейна
+// и причал берут те же карточки каталога, что терраса, но доска у них может быть своя.
 const DECK_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'pier'];
 
 // Материал настила для конкретного элемента: дефолтный baseDeck, либо его клон с
 // текстурами товара / цветом из S.elementMat[el]. Клон попадёт в меш и будет
 // освобождён clearGroup при следующей пересборке.
 function _resolveDeckMat(baseDeck, el) {
-  // matKey: у террасы у бассейна и причала материал общий с террасой (state.js).
-  const key = (typeof matKey === 'function') ? matKey(el) : el;
-  const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat[key] : null;
+  const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat[el] : null;
   if (!em) return baseDeck;
   const m = baseDeck.clone();
   if (em.textures && _applyDeckProductTextures({ deck: m }, em.textures)) return m;
