@@ -671,7 +671,8 @@ function _applyDeckProductTextures(M, textures) {
   return applied; // false → у товара нет PBR-текстур (напр. мебель), деке не трогаем
 }
 
-// Деко-элементы, у каждого свой материал настила (S.elementMat[el]).
+// Деко-элементы, у каждого свой материал настила (S.elementMat[el]): терраса у бассейна
+// и причал берут те же карточки каталога, что терраса, но доска у них может быть своя.
 const DECK_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'pier'];
 
 // Материал настила для конкретного элемента: дефолтный baseDeck, либо его клон с
