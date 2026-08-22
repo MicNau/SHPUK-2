@@ -815,8 +815,9 @@ function dDeleteItem(secId) {
   if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
   S.sections = S.sections.filter(s => s !== secId);
   if (S.mats && S.mats[secId]) delete S.mats[secId];
-  if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
-  if (S.estimate && S.estimate[secId]) delete S.estimate[secId];
+  // Материал общий у трёх террас — чистим его, только когда удаляют саму террасу.
+  if (matKey(secId) === secId && S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
+  if (matKey(secId) === secId && S.estimate && S.estimate[secId]) delete S.estimate[secId];
   dConfigured.delete(secId);
 
   // Если удаляемая позиция активна — сбрасываем активность
@@ -1042,7 +1043,9 @@ function _applySampleToActive(sample) {
                    colorName: sample.colorName || '',
                    // modelUrl: у забора по нему берётся GLB товара (TODO.md → ЗАБОР 2).
                    modelUrl: sample.modelUrl || '' };
-    S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures, ...meta }
+    // matKey: терраса у бассейна и причал пишут материал в ключ террасы — доска
+    // у всех трёх одна (state.js, MAT_ALIAS).
+    S.elementMat[matKey(dActiveItem)] = sample.textures ? { textures: sample.textures, ...meta }
                               : (sample.color ? { color: sample.color, ...meta } : null);
     // Грядки: высота борта — свойство товара (150/200/225/270/300 мм, см. TODO.md),
     // поэтому забираем её из названия и отдаём в 3D.
@@ -1449,7 +1452,7 @@ function _productThumbStyle(p) {
 // Товар уже применён к активному элементу? По нему кнопка «Применить» гаснет.
 function _isProductApplied(pid) {
   const el = dActiveItem;
-  const em = el && S.elementMat ? S.elementMat[el] : null;
+  const em = el && S.elementMat ? S.elementMat[matKey(el)] : null;
   return !!(em && em.productId === pid);
 }
 
@@ -1620,8 +1623,9 @@ function _setEstimateForActive(sample) {
   if (!dActiveItem) return;
   if (!('price' in sample)) return;   // источник цены не передал — строку сметы не трогаем
   const price = _parsePriceNum(sample.price);
-  if (price == null) { delete S.estimate[dActiveItem]; _dSyncSummaryBtn(); return; }
-  S.estimate[dActiveItem] = { id: sample.id, name: sample.name, price };
+  const key = matKey(dActiveItem);
+  if (price == null) { delete S.estimate[key]; _dSyncSummaryBtn(); return; }
+  S.estimate[key] = { id: sample.id, name: sample.name, price };
   _dSyncSummaryBtn();
 }
 
@@ -1698,7 +1702,7 @@ function _computeEstimate() {
     const metric = _elementMetric(el);
     if (!metric || metric.value <= 0) continue;
     const lbl = (D_SIDEBAR_ITEMS.find(i => i.id === el) || {}).lbl || el;
-    const mat = S.estimate[el] || null;
+    const mat = S.estimate[matKey(el)] || null;
     let qtyUnits = null, subtotal = null;
     if (mat && mat.price) {
       if (metric.kind === 'deck') {
@@ -1848,9 +1852,10 @@ function _linesToMm(name) {
 // id товара, выбранного для элемента: сначала явный выбор «В смету», затем
 // применённый к элементу материал. null — бэкенд возьмёт товар по умолчанию.
 function _elementProductId(el) {
-  const est = S.estimate && S.estimate[el];
+  const key = matKey(el);                 // бассейн/причал → товар террасы
+  const est = S.estimate && S.estimate[key];
   if (est && est.id) return est.id;
-  const mat = S.elementMat && S.elementMat[el];
+  const mat = S.elementMat && S.elementMat[key];
   return (mat && mat.productId) || null;
 }
 
@@ -1904,10 +1909,56 @@ function _furnitureProjectObject(name) {
     : null;
 }
 
+// ── Дорожки: осевая линия + ширина → замкнутый контур ленты ──
+//
+// API ждёт КОНТУР (calculation_api.md, «Дорожка»): опорная («стартовая») сторона —
+// это ширина дорожки, от неё идёт обход; на каждом повороте у обеих боковых сторон
+// появляется по вершине, и число вершин у них должно совпадать. У нас хранится
+// осевая ломаная и ширина, поэтому кромки считаем тем же оффсетом с миттером, что
+// и 3D-лента (_offsetPolyline из viewer3d-builders) — смета совпадёт с картинкой.
+// Порядок вершин: right[0], left[0] (обе 'start'), дальше левая кромка до конца,
+// затем правая обратно — как в примере контракта.
+// Каждая линия разметки (разрывы {break:true}) — отдельный объект дорожки.
+function _pathProjectObjects(name) {
+  const pts = S.pts.paths || [];
+  if (typeof _offsetPolyline !== 'function') return [];
+  const G = _GRIDm();
+  const halfW = ((S.pathWidth || 120) / 100) / 2;      // м
+  const segs = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [pts.filter(p => !p.break)];
+  // Осевые в метрах плана; {x,z} — как ждёт _offsetPolyline (z = y плана).
+  const lines = [];
+  for (const seg of segs) {
+    const raw = seg.filter(p => !p.break).map(p => ({ x: p.x * G, z: p.y * G }));
+    const wp = [];
+    for (const p of raw) if (!wp.length || Math.hypot(p.x - wp[wp.length-1].x, p.z - wp[wp.length-1].z) > 0.05) wp.push(p);
+    if (wp.length >= 2) lines.push(wp);
+  }
+  if (!lines.length) return [];
+  // Примыкания линий подрезаем так же, как в 3D: иначе перекрытия попадут в смету дважды.
+  const trimmed = (typeof _trimPathJunctions === 'function') ? _trimPathJunctions(lines, halfW) : lines;
+  const productId = _elementProductId('paths');
+  const objs = [];
+  trimmed.forEach((wp, i) => {
+    const { left, right } = _offsetPolyline(wp, halfW);
+    const loop = [right[0], ...left, ...right.slice(1).reverse()];
+    const ox = Math.min(...loop.map(p => p.x)), oy = Math.min(...loop.map(p => p.z));
+    const mm = v => Math.round(v * 1000);
+    const vertices = loop.map((p, k) => ({
+      x: mm(p.x - ox), y: mm(p.z - oy),
+      vertexType: (k <= 1) ? 'start' : 'free',      // опорная сторона right[0]–left[0]
+    }));
+    objs.push({
+      type: CalculationType.PATH,
+      name: trimmed.length > 1 ? `${name} ${i + 1}` : name,
+      vertices,
+      deckingBoardProductId: productId,
+    });
+  });
+  return objs;
+}
+
 // Объекты проекта. Терраса у бассейна и причал уходят тем же типом TERRACE —
-// это отдельно стоящие террасы, все вершины 'free'. Дорожек пока нет: API ждёт
-// замкнутый контур ленты с отмеченной стартовой стороной, а у нас хранится
-// осевая линия с шириной.
+// это отдельно стоящие террасы, все вершины 'free'.
 function _projectObjects() {
   const lbl = id => (D_SIDEBAR_ITEMS.find(i => i.id === id) || {}).lbl || id;
   const objs = [];
@@ -1920,6 +1971,9 @@ function _projectObjects() {
   if (S.sections.includes('steps')) {
     const o = _stepsProjectObject(lbl('steps'));
     if (o) objs.push(o);
+  }
+  if (S.sections.includes('paths')) {
+    for (const o of _pathProjectObjects(lbl('paths'))) objs.push(o);
   }
   for (const el of ['railing', 'fence']) {
     if (!S.sections.includes(el)) continue;
@@ -1948,12 +2002,7 @@ function buildProjectCalcRequest() {
 // id террасной доски для расчёта: сначала явный выбор «В смету», затем применённый
 // к террасе товар (S.elementMat.terrace.productId пишется в _applySampleToActive).
 function _deckingBoardProductId(secId) {
-  const sec = secId || 'terrace';
-  const est = S.estimate && S.estimate[sec];
-  if (est && est.id) return est.id;
-  const mat = S.elementMat && S.elementMat[sec];
-  if (mat && mat.productId) return mat.productId;
-  return null;
+  return _elementProductId(secId || 'terrace');
 }
 
 // Собирает тело запроса или причину, по которой расчёт невозможен.

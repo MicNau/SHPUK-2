@@ -42,6 +42,14 @@ const RECT_SECTIONS = {
   },
 };
 
+// Элементы с ОБЩИМ материалом: терраса у бассейна и причал — те же террасы из той
+// же доски, что и терраса/крыльцо, отдельного выбора у них нет. Ключ материала и
+// строки сметы у всех трёх один — 'terrace': товар, применённый к любой из них,
+// применяется ко всем. Единственная точка правды — matKey(), через неё идут ВСЕ
+// чтения и записи S.elementMat / S.estimate.
+const MAT_ALIAS = { pool_terrace: 'terrace', pier: 'terrace' };
+function matKey(el) { return MAT_ALIAS[el] || el; }
+
 // Прямоугольники секции (всегда массив; создаётся лениво).
 function secRects(secId) {
   const c = RECT_SECTIONS[secId];

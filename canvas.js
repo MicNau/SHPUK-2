@@ -1149,6 +1149,76 @@ function _stepsNormalize() {
   }
 }
 
+// ── Столбы ограждения террасы на плане (нормализованные 0..1) ──────────────
+// Повторяет раскладку из buildRailing3d (viewer3d-railing.js): по каждому отрезку
+// ломаной столбы стоят через RAIL_SECTION_W по осям, конец отрезка — всегда столб;
+// мелкий остаток (< 0.15 м) растворяется в последней секции. Держать в синхроне:
+// если раскладка в 3D изменится, «залипание» ступеней уедет от реальных столбов.
+function _railingPostsNorm() {
+  const out = [];
+  if (typeof S === 'undefined' || !S.sections.includes('railing')) return out;
+  const pts = S.pts.railing || [];
+  const segsAll = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [pts];
+  const Wm = ((typeof RAIL_SECTION_W !== 'undefined') ? RAIL_SECTION_W : 1.5) / GRID;
+  const remMin = 0.15 / GRID, minLen = 0.20 / GRID;
+  for (const seg of segsAll) {
+    for (let i = 0; i < seg.length - 1; i++) {
+      const a = seg[i], b = seg[i + 1];
+      const L = Math.hypot(b.x - a.x, b.y - a.y);
+      if (L < minLen) continue;
+      const ux = (b.x - a.x) / L, uy = (b.y - a.y) / L;
+      const nFull = Math.max(1, Math.floor(L / Wm + 1e-9));
+      const pos = [];
+      for (let k = 0; k <= nFull; k++) pos.push(k * Wm);
+      if (L - nFull * Wm > remMin) pos.push(L);
+      else pos[pos.length - 1] = L;
+      for (const t of pos) out.push({ x: a.x + ux * t, y: a.y + uy * t });
+    }
+  }
+  return out;
+}
+
+// Смещение перил лестницы от её оси (нормализованное). Те же формулы, что в 3D
+// (viewer3d-builders: latOff = max(0.10, stairWidth/2 − STAIR_RAIL_INSET)).
+function _stepsRailOffsetNorm(widthNorm) {
+  const inset = ((typeof STAIR_RAIL_INSET !== 'undefined') ? STAIR_RAIL_INSET : 0.12) / GRID;
+  return Math.max(0.10 / GRID, widthNorm / 2 - inset);
+}
+
+// TODO.md 10: «залипание» ступеней к ограждению террасы — двигаем лестницу поперёк
+// спуска так, чтобы одно из её перил пришло ОСЬЮ в ближайший столб ограждения.
+// Работает только при перемещении (не при resize) и только если ограждение
+// размечено: без столбов ступени ведут себя как раньше.
+function _stepsSnapToRailPost() {
+  const s = S.steps; if (!s) return;
+  const posts = _railingPostsNorm();
+  if (!posts.length) return;
+  const D = _stepsDepthNorm();
+  // Ось спуска = та, по которой размер равен расчётной глубине (_stepsNormalize).
+  const alongY = Math.abs(s.h - D) <= Math.abs(s.w - D);
+  const lat = alongY ? 'x' : 'y';                 // поперёк спуска — там стоят перила
+  const size = alongY ? s.w : s.h;
+  const c = (alongY ? s.x : s.y) + size / 2;      // ось лестницы
+  const off = _stepsRailOffsetNorm(size);
+  // Столбы берём только те, что напротив лестницы: по оси спуска не дальше её глубины
+  // (иначе притягивало бы к перилам на другом краю террасы).
+  const runLo = (alongY ? s.y : s.x) - D, runHi = (alongY ? s.y : s.x) + (alongY ? s.h : s.w) + D;
+  const thr = EDGE_SNAP_DIST / GRID;
+  let bestShift = null, bestD = thr;
+  for (const p of posts) {
+    const run = alongY ? p.y : p.x;
+    if (run < runLo || run > runHi) continue;
+    const v = alongY ? p.x : p.y;
+    for (const rail of [c - off, c + off]) {
+      const d = Math.abs(v - rail);
+      if (d < bestD) { bestD = d; bestShift = v - rail; }
+    }
+  }
+  if (bestShift === null) return;
+  if (alongY) s.x = Math.max(0, Math.min(1 - s.w, s.x + bestShift));
+  else        s.y = Math.max(0, Math.min(1 - s.h, s.y + bestShift));
+}
+
 function getStepsRectPx(W) {
   const s = S.steps;
   return { x: s.x * W, y: s.y * W, w: s.w * W, h: s.h * W };
@@ -1171,10 +1241,14 @@ function applyStepsDrag(wx, wy, W) {
   const ds = stepsDragStart;
   const dx = (wx - ds.mx) / W, dy = (wy - ds.my) / W;
   const s = S.steps;
-  // excludeTerraceIdx = -1 — ступени снапаются ко ВСЕМ террасным rect'ам + стенам дома.
+  // excludeIdx = -1 — ступени снапаются ко ВСЕМ террасным rect'ам + стенам дома.
   const res = snapDraggedRect(stepsDrag, ds, dx, dy, -1);
   s.x = res.x; s.y = res.y; s.w = res.w; s.h = res.h;
   _stepsNormalize();     // глубину и разворот пользователь не задаёт
+  // Перемещение — довешиваем «залипание» к столбу ограждения (TODO.md 10).
+  // При resize не трогаем: там пользователь тянет кромку, сдвиг всей лестницы
+  // выглядел бы как срыв захвата.
+  if (stepsDrag === 'move') _stepsSnapToRailPost();
   drawStepsCanvas();
 }
 
@@ -1302,6 +1376,15 @@ function drawStepsCanvas() {
   for (let m=5; m<=GRID; m+=5) { const px = m/GRID*W; ctx.fillText(m+'м', px, H-3/cx.scale); }
 
   drawPreviousLayers(ctx, W, H, cx, 'steps');
+
+  // Столбы ограждения террасы — к ним «залипают» перила лестницы (TODO.md 10).
+  // Показываем, иначе снап выглядит как случайный рывок.
+  for (const p of _railingPostsNorm()) {
+    ctx.beginPath();
+    ctx.arc(p.x * W, p.y * H, 3.5 / cx.scale, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = 'rgba(122,75,35,.75)'; ctx.lineWidth = 1.5 / cx.scale; ctx.stroke();
+  }
 
   // Ступени (текущая секция)
   const { x, y, w, h } = getStepsRectPx(W);
