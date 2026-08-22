@@ -1047,7 +1047,9 @@ function buildScene3d() {
         color: (typeof HouseBuilder !== 'undefined' && HouseBuilder.PAD_COLOR) || 0x585858,
         roughness: 0.95, metalness: 0.0 });
       const padMesh = new THREE.Mesh(padGeo, padMat);
-      padMesh.position.set(houseL/2, padH/2, houseW/2);
+      const _padTop = (typeof HouseBuilder !== 'undefined' && HouseBuilder.PAD_TOP_Y !== undefined)
+        ? HouseBuilder.PAD_TOP_Y : 0.005;
+      padMesh.position.set(houseL/2, _padTop - padH/2, houseW/2);
       padMesh.receiveShadow = true;
       houseGroup.add(padMesh);
     }
