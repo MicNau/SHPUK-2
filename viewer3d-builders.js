@@ -1718,10 +1718,12 @@ function ensureFenceModel(url, label) {
   return _fenceLoading[url];
 }
 
-// Планочная UV для полотна забора. Доски идут ВДОЛЬ ДЛИННОЙ СТОРОНЫ панели:
-// box-проекция даёт грувы вдоль горизонтали (панель шире, чем выше — это обычный
-// случай), а для вытянутой вверх панели u/v меняются местами. Нужна только когда
-// на полотне лежит текстура товара — у сплошного цвета UV не важны.
+// Планочная UV для полотна УСЛОВНОГО забора (без модели товара). Доски идут вдоль
+// длинной стороны панели: box-проекция даёт грувы вдоль горизонтали (панель шире,
+// чем выше — обычный случай), а для вытянутой вверх панели u/v меняются местами.
+// Нужна только когда на полотне лежит текстура товара — у сплошного цвета UV не важны.
+// У забора ИЗ МОДЕЛИ товара UV берутся из GLB (см. _fenceModelSection): ориентация
+// досок — вертикальная или горизонтальная — задаётся в самом файле.
 function _applyFenceUV(mesh, swap) {
   if (typeof _applyBoxUV !== 'function') return;
   _applyBoxUV(mesh, DECK_TILE);
@@ -1756,9 +1758,8 @@ function _fenceModelPost(proto, group, x, z, angle, sy, frameMat) {
     if (!o.isMesh) return;
     const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
     if (FENCE_FRAME_RE.test(nm)) {
-      o.material = frameMat;
-      o.castShadow = o.receiveShadow = true;
-      threeState.fenceMeshes.push(o);
+      o.material = frameMat;             // в threeState.fenceMeshes не идёт: примерка
+      o.castShadow = o.receiveShadow = true;  // образца красит только полотно
       kept++;
     } else drop.push(o);
   });
@@ -1796,6 +1797,12 @@ const FENCE_FRAME_RE = /post|pillar|rack|frame|beam|столб|опор|карк
 // GLB как есть, и после загрузки модели текстура товара пропадала — забор
 // «возвращался» к виду из файла. Модель без текстур товара (panelMat без карты)
 // красится так же — по правилу продукта.
+//
+// UV НЕ ТРОГАЕМ: развёртка досок делается в GLB, оттуда и берётся (решение продукта
+// от 2026-08-23) — вертикальный и горизонтальный заборы различаются только файлом,
+// признака ориентации в карточке товара не нужно. Единственное исключение — меш
+// вообще без UV: тогда текстура товара легла бы одним пикселем, поэтому для него
+// остаётся аварийная box-проекция.
 function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, frameMat) {
   const inst = proto.clone(true);
   inst.position.set(x, 0, z);
@@ -1804,8 +1811,11 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
   inst.traverse(o => {
     if (!o.isMesh) return;
     const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
-    o.material = FENCE_FRAME_RE.test(nm) ? frameMat : panelMat;
+    const isFrame = FENCE_FRAME_RE.test(nm);
+    o.material = isFrame ? frameMat : panelMat;
     o.castShadow = o.receiveShadow = true;
+    if (isFrame) return;                 // столбы товаром не красятся — и в примерку не идут
+    if (panelMat.map && o.geometry && !o.geometry.attributes.uv) _applyFenceUV(o, false);
     threeState.fenceMeshes.push(o);
   });
   group.add(inst);
