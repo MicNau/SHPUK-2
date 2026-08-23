@@ -59,9 +59,41 @@ function dGoTo(s) {
   else if (s === 3) _dInitWorkspace();
 }
 
+// Ширина левой панели: заголовок + 32px с каждой стороны (требование продукта
+// 2026-08-23). Считаем по РЕАЛЬНЫМ метрикам шрифта, а не константой: у Segoe UI
+// и запасных шрифтов ширина одной и той же строки отличается на 10-15%, и
+// константу пришлось бы брать с запасом — панель осталась бы шире, чем нужно.
+// Нижняя граница — самая длинная строка меню (подпись + отступы + иконки правки
+// и удаления): панель уже неё обрезала бы название элемента.
+const SIDEBAR_PAD = 32;          // отступ заголовка слева и справа
+const SIDEBAR_TITLES = ['Благоустройство', 'Параметры дома'];   // заголовки обеих левых панелей
+function _dSyncSidebarWidth() {
+  const probe = document.createElement('span');
+  probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;'
+                      + 'font-size:36px;font-weight:400;';
+  document.body.appendChild(probe);
+  const widest = (list, size, weight) => {
+    probe.style.fontSize = size + 'px'; probe.style.fontWeight = weight;
+    let w = 0;
+    for (const t of list) { probe.textContent = t; w = Math.max(w, probe.getBoundingClientRect().width); }
+    return w;
+  };
+  const titleW = widest(SIDEBAR_TITLES, 36, 400);
+  // Строка меню: подпись 18px/700 (активный пункт жирнее) + паддинги кнопки 2×14
+  // + рамки 2×2 + два зазора по 2px + две иконки 48px + паддинг списка 2×8.
+  const labelW = widest(D_SIDEBAR_ITEMS.map(i => i.lbl), 18, 700);
+  probe.remove();
+  const w = Math.ceil(Math.max(titleW + 2 * SIDEBAR_PAD, labelW + 28 + 4 + 4 + 96 + 16));
+  document.documentElement.style.setProperty('--sidebar-w', w + 'px');
+}
+
 // Сразу рендерим сетку при загрузке (step 1 активен по умолчанию)
 if (typeof document !== 'undefined') {
-  const _initOnReady = () => { _dCacheToggleDefaults(); _dInitHouseGrid(); };
+  const _initOnReady = () => {
+    _dCacheToggleDefaults(); _dInitHouseGrid(); _dSyncSidebarWidth();
+    // Шрифт мог ещё не загрузиться — пересчитываем, когда метрики окончательные.
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(_dSyncSidebarWidth);
+  };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', _initOnReady);
   } else {
