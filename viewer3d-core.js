@@ -641,8 +641,11 @@ const TERRACE_SIDE_TILE = 1.3;
 //   plankAlongX = true  → доски вдоль X (без поворота);
 //   plankAlongX = false → доски вдоль Z (поворот верхней грани на 90°).
 // Боковые грани всегда дают горизонтальные грувы (имитация дощатой обшивки юбки).
-function _applyDeckUV(mesh, plankAlongX) {
-  _applyBoxUV(mesh, DECK_TILE);
+// uvOffset — необязательное смещение проекции (как groupOffset у _applyBoxUV):
+// им можно «переехать» с мировой сетки на локальную привязку. Нужно ступеням:
+// см. проступи в buildSteps3d, где шов доски ставится по середине проступи.
+function _applyDeckUV(mesh, plankAlongX, uvOffset) {
+  _applyBoxUV(mesh, DECK_TILE, uvOffset);
   if (!plankAlongX) _rotateBoxTopUV90(mesh.geometry);
 }
 
