@@ -961,13 +961,13 @@ function _dSetPanelLocked(locked) {
   if (panel) panel.classList.toggle('hidden', locked);
 }
 
-// Плавающая кнопка сметы: только на шаге 3 и только когда есть что показывать —
-// хотя бы один выбранный товар. Пустая смета кнопкой не заманивает.
+// Кнопка сметы: на шаге 3 показывается ВСЕГДА и активной. Раньше она ждала первого
+// применённого товара и до тех пор просто отсутствовала — пользователь не понимал,
+// куда она делась. Пустую смету объясняет сам экран («Товары ещё не выбраны»).
 function _dSyncSummaryBtn() {
   const btn = document.getElementById('d-btn-summary');
   if (!btn) return;
-  const hasProduct = !!(S.estimate && Object.keys(S.estimate).length);
-  const show = (dStep === 3 && hasProduct);
+  const show = (dStep === 3);
   btn.style.display = show ? '' : 'none';
   // Кнопка живёт внизу правой панели: прячем и контейнер, иначе остаются
   // его отступы пустой полосой под списком товаров.
@@ -2186,11 +2186,7 @@ function _dRenderProjectCalc() {
     <div class="est-actions">
       <button class="d-canvas-btn" id="d-project-pdf" onclick="dProjectReport()">Смета проекта в PDF</button>
       <span class="est-note" id="d-project-pdf-state"></span>
-    </div>
-    <div class="est-note">Спецификация и работы посчитаны бэкендом по разметке: подконструкция,
-    крепёж и работы. Таблица выше — стоимость «голого» материала по объёму. Терраса у бассейна,
-    причал и дорожки сюда не входят: своих типов расчёта у них в API пока нет. Пока в каталоге
-    не заполнены характеристики товаров, расчёт идёт на товарах по умолчанию, а не на выбранных.</div>`;
+    </div>`;
 }
 
 // ══════════════════════════════════════════════
@@ -2223,9 +2219,14 @@ function dShowSummary() {
 
   // ── Предварительная смета ──
   const est = _computeEstimate();
+  const hasProduct = !!(S.estimate && Object.keys(S.estimate).length);
   let estHTML = '<div class="est-title">Предварительная смета</div>';
   if (!est.rows.length) {
     estHTML += '<div class="est-empty">Разметьте конструкции, чтобы рассчитать смету.</div>';
+  } else if (!hasProduct) {
+    // Конструкции размечены, но ни один товар не применён: таблица из прочерков
+    // с итогом 0 ₽ выглядела бы поломкой.
+    estHTML += '<div class="est-empty">Товары ещё не выбраны.</div>';
   } else {
     estHTML += `
       <table class="est-table">
