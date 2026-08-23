@@ -1713,6 +1713,18 @@ function ensureFenceModel(url, label) {
   return _fenceLoading[url];
 }
 
+// Планочная UV для полотна забора: box-проекция + swap u/v, чтобы доски шли
+// ВЕРТИКАЛЬНО (у настила грувы по умолчанию горизонтальные). Нужна только когда
+// на заборе лежит текстура товара — у сплошного «условного» цвета UV не важны.
+function _applyFenceUV(mesh) {
+  if (typeof _applyBoxUV !== 'function') return;
+  _applyBoxUV(mesh, DECK_TILE);
+  const uv = mesh.geometry.attributes.uv;
+  if (!uv) return;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getY(i), uv.getX(i));
+  uv.needsUpdate = true;
+}
+
 // Секция условного забора: столб в начале + полотно до следующего столба.
 function _fenceSchematicSection(group, x, z, angle, spanW, panelH, mat, withPost) {
   const g = new THREE.Group();
@@ -1723,12 +1735,14 @@ function _fenceSchematicSection(group, x, z, angle, spanW, panelH, mat, withPost
     const post = new THREE.Mesh(new THREE.BoxGeometry(FENCE_POST_W, postH, FENCE_POST_W), mat);
     post.position.set(0, postH / 2, 0);
     post.castShadow = post.receiveShadow = true;
+    if (mat.map) _applyFenceUV(post);
     g.add(post);
   }
   const panelLen = Math.max(0.05, spanW - FENCE_POST_W);
   const panel = new THREE.Mesh(new THREE.BoxGeometry(panelLen, panelH, FENCE_PANEL_T), mat);
   panel.position.set(spanW / 2, FENCE_GROUND_GAP + panelH / 2, 0);
   panel.castShadow = panel.receiveShadow = true;
+  if (mat.map) _applyFenceUV(panel);
   g.add(panel);
   threeState.fenceMeshes.push(panel);
   group.add(g);
@@ -1764,7 +1778,13 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
   const fenceGroup = new THREE.Group();
   const panelH = (typeof S !== 'undefined' && S.fenceH) ? S.fenceH : 1.5;
   const sy = panelH / FENCE_NATIVE_H;
-  const schemMat = new THREE.MeshStandardMaterial({
+  // Материал условного забора: если к нему применён товар — его текстуры/цвет
+  // (M.deck приходит уже разрешённым из _resolveDeckMat), иначе прежний
+  // нейтральный «условный» цвет. Раньше текстура товара сюда не доезжала:
+  // и столбы, и полотно всегда красились FENCE_SCHEMATIC_COLOR, и забор
+  // оставался серым даже когда в каталоге у товара есть texture_urls.
+  const hasProductMat = !!(typeof S !== 'undefined' && S.elementMat && S.elementMat.fence);
+  const schemMat = (hasProductMat && M.deck) ? M.deck : new THREE.MeshStandardMaterial({
     color: FENCE_SCHEMATIC_COLOR, roughness: 0.85, metalness: 0.05,
   });
 
