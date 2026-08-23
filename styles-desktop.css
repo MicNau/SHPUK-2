@@ -40,6 +40,11 @@
   --center-bg: #f0f0f0;  /* color/center-bg — фон карточки загрузки фото */
   --center-bg-hover: #e8e8e8;
   --border: #e0e0e0;     /* color/border */
+  /* Ширина левой панели = ширина заголовка + 32px с каждой стороны. Значение
+     подставляет _dSyncSidebarWidth (nav-desktop.js) по РЕАЛЬНЫМ метрикам шрифта:
+     Segoe UI на машине пользователя и запасной шрифт в другом окружении дают
+     разную ширину, а «на глаз» пришлось бы закладывать запас. Здесь — фолбэк,
+     если скрипт почему-то не отработал. */
   --sidebar-w: 364px;
   --panel-w: 364px;
 }
@@ -196,7 +201,7 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
    ═══════════════════════════════════════════ */
 .d-params-layout { flex: 1; display: flex; background: var(--bg); }
 .d-params-left {
-  width: var(--sidebar-w); padding: 16px 24px 28px; border-right: 1px solid #e0e0e0;
+  width: var(--sidebar-w); padding: 16px 32px 28px; border-right: 1px solid #e0e0e0;
   display: flex; flex-direction: column; gap: 0;
   overflow: hidden;
 }
@@ -327,7 +332,7 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 /* Заголовки экранов — 36px обычного веса, как «Выберите тип дома» на первом. */
 .d-sidebar-title {
   font-size: 36px; font-weight: 400; color: var(--text);
-  padding: 16px 20px 12px;
+  padding: 16px 32px 12px;   /* по этим 32px считается ширина панели */
 }
 .d-sidebar-list {
   flex: 1; min-height: 0; overflow-y: auto;
