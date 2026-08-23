@@ -272,9 +272,11 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   flex: 1; background: var(--bg);
   position: relative; overflow: hidden; cursor: grab; touch-action: none;
 }
+/* Подсказка по управлению 3D — три строки в ЛЕВОМ ВЕРХНЕМ углу вида. */
 .d-3d-hint {
-  position:absolute; bottom:10px; left:0; right:0; text-align:center;
-  font-size:11px; color:rgba(0,0,0,.35); pointer-events:none; z-index:1;
+  position:absolute; top:10px; left:12px;
+  font-size:11px; line-height:1.5; color:rgba(0,0,0,.35);
+  pointer-events:none; z-index:1;
 }
 /* Материалы дома — квадратные образцы (крыша/фундамент/стены) */
 .d-hm-group { margin-bottom: 16px; }
