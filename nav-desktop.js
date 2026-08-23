@@ -2247,18 +2247,22 @@ function dShowSummary() {
   }
 
   // Блок расчёта проекта бэкендом — заполняется асинхронно (_dRenderProjectCalc).
+  // Пока ни один товар не выбран, его НЕ показываем: спецификация на товарах по
+  // умолчанию рядом с «Товары ещё не выбраны» противоречила бы сама себе.
   document.getElementById('d-sum-body').innerHTML =
-    infoHTML + estHTML + '<div id="d-project-calc"></div>';
+    infoHTML + estHTML + (hasProduct ? '<div id="d-project-calc"></div>' : '');
   // Расчёт не должен ломать «Итог»: исключение при сборке запроса раньше обрывало
   // dShowSummary до рендера, и блок оставался пустым — без заголовка и без
   // сообщения, то есть неотличимо от «фичи вообще нет в этой сборке».
-  try {
-    _ensureProjectCalc();
-  } catch (e) {
-    console.error('[project calc] не удалось собрать запрос', e);
-    _projectCalc = { key: 'x', state: 'err', error: 'Не удалось собрать запрос: ' + e.message };
+  if (hasProduct) {
+    try {
+      _ensureProjectCalc();
+    } catch (e) {
+      console.error('[project calc] не удалось собрать запрос', e);
+      _projectCalc = { key: 'x', state: 'err', error: 'Не удалось собрать запрос: ' + e.message };
+    }
+    _dRenderProjectCalc();
   }
-  _dRenderProjectCalc();
   document.getElementById('d-summary-overlay').classList.add('active');
 }
 
