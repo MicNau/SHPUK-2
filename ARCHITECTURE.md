@@ -182,10 +182,11 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-styles-desktop.css?v=13   state.js?v=41              canvas.js?v=38
-shared/house-builder.js?v=82                          ResourceManager.js?v=5
-viewer3d-core.js?v=126    viewer3d-builders.js?v=10   viewer3d-railing.js?v=5
-viewer3d-entourage.js?v=14                            nav-desktop.js?v=68
+styles-desktop.css?v=30   state.js?v=48              canvas.js?v=46
+shared/house-builder.js?v=85                          ResourceManager.js?v=6
+viewer3d-core.js?v=135    viewer3d-builders.js?v=21   viewer3d-railing.js?v=7
+viewer3d-entourage.js?v=14                            nav-desktop.js?v=86
+backend_API/Calculator.js?v=2
 ```
 
 `viewer3d-entourage.js` автоматически детектит `IS_MOBILE` (UA + `innerWidth<768`)
@@ -827,6 +828,20 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Сделано в итерации v=155 (замыкающий столб забора, подсказка по управлению 3D):
+
+- **Свободный конец забора заканчивается столбом.** Раньше замыкающий столб ставился
+  только в условном виде (`!proto`): с моделью товара линия обрывалась панелью.
+  Теперь он строится в обеих ветках — `_fenceModelPost` клонирует секцию модели и
+  оставляет в ней только каркасные меши (`FENCE_FRAME_RE`), а если таких нет,
+  отрабатывает `_fenceBoxPost` с условным столбом. Обе функции ставят столб в общий
+  `postSet`, поэтому на стыке отрезков дубля не возникает.
+- **Подсказка по управлению 3D** переписана в три строки («Левая кнопка — вращение /
+  Правая кнопка — перемещение / Колесико — масштаб») и переехала в ЛЕВЫЙ ВЕРХНИЙ угол
+  вида (`.d-3d-hint`: `top:10px; left:12px`), где не спорит с кнопками справа снизу.
+  Текст правится в двух местах `index.html` — на шаге 2 и на шаге 3.
+- Cache-bust: `viewer3d-builders.js?v=21`, `styles-desktop.css?v=30`.
 
 Сделано в итерации v=154 (забор: полотно товаром, каркас тёмно-серый):
 

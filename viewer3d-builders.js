@@ -1732,19 +1732,49 @@ function _applyFenceUV(mesh, swap) {
   uv.needsUpdate = true;
 }
 
+// Столб условного забора (он же — замыкающий на свободном конце пролёта).
+function _fenceBoxPost(group, x, z, angle, panelH, frameMat) {
+  const postH = FENCE_GROUND_GAP + panelH + 0.10;
+  const post = new THREE.Mesh(new THREE.BoxGeometry(FENCE_POST_W, postH, FENCE_POST_W), frameMat);
+  post.position.set(x, postH / 2, z);
+  post.rotation.y = angle;
+  post.castShadow = post.receiveShadow = true;
+  group.add(post);
+}
+
+// Замыкающий столб для забора ИЗ МОДЕЛИ товара: клонируем секцию и оставляем в ней
+// только каркасные меши (столб). Так свободный конец получает столб той же формы,
+// что и остальные. Модель без каркасных мешей → false, зовущий ставит box-столб.
+function _fenceModelPost(proto, group, x, z, angle, sy, frameMat) {
+  const inst = proto.clone(true);
+  inst.position.set(x, 0, z);
+  inst.rotation.y = angle;
+  inst.scale.set(1, sy, 1);
+  const drop = [];
+  let kept = 0;
+  inst.traverse(o => {
+    if (!o.isMesh) return;
+    const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
+    if (FENCE_FRAME_RE.test(nm)) {
+      o.material = frameMat;
+      o.castShadow = o.receiveShadow = true;
+      threeState.fenceMeshes.push(o);
+      kept++;
+    } else drop.push(o);
+  });
+  if (!kept) return false;
+  for (const o of drop) if (o.parent) o.parent.remove(o);
+  group.add(inst);
+  return true;
+}
+
 // Секция условного забора: столб в начале + полотно до следующего столба.
 // panelMat — материал товара (полотно), frameMat — тёмно-серый (столбы).
 function _fenceSchematicSection(group, x, z, angle, spanW, panelH, panelMat, frameMat, withPost) {
   const g = new THREE.Group();
   g.position.set(x, 0, z);
   g.rotation.y = angle;
-  if (withPost) {
-    const postH = FENCE_GROUND_GAP + panelH + 0.10;
-    const post = new THREE.Mesh(new THREE.BoxGeometry(FENCE_POST_W, postH, FENCE_POST_W), frameMat);
-    post.position.set(0, postH / 2, 0);
-    post.castShadow = post.receiveShadow = true;
-    g.add(post);
-  }
+  if (withPost) _fenceBoxPost(g, 0, 0, 0, panelH, frameMat);
   const panelLen = Math.max(0.05, spanW - FENCE_POST_W);
   const panel = new THREE.Mesh(new THREE.BoxGeometry(panelLen, panelH, FENCE_PANEL_T), panelMat);
   panel.position.set(spanW / 2, FENCE_GROUND_GAP + panelH / 2, 0);
@@ -1841,15 +1871,15 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
         if (proto) _fenceModelSection(proto, fenceGroup, x, z, angle, secW, sy, panelMat, frameMat);
         else       _fenceSchematicSection(fenceGroup, x, z, angle, secW, panelH, panelMat, frameMat, withPost);
       }
-      // Замыкающий столб пролёта (только у условного забора: у модели столб свой).
+      // Замыкающий столб пролёта: у модели столб стоит в НАЧАЛЕ секции, поэтому
+      // свободный конец забора оставался без столба — ставим его отдельно (клоном
+      // каркаса модели, а если каркасных мешей в ней нет — обычным box-столбом).
       const ex = a.x + ux * segLen, ez = a.z + uz * segLen;
-      if (!proto && !postSet.has(postKey(ex, ez))) {
+      if (!postSet.has(postKey(ex, ez))) {
         postSet.add(postKey(ex, ez));
-        const postH = FENCE_GROUND_GAP + panelH + 0.10;
-        const post = new THREE.Mesh(new THREE.BoxGeometry(FENCE_POST_W, postH, FENCE_POST_W), frameMat);
-        post.position.set(ex, postH / 2, ez);
-        post.castShadow = post.receiveShadow = true;
-        fenceGroup.add(post);
+        if (!proto || !_fenceModelPost(proto, fenceGroup, ex, ez, angle, sy, frameMat)) {
+          _fenceBoxPost(fenceGroup, ex, ez, angle, panelH, frameMat);
+        }
       }
     }
   }
