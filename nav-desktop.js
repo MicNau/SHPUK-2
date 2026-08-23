@@ -1316,7 +1316,20 @@ async function _ensureCatalogSection(sectionId) {
     filters.push(new Filter(FilterType.LIMIT, 50));
     const res = await rm.getResources(...filters);
     // res === null → ошибка запроса → null (повторяемо); иначе массив (возможно пустой).
-    _catalogCache[sectionId] = res ? (res.products || []) : null;
+    let products = res ? (res.products || []) : null;
+    // Пусто, хотя тег есть → товары тега могут лежать НЕ в этом разделе (так было
+    // с мебелью, из-за чего появился SECTION_TAG_ONLY). Перезапрашиваем только по
+    // тегу: лучше показать товары из соседнего раздела, чем пустой список и заглушки.
+    if (tag && !tagOnly && products && products.length === 0) {
+      const byTag = await rm.getResources(new Filter(FilterType.TAGS, [tag]),
+                                          new Filter(FilterType.LIMIT, 50));
+      const alt = byTag ? (byTag.products || []) : [];
+      if (alt.length) {
+        console.info(`[catalog] раздел ${sectionId}: по section_id+тегу пусто, взяли ${alt.length} товар(ов) по тегу «${tag}»`);
+        products = alt;
+      }
+    }
+    _catalogCache[sectionId] = products;
   } catch (e) {
     console.warn('[catalog] section load failed', sectionId, e);
     _catalogCache[sectionId] = null;
