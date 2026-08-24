@@ -377,7 +377,7 @@ function getHouseMats() {
     envMapIntensity: eI * 0.7,
   });
   wall.normalScale  = new THREE.Vector2(0.5, 0.5);
-  _assignHouseMatTex(wall, _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'beige'));
+  _assignHouseMatTex(wall, _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'white'));
 
   // Цоколь — бетон (однотонный) или камень (текстура).
   const base = new THREE.MeshStandardMaterial({
@@ -684,13 +684,26 @@ const DECK_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace'];
 // Материал настила для конкретного элемента: дефолтный baseDeck, либо его клон с
 // текстурами товара / цветом из S.elementMat[el]. Клон попадёт в меш и будет
 // освобождён clearGroup при следующей пересборке.
+// Элементы, которые до выбора товара рендерятся УСЛОВНЫМ серым, а не дефолтной
+// текстурой доски (TODO.md, этап 1 п.6): терраса, ступени, ограждение и перила
+// (перила берут материал ограждения). Цвет — тот же, что у полотна условного
+// забора: он читается как «черновик», а не как готовый материал.
+// Дорожки, грядки и терраса у бассейна в список не входят — там прежний вид.
+const SCHEMATIC_UNTIL_PRODUCT = new Set(['terrace', 'steps', 'railing']);
+function _schematicDeckMat() {
+  const c = (typeof FENCE_SCHEMATIC_COLOR !== 'undefined') ? FENCE_SCHEMATIC_COLOR : 0xb0a89c;
+  return new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.05 });
+}
+
 function _resolveDeckMat(baseDeck, el) {
   const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat[el] : null;
-  if (!em) return baseDeck;
+  if (!em) return SCHEMATIC_UNTIL_PRODUCT.has(el) ? _schematicDeckMat() : baseDeck;
   const m = baseDeck.clone();
   if (em.textures && _applyDeckProductTextures({ deck: m }, em.textures)) return m;
   if (em.color) { m.color.set(em.color); return m; }
   m.dispose();
+  // Товар выбран, но ни текстур, ни цвета у него нет — условный вид тоже не годится
+  // (пользователь уже сделал выбор), берём дефолтную доску.
   return baseDeck;
 }
 
@@ -703,7 +716,14 @@ const HOUSE_ROOF_TILE  = UV_TILE;
 const HOUSE_WALL_TILE  = UV_TILE;
 const HOUSE_BASE_TILE  = UV_TILE;
 const TERRACE_MIN_H = 0.15;   // минимальная высота настила террасы, м (TODO.md, этап 1 п.2)
-const HOUSE_WOOD_COLOR = 0x4a2f18; // «дерево» — вариант рам/дверей по умолчанию (S.frameMat = 'wood')
+// Палитра дома (стены/фундамент/рамы) — те же значения, что в HOUSE_COLORS (state.js).
+const HOUSE_PALETTE = {
+  white:    { c: 0xffffff },
+  beige:    { c: 0xc7ba95 },
+  gray:     { c: 0x7e7e7e },
+  brown:    { c: 0x61564d },
+  darkgray: { c: 0x1d2630 },
+};
 
 // Текстурный набор для материала дома: {color, map, normalMap, roughnessMap}.
 // Для однотонных (штукатурка/бетон) карты = null. repeat=1 — тайлинг задаётся
@@ -715,23 +735,12 @@ function _houseTexSet(kind, variant) {
       metal_green: { c: 0xffffff, d: 'roof_diff_02', n: 'roof_norm_02', r: 'roof_roug_02' },
       metal_red:   { c: 0xffffff, d: 'roof_diff_03', n: 'roof_norm_03', r: 'roof_roug_03' },
     },
-    wall: {
-      white: { c: 0xf2f0ec },
-      beige: { c: 0xefe2c8 },
-      brown: { c: 0x7a5533 },
-    },
-    base: {
-      beige:    { c: 0xd9c9a8 },
-      brown:    { c: 0x7a5533 },
-      darkgray: { c: 0x4a4a4a },
-    },
-    // Рамы окон и двери — только цвет. Дублируется в HOUSE_MATERIALS.frame (state.js),
-    // откуда рисуются образцы в UI; менять синхронно.
-    frame: {
-      wood:  { c: HOUSE_WOOD_COLOR },   // текущий (дерево)
-      white: { c: 0xf2f2f0 },
-      dark:  { c: 0x2b1a0d },
-    },
+    // Стены, фундамент и рамы — ОДНА палитра из пяти цветов (TODO.md, этап 1 п.10).
+    // Дублируется в HOUSE_COLORS (state.js), откуда рисуются образцы в UI; менять
+    // синхронно. Текстур ни у одной из трёх групп нет — только цвет.
+    wall:  HOUSE_PALETTE,
+    base:  HOUSE_PALETTE,
+    frame: HOUSE_PALETTE,
   };
   const grp = D[kind] || {};
   const e = grp[variant] || grp[Object.keys(grp)[0]] || { c: 0xffffff };
@@ -835,9 +844,9 @@ function _applyHouseTexSet(mesh, tex, tileSize, uvFn) {
 function _applyHouseMaterials(parent) {
   if (!parent) return;
   const roofT = _houseTexSet('roof', (typeof S !== 'undefined' && S.roofMat) || 'tile');
-  const wallT = _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'beige');
+  const wallT = _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'white');
   const baseT = _houseTexSet('base', (typeof S !== 'undefined' && S.baseMat) || 'beige');
-  const frameC = _houseTexSet('frame', (typeof S !== 'undefined' && S.frameMat) || 'wood').color;
+  const frameC = _houseTexSet('frame', (typeof S !== 'undefined' && S.frameMat) || 'brown').color;
   parent.traverse(o => {
     if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
     const nm = o.material.name || '';
@@ -1151,10 +1160,22 @@ function buildScene3d() {
     }
   }
 
+  // Мировые bbox блоков секции — нужны настилу и полуступени.
+  const _rectsWorld = polys => polys.map(pp => {
+    const w = canvasToWorld(pp, houseL, houseW);
+    return {
+      minX: Math.min(...w.map(p => p.x)), maxX: Math.max(...w.map(p => p.x)),
+      minZ: Math.min(...w.map(p => p.z)), maxZ: Math.max(...w.map(p => p.z)),
+    };
+  });
+
   const terraceRectPolys = _terraceRectsToPolygons('terrace');
   if (S.sections.includes('terrace')) {
     M.deck = _resolveDeckMat(_baseDeck, 'terrace');
     _buildRectDecks(terraceRectPolys, terraceLevel - 0.01, _houseEdgesW);
+    // Полуступень по свободному контуру (всё, кроме участков у стен дома).
+    try { buildTerraceNosing(houseGroup, M, _rectsWorld(terraceRectPolys), terraceLevel - 0.01); }
+    catch (e) { console.error('[buildTerraceNosing]', e); }
   }
 
   // Отдельно стоящие террасы: тот же настил, но доски вдоль длинной стороны блока
@@ -1163,6 +1184,9 @@ function buildScene3d() {
   if (S.sections.includes('pool_terrace') && poolRectPolys.length) {
     M.deck = _resolveDeckMat(_baseDeck, 'pool_terrace');
     _buildRectDecks(poolRectPolys, terraceLevel - 0.01, null);
+    // Отдельно стоящая — свободен весь контур.
+    try { buildTerraceNosing(houseGroup, M, _rectsWorld(poolRectPolys), terraceLevel - 0.01); }
+    catch (e) { console.error('[buildTerraceNosing pool]', e); }
   }
 
   if (S.sections.includes('paths') && S.pts.paths.filter(p=>!p.break).length >= 2) {

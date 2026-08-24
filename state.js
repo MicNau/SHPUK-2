@@ -177,6 +177,15 @@ const SECTION_TAG_ONLY = new Set([2430, 2330]);
 
 // Материалы дома (шаг «Параметры дома»). Образцы — квадраты: с текстурой (img из
 // assets/) или однотонные (color). id используются в 3D (_houseTexSet в viewer3d-core).
+// Палитра дома: один набор на стены, фундамент и рамы (TODO.md, этап 1 п.10).
+const HOUSE_COLORS = [
+  { id: 'white',    color: '#ffffff' },   // белый
+  { id: 'beige',    color: '#c7ba95' },   // бежевый
+  { id: 'gray',     color: '#7e7e7e' },   // нейтрально серый
+  { id: 'brown',    color: '#61564d' },   // коричневый
+  { id: 'darkgray', color: '#1d2630' },   // холодный тёмно-серый
+];
+
 const HOUSE_MATERIALS = {
   roof: {
     label: 'Материал крыши',
@@ -186,36 +195,12 @@ const HOUSE_MATERIALS = {
       { id: 'metal_red',   img: 'assets/roof_diff_03.jpg' }, // металл красный
     ],
   },
-  // Фундамент и стены — только цвет, без текстур (TODO). Значения продублированы
-  // в _houseTexSet (viewer3d-core.js) — менять синхронно, иначе образец в UI
-  // разойдётся с цветом в 3D.
-  base: {
-    label: 'Цвет фундамента',
-    items: [
-      { id: 'beige',    color: '#d9c9a8' },                  // бежевый
-      { id: 'brown',    color: '#7a5533' },                  // коричневый
-      { id: 'darkgray', color: '#4a4a4a' },                  // тёмно-серый
-    ],
-  },
-  wall: {
-    label: 'Цвет стен',
-    items: [
-      { id: 'white', color: '#f2f0ec' },                     // белый
-      { id: 'beige', color: '#efe2c8' },                     // бежевый
-      { id: 'brown', color: '#7a5533' },                     // коричневый
-    ],
-  },
-  // Рамы окон и полотна дверей (меши с материалами mat_frame*/mat_door). Текстур нет,
-  // только цвет; те же значения продублированы в _houseTexSet (viewer3d-core.js) —
-  // менять синхронно, иначе образец в UI разойдётся с цветом в 3D.
-  frame: {
-    label: 'Материал рам',
-    items: [
-      { id: 'wood',  color: '#4a2f18' },                     // текущий (дерево)
-      { id: 'white', color: '#f2f2f0' },                     // белый
-      { id: 'dark',  color: '#2b1a0d' },                     // тёмно-коричневый
-    ],
-  },
+  // Стены, фундамент и рамы — ОДНА палитра из пяти цветов (TODO.md, этап 1 п.10),
+  // без текстур. Значения продублированы в _houseTexSet (viewer3d-core.js) — менять
+  // синхронно, иначе образец в UI разойдётся с цветом в 3D.
+  base: { label: 'Цвет фундамента', items: HOUSE_COLORS },
+  wall: { label: 'Цвет стен',       items: HOUSE_COLORS },
+  frame: { label: 'Цвет рам',       items: HOUSE_COLORS },
 };
 // Ключ группы HOUSE_MATERIALS ↔ поле состояния: '<kind>Mat' (roofMat, baseMat,
 // wallMat, frameMat). На этом соглашении держатся _dRenderHouseMaterials и
@@ -325,10 +310,12 @@ const S = {
   // материале (S.elementMat.facade) = «весь фасад». Материал панелей — S.elementMat.facade.
   wallZones: {},
   // Материалы дома (шаг «Параметры дома»).
-  roofMat: 'tile',     // tile | metal_green | metal_red
-  baseMat: 'beige',    // beige | brown | darkgray (только цвет, без текстур)
-  wallMat: 'beige',    // white | beige | brown (только цвет, без текстур)
-  frameMat: 'wood',    // wood | white | dark — рамы окон и двери
+  roofMat: 'tile',     // tile | metal_green | metal_red (единственная группа с текстурами)
+  // Стены, фундамент и рамы — общая палитра HOUSE_COLORS:
+  // white | beige | gray | brown | darkgray (только цвет, без текстур).
+  baseMat: 'beige',
+  wallMat: 'white',
+  frameMat: 'brown'
 };
 // (TOTAL и глобальный step удалены — прогресс-бар мобильного wizard'а.)
 
