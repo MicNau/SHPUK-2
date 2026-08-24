@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=31">
+<link rel="stylesheet" href="styles-desktop.css?v=33">
 </head>
 <body>
 
@@ -353,6 +353,15 @@
   <img id="d-photo-img" src="" alt="">
 </div>
 
+<!-- ═══ HINT OVERLAY (инструкция при первом заходе в редактор) ═══ -->
+<div class="d-hint-overlay" id="d-hint-overlay">
+  <div class="d-hint-box">
+    <div class="d-hint-title" id="d-hint-title"></div>
+    <div class="d-hint-text" id="d-hint-text"></div>
+    <button class="d-btn d-btn-next" onclick="dHideEditorHint()">Понятно</button>
+  </div>
+</div>
+
 <!-- ═══ SUMMARY OVERLAY ═══ -->
 <div class="d-summary-overlay" id="d-summary-overlay">
   <div class="d-summary-box">
@@ -404,6 +413,6 @@
 <script src="viewer3d-railing.js?v=8"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=87"></script>
+<script src="nav-desktop.js?v=91"></script>
 </body>
 </html>

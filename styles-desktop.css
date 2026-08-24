@@ -276,12 +276,16 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   flex: 1; background: var(--bg);
   position: relative; overflow: hidden; cursor: grab; touch-action: none;
 }
-/* Подсказка по управлению 3D — три строки в ЛЕВОМ ВЕРХНЕМ углу вида. */
+/* Подсказка по управлению 3D — три строки в ЛЕВОМ ВЕРХНЕМ углу вида, на такой же
+   белой плашке и тем же кеглем, что инструкция редактора (TODO.md, этап 1 п.17).
+   На плане её быть не должно — прячем, пока открыт редактор (класс на body). */
 .d-3d-hint {
-  position:absolute; top:10px; left:12px;
-  font-size:11px; line-height:1.5; color:rgba(0,0,0,.35);
-  pointer-events:none; z-index:1;
+  position: absolute; top: 20px; left: 24px;
+  padding: 12px 16px; background: var(--bg);
+  font-size: 16px; font-weight: 400; line-height: 1.35; color: var(--text);
+  pointer-events: none; z-index: 1;
 }
+body.d-editor-open .d-3d-hint { display: none; }
 /* Материалы дома — квадратные образцы (крыша/фундамент/стены) */
 .d-hm-group { margin-bottom: 16px; }
 .d-hm-label { font-size: 16px; font-weight: 400; color: #999; margin-bottom: 8px; }
@@ -460,14 +464,16 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
   background: var(--bg); flex-direction: column;
 }
 .d-center-canvas.active { display: flex; }
-/* Инструкция редактора — в левом верхнем углу поверх плана, без подложки и
-   разделителя: по макету заголовка у редактора нет, только текст подсказки. */
+/* Инструкция редактора — в левом верхнем углу поверх плана, на БЕЛОЙ непрозрачной
+   плашке (TODO.md, этап 1 п.16): поверх сетки плана текст без подложки читался плохо.
+   Заголовка у редактора нет, только текст подсказки. */
 .d-canvas-header {
   position: absolute; top: 0; left: 0; z-index: 2;
   padding: 20px 24px; pointer-events: none;
 }
 .d-canvas-title { display: none; }
 .d-canvas-hint {
+  padding: 12px 16px; background: var(--bg);
   font-size: 16px; font-weight: 400; color: var(--text);
   line-height: 1.35; max-width: 440px;
 }
@@ -681,7 +687,12 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 .d-mat-btn {
   flex: 1; height: 34px; border: none; border-radius: var(--r);
   font-size: 12px; font-weight: 700; cursor: pointer; transition: background .15s;
+  white-space: nowrap;
 }
+/* «Посмотреть текстуру» длиннее «Применить» — отдаём левой кнопке больше места,
+   иначе надпись переносится в две строки (TODO.md, этап 1 п.11). */
+.d-mat-btn-view { flex: 1.7; }
+.d-mat-btn-apply { flex: 1; }
 .d-mat-btn-apply { background: var(--accent); color: #fff; }
 .d-mat-btn-apply:hover:not(:disabled) { background: var(--accent-hover); }
 /* Применённый товар: кнопка гаснет по общему соглашению для неактивных. */
@@ -733,6 +744,25 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 /* ═══════════════════════════════════════════
    SUMMARY overlay
    ═══════════════════════════════════════════ */
+/* Инструкция при первом заходе в редактор (TODO.md, этап 1 п.15). */
+.d-hint-overlay {
+  display: none; position: fixed; inset: 0; z-index: 250;
+  background: rgba(0,0,0,.5); align-items: center; justify-content: center;
+}
+.d-hint-overlay.active { display: flex; }
+.d-hint-box {
+  width: 440px; max-width: calc(100vw - 64px); background: var(--bg);
+  padding: 24px; display: flex; flex-direction: column; gap: 16px; align-items: flex-start;
+}
+.d-hint-title { font-size: 22px; font-weight: 400; }
+.d-hint-text { font-size: 16px; font-weight: 400; line-height: 1.4; color: var(--text); }
+/* Кнопка «Понятно»: .d-btn рассчитана на футер панели (flex:1), в окне её надо
+   задать явно, иначе она сжимается до ширины текста. */
+.d-hint-box .d-btn {
+  align-self: flex-end; flex: none;
+  min-width: 160px; height: 48px; padding: 0 24px; font-size: 18px;
+}
+
 .d-summary-overlay {
   display: none; position: fixed; inset: 0; z-index: 200;
   background: rgba(0,0,0,.5); align-items: center; justify-content: center;

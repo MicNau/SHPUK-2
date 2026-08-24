@@ -930,6 +930,32 @@ function _dSelectItem(secId) {
 }
 
 // ── Open editor ──
+// Разделы, для которых инструкцию в этой сессии уже показывали (TODO.md, этап 1 п.15).
+const _dHintShown = new Set();
+
+// Всплывающая инструкция при ПЕРВОМ заходе в редактор раздела. Текст берём из самой
+// подсказки редактора — один источник, расходиться нечему. Помним в рамках сессии.
+function _dShowEditorHint(secId) {
+  if (_dHintShown.has(secId)) return;
+  const src = document.querySelector('#d-canvas-' + secId + ' .d-canvas-hint');
+  const text = src ? src.textContent.trim() : '';
+  if (!text) return;
+  _dHintShown.add(secId);
+  const ov = document.getElementById('d-hint-overlay');
+  const body = document.getElementById('d-hint-text');
+  const title = document.getElementById('d-hint-title');
+  if (!ov || !body) return;
+  const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
+  if (title) title.textContent = item ? item.lbl : '';
+  body.textContent = text;
+  ov.classList.add('active');
+}
+
+function dHideEditorHint() {
+  const ov = document.getElementById('d-hint-overlay');
+  if (ov) ov.classList.remove('active');
+}
+
 function _dOpenEditor(secId) {
   dActiveItem = secId;
   dEditorOpen = true;
@@ -945,8 +971,13 @@ function _dOpenEditor(secId) {
   const canvasEl = document.getElementById('d-canvas-' + secId);
   if (canvasEl) canvasEl.classList.add('active');
 
+  // Подсказка по управлению 3D видна только на 3D-виде (TODO.md, этап 1 п.17):
+  // поверх плана она просвечивала сквозь редактор.
+  document.body.classList.add('d-editor-open');
+
   const initFn = D_CANVAS_INIT[secId];
   if (initFn) setTimeout(() => initFn(), 80);
+  _dShowEditorHint(secId);
 }
 
 // ── Назад (кнопка внизу сайдбара) ──
@@ -995,6 +1026,8 @@ function dConfirmCanvas(secId) {
 // ── Canvas helpers ──
 function _dCloseAllCanvases() {
   document.querySelectorAll('.d-center-canvas').forEach(el => el.classList.remove('active'));
+  // Редактор закрыт — снова показываем подсказку по управлению 3D (см. п.17).
+  document.body.classList.remove('d-editor-open');
 }
 
 // ── Panel lock/unlock ──
@@ -1521,6 +1554,10 @@ function _dRenderRealResults(allProducts) {
     list.innerHTML = '<div style="padding:16px;color:#999;font-size:13px;">Нет товаров под выбранные фильтры</div>';
     return;
   }
+  // В «Садовой мебели» по кнопке открывается фото товара, в остальных разделах —
+  // текстура (TODO.md, этап 1 п.11). Раздел берём по пункту меню: _activeSectionId()
+  // возвращает НОМЕР раздела каталога, а не его id.
+  const viewLabel = (dActiveItem === 'furniture') ? 'Посмотреть' : 'Посмотреть текстуру';
   list.innerHTML = products.map(p => {
     const price = _productPrice(p);
     const thumbStyle = _productThumbStyle(p);
@@ -1541,7 +1578,7 @@ function _dRenderRealResults(allProducts) {
         <div class="d-mat-desc">${desc}</div>
         <div class="d-mat-actions">
           ${bigPic ? `<button class="d-mat-btn d-mat-btn-view"
-             onclick="dShowPhoto(event, '${bigPic.replace(/'/g, "\\'")}')">Посмотреть</button>` : ''}
+             onclick="dShowPhoto(event, '${bigPic.replace(/'/g, "\\'")}')">${viewLabel}</button>` : ''}
           <button class="d-mat-btn d-mat-btn-apply" onclick="dApplyRealMat(event, ${p.id})"
                   ${_isProductApplied(p.id) ? 'disabled' : ''}>Применить</button>
         </div>
@@ -1643,7 +1680,23 @@ function dToggleMatCard(mid) {
   const el = document.getElementById('dmc-' + mid);
   const was = el.classList.contains('open');
   document.querySelectorAll('.d-mat-card.open').forEach(c => c.classList.remove('open'));
-  if (!was) el.classList.add('open');
+  if (was) return;
+  el.classList.add('open');
+  // Раскрытая карточка целиком в поле зрения (TODO.md, этап 1 п.12): у карточки внизу
+  // списка кнопки «Посмотреть»/«Применить» оказывались за краем контейнера.
+  // Ждём КОНЦА анимации раскрытия: пока max-height едет, карточка ещё низкая, и
+  // прокрутка не доводит список до конца. Таймер — страховка, если transitionend
+  // не придёт. Прокрутка мгновенная: smooth-анимация в части окружений не запускается.
+  const body = el.querySelector('.d-mat-body');
+  let scrolled = false;
+  const toView = () => {
+    if (scrolled) return;
+    scrolled = true;
+    if (body) body.removeEventListener('transitionend', toView);
+    el.scrollIntoView({ block: 'center' });
+  };
+  if (body) body.addEventListener('transitionend', toView);
+  setTimeout(toView, 450);
 }
 
 function dApplyMat(e, mid, name, color, priceStr) {
