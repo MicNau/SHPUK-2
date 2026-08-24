@@ -1693,8 +1693,8 @@ const FENCE_POST_W     = 0.10;   // сечение столба условног
 const FENCE_PANEL_T    = 0.04;   // толщина полотна условного забора, м
 const FENCE_GROUND_GAP = 0.05;   // просвет под полотном, м
 const FENCE_SCHEMATIC_COLOR = 0xb0a89c;   // нейтральный «условный» цвет полотна без товара
-// Столбы и вспомогательные элементы забора — всегда тёмно-серые: товаром красится
-// ТОЛЬКО полотно (требование продукта 2026-08-23). Значение занижено относительно
+// ВСЕ части забора, кроме полотна, — тёмно-серые: товаром красится ТОЛЬКО полотно
+// (требование продукта 2026-08-23). Значение занижено относительно
 // «настоящего» тёмно-серого: базовый цвет умножается на освещение сцены (та же
 // история, что с PAD_COLOR), и 0x4a4a4a в кадре читался как средне-серый.
 const FENCE_FRAME_COLOR = 0x2a2a2a;
@@ -1751,9 +1751,9 @@ function _fenceBoxPost(group, x, z, angle, panelH, frameMat) {
   group.add(post);
 }
 
-// Замыкающий столб для забора ИЗ МОДЕЛИ товара: клонируем секцию и оставляем в ней
-// только каркасные меши (столб). Так свободный конец получает столб той же формы,
-// что и остальные. Модель без каркасных мешей → false, зовущий ставит box-столб.
+// Замыкающий столб для забора ИЗ МОДЕЛИ товара: клонируем секцию и выбрасываем из неё
+// полотно — остаётся каркас (столб). Так свободный конец получает столб той же формы,
+// что и остальные. Клон без каркасных мешей → false, зовущий ставит box-столб.
 function _fenceModelPost(proto, group, x, z, angle, sy, frameMat) {
   const inst = proto.clone(true);
   inst.position.set(x, 0, z);
@@ -1764,7 +1764,7 @@ function _fenceModelPost(proto, group, x, z, angle, sy, frameMat) {
   inst.traverse(o => {
     if (!o.isMesh) return;
     const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
-    if (FENCE_FRAME_RE.test(nm)) {
+    if (!FENCE_PANEL_RE.test(nm)) {
       o.material = frameMat;             // в threeState.fenceMeshes не идёт: примерка
       o.castShadow = o.receiveShadow = true;  // образца красит только полотно
       kept++;
@@ -1794,16 +1794,20 @@ function _fenceSchematicSection(group, x, z, angle, spanW, panelH, panelMat, fra
   group.add(g);
 }
 
-// Столбы/каркас в модели товара — по имени меша или материала. Всё остальное
-// считаем полотном: пользователь ждёт на нём текстуру выбранного товара.
-const FENCE_FRAME_RE = /post|pillar|rack|frame|beam|столб|опор|карка|стойк/i;
+// Полотно в модели товара — по имени меша или материала. Всё ОСТАЛЬНОЕ (столбы,
+// каркас, крепёж, добор и что там ещё окажется в файле) красится тёмно-серым:
+// правило продукта — «все части забора кроме панелей тёмно-серые». Раньше было
+// наоборот (список каркасных имён, остальное — полотно), и любая непонятная
+// деталь модели уезжала в текстуру товара.
+const FENCE_PANEL_RE = /panel|polotno|полотн|board|plank|доск|штакет|ламел|lamel|fill|заполн/i;
 
 // Секция из модели товара: клон, растянутый по длине пролёта. Материалы назначаем
 // САМИ по тому же правилу, что и у условного забора: полотно — материал товара,
-// столбы и вспомогательные элементы — тёмно-серые. Раньше брались материалы из
-// GLB как есть, и после загрузки модели текстура товара пропадала — забор
-// «возвращался» к виду из файла. Модель без текстур товара (panelMat без карты)
-// красится так же — по правилу продукта.
+// ВСЁ остальное — тёмно-серое. Раньше брались материалы из GLB как есть, и после
+// загрузки модели текстура товара пропадала — забор «возвращался» к виду из файла.
+// Модель без текстур товара (panelMat без карты) красится так же — по правилу
+// продукта. Возвращает число мешей, опознанных как полотно (0 → см. warn в
+// buildFence3d: имена в модели не совпали с FENCE_PANEL_RE).
 //
 // UV НЕ ТРОГАЕМ: развёртка досок делается в GLB, оттуда и берётся (решение продукта
 // от 2026-08-23) — вертикальный и горизонтальный заборы различаются только файлом,
@@ -1815,17 +1819,20 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
   inst.position.set(x, 0, z);
   inst.rotation.y = angle;
   inst.scale.set(spanW / FENCE_SECTION_W, sy, 1);
+  let panels = 0;
   inst.traverse(o => {
     if (!o.isMesh) return;
     const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
-    const isFrame = FENCE_FRAME_RE.test(nm);
-    o.material = isFrame ? frameMat : panelMat;
+    const isPanel = FENCE_PANEL_RE.test(nm);
+    o.material = isPanel ? panelMat : frameMat;
     o.castShadow = o.receiveShadow = true;
-    if (isFrame) return;                 // столбы товаром не красятся — и в примерку не идут
+    if (!isPanel) return;                // не полотно — товаром не красится и в примерку не идёт
     if (panelMat.map && o.geometry && !o.geometry.attributes.uv) _applyFenceUV(o, false);
     threeState.fenceMeshes.push(o);
+    panels++;
   });
   group.add(inst);
+  return panels;
 }
 
 // Забор по ломаной: пролёты делятся на секции РАВНОЙ ширины (округление длины на
@@ -1857,13 +1864,14 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
   const panelMat = (hasProductMat && M.deck) ? M.deck : new THREE.MeshStandardMaterial({
     color: FENCE_SCHEMATIC_COLOR, roughness: 0.85, metalness: 0.05,
   });
-  // Столбы и добор — всегда тёмно-серые, товаром красится только полотно.
+  // ВСЕ части забора, кроме полотна, — тёмно-серые (столбы, каркас, крепёж, добор).
   const frameMat = new THREE.MeshStandardMaterial({
-    color: FENCE_FRAME_COLOR, roughness: 0.75, metalness: 0.15,
+    color: FENCE_FRAME_COLOR, roughness: 0.60, metalness: 0.15,
   });
 
   const postSet = new Set();
   const postKey = (x, z) => `${x.toFixed(2)},${z.toFixed(2)}`;
+  let panelsPainted = 0;                 // сколько мешей модели опознано как полотно
 
   const segments = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [realPts];
   for (const seg of segments) {
@@ -1885,7 +1893,7 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
         const key = postKey(x, z);
         const withPost = !postSet.has(key);
         postSet.add(key);
-        if (proto) _fenceModelSection(proto, fenceGroup, x, z, angle, secW, sy, panelMat, frameMat);
+        if (proto) panelsPainted += _fenceModelSection(proto, fenceGroup, x, z, angle, secW, sy, panelMat, frameMat);
         else       _fenceSchematicSection(fenceGroup, x, z, angle, secW, panelH, panelMat, frameMat, withPost);
       }
       // Замыкающий столб пролёта: у модели столб стоит в НАЧАЛЕ секции, поэтому
@@ -1899,6 +1907,11 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
         }
       }
     }
+  }
+  // Модель без опознанного полотна станет целиком тёмно-серой — на стенде это надо
+  // видеть сразу, чтобы дополнить FENCE_PANEL_RE именами из конкретного файла.
+  if (proto && !panelsPainted) {
+    console.warn('[fence] в модели товара не опознано полотно — забор целиком тёмно-серый:', url);
   }
   parent.add(fenceGroup);
 }
