@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=33">
+<link rel="stylesheet" href="styles-desktop.css?v=35">
 </head>
 <body>
 
@@ -135,8 +135,9 @@
               <div class="d-param-unit" id="d-terrace-h-hint"><span>15 см</span><span>80 см</span></div>
             </div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addRect('terrace')">Добавить</button>
-              <button class="d-canvas-btn" onclick="delActiveRect('terrace')">Удалить</button>
+              <button class="d-canvas-btn" onclick="addRect('terrace')">Ещё одна</button>
+              <button class="d-canvas-btn" onclick="delActiveRect('terrace')">Удалить выбранную</button>
+              <button class="d-canvas-btn" onclick="dResetSection('terrace')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('terrace')">Дальше →</button>
             </div>
           </div>
@@ -153,6 +154,7 @@
           <div class="d-canvas-footer">
             <div class="tg on" onclick="ttg(this)" data-id="steps-railing"><span class="tg-txt">Перила лестницы</span><div class="tg-ind"></div></div>
             <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="dResetSection('steps')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('steps')">Дальше →</button>
             </div>
           </div>
@@ -171,6 +173,7 @@
               <button class="d-canvas-btn" onclick="addBed()">Добавить</button>
               <button class="d-canvas-btn" onclick="rotateActiveBed()">Повернуть</button>
               <button class="d-canvas-btn" onclick="delActiveBed()">Удалить</button>
+              <button class="d-canvas-btn" onclick="dResetSection('beds')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('beds')">Дальше →</button>
             </div>
           </div>
@@ -188,6 +191,7 @@
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="addRect('pool_terrace')">Добавить</button>
               <button class="d-canvas-btn" onclick="delActiveRect('pool_terrace')">Удалить</button>
+              <button class="d-canvas-btn" onclick="dResetSection('pool_terrace')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('pool_terrace')">Дальше →</button>
             </div>
           </div>
@@ -215,7 +219,7 @@
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="addBreak('paths')">Добавить</button>
               <button class="d-canvas-btn" onclick="undoPt('paths')">Отменить</button>
-              <button class="d-canvas-btn" onclick="clrPts('paths')">Очистить</button>
+              <button class="d-canvas-btn" onclick="dResetSection('paths')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('paths')">Дальше →</button>
             </div>
           </div>
@@ -233,6 +237,7 @@
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="rotateActiveFurniture(1)">Повернуть</button>
               <button class="d-canvas-btn" onclick="delActiveFurniture()">Удалить</button>
+              <button class="d-canvas-btn" onclick="dResetSection('furniture')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('furniture')">Дальше →</button>
             </div>
           </div>
@@ -250,7 +255,7 @@
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="addBreak('railing')">Добавить</button>
               <button class="d-canvas-btn" onclick="undoPt('railing')">Отменить</button>
-              <button class="d-canvas-btn" onclick="clrPts('railing')">Очистить</button>
+              <button class="d-canvas-btn" onclick="dResetSection('railing')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('railing')">Дальше →</button>
             </div>
           </div>
@@ -268,6 +273,7 @@
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="dFacadeSelectAll()">Выбрать всё</button>
               <button class="d-canvas-btn" onclick="dFacadeClear()">Сбросить</button>
+              <button class="d-canvas-btn" onclick="dResetSection('facade')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('facade')">Дальше →</button>
             </div>
           </div>
@@ -293,7 +299,7 @@
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="addBreak('fence')">Добавить</button>
               <button class="d-canvas-btn" onclick="undoPt('fence')">Отменить</button>
-              <button class="d-canvas-btn" onclick="clrPts('fence')">Очистить</button>
+              <button class="d-canvas-btn" onclick="dResetSection('fence')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('fence')">Дальше →</button>
             </div>
           </div>
@@ -315,24 +321,12 @@
       <div class="d-panel-header">
         <div class="d-panel-title" id="d-panel-title">Материалы</div>
       </div>
-      <!-- Фильтры приколочены, скроллится только список карточек. -->
+      <!-- Фильтры цвета и цены переехали в ЛЕВУЮ панель, под кнопку раздела
+           (TODO.md, этап 2 п.1) — здесь остался только суб-тумблер террасы. -->
       <div class="d-panel-body" id="d-panel-body">
         <div class="d-panel-filters">
           <!-- Sub-toggle (Терраса / Ограждение — only for terrace) -->
           <div class="d-panel-sub-toggle" id="d-panel-sub-toggle" style="display:none;"></div>
-
-          <!-- Color filter. Скрывается для мебели: у её товаров поле color пустое. -->
-          <div class="d-color-section" id="d-color-section">
-            <div class="d-color-title">Цвет:</div>
-            <div class="d-color-grid" id="d-color-grid"></div>
-          </div>
-
-          <!-- Price filter. Скрывается для мебели: тиры заданы в ₽/м.пог (доска),
-               у мебели цена за изделие — фильтр по ним бессмыслен. -->
-          <div class="d-color-section" style="margin-top:6px;" id="d-price-section">
-            <div class="d-color-title">Цена:</div>
-            <div class="d-price-grid" id="d-price-grid"></div>
-          </div>
         </div>
 
         <!-- Results (auto-shown) — единственный скроллящийся блок панели -->
@@ -385,7 +379,7 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=50"></script>
+<script src="state.js?v=51"></script>
 <script src="canvas.js?v=47"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=85"></script>
@@ -413,6 +407,6 @@
 <script src="viewer3d-railing.js?v=8"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=91"></script>
+<script src="nav-desktop.js?v=92"></script>
 </body>
 </html>
