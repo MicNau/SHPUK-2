@@ -208,6 +208,115 @@ function _terraceRectsToPolygons(secId) {
   return polys;
 }
 
+// ── ПОЛУСТУПЕНЬ ──────────────────────────────────────────────────────────────
+// Доска по всему СВОБОДНОМУ контуру террасы (TODO.md, этап 1 п.7): 170 мм в плане,
+// 25 мм по высоте, верх заподлицо с настилом, наружу вылет 10 мм. Свободный контур —
+// весь периметр, КРОМЕ участков у стен дома; у лестницы полуступень НЕ разрывается.
+const NOSING_W    = 0.17;    // ширина доски в плане
+const NOSING_H    = 0.025;   // высота доски
+const NOSING_OUT  = 0.01;    // вылет за кромку настила
+// Верх поднят на волосок над настилом: точное совпадение плоскостей дало бы
+// z-fighting на перекрытии в 160 мм. 1 мм в кадре не читается.
+const NOSING_LIFT = 0.001;
+
+// Строит полуступень по union-контуру блоков секции.
+// worldRects — [{minX,maxX,minZ,maxZ}] в мире, deckTopY — отметка верха настила.
+function buildTerraceNosing(parent, M, worldRects, deckTopY) {
+  if (!worldRects || !worldRects.length) return 0;
+  if (typeof _terraceUnionLoops !== 'function') return 0;
+  const loops = _terraceUnionLoops(worldRects);
+  const houseEdges = (typeof _railHouseEdges === 'function') ? _railHouseEdges() : [];
+  const inside = (x, z) => worldRects.some(r =>
+    x > r.minX + 1e-4 && x < r.maxX - 1e-4 && z > r.minZ + 1e-4 && z < r.maxZ - 1e-4);
+  const mat = M.deck;
+  let built = 0;
+
+  for (const loop of loops) {
+    const n = loop.length;
+    if (n < 3) continue;
+    // Направление и НАРУЖНАЯ нормаль каждого ребра (пробой точки в полуметре от середины).
+    const seg = [];
+    for (let i = 0; i < n; i++) {
+      const a = loop[i], b = loop[(i + 1) % n];
+      const dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz);
+      if (L < 1e-6) { seg.push(null); continue; }
+      const ux = dx / L, uz = dz / L;
+      let nx = uz, nz = -ux;
+      if (inside((a.x + b.x) / 2 + nx * 0.05, (a.z + b.z) / 2 + nz * 0.05)) { nx = -nx; nz = -nz; }
+      seg.push({ a, ux, uz, nx, nz, L, alongX: Math.abs(ux) > Math.abs(uz) });
+    }
+    // У стен дома полуступени нет: те же skip-диапазоны, что у перил (pad 0.30).
+    const skipsOf = [];
+    for (let i = 0; i < n; i++) {
+      const e = seg[i], b = loop[(i + 1) % n];
+      skipsOf.push((e && houseEdges.length)
+        ? _railEdgesSkipRanges(e.a.x, e.a.z, b.x, b.z, 0.30, houseEdges) : []);
+    }
+    // Есть ли у ребра доска у его начала (t=0) / конца (t=1)?
+    const coveredAt = (idx, atStart) => {
+      if (!seg[idx]) return false;
+      const t = atStart ? 0.001 : 0.999;
+      return !skipsOf[idx].some(([a, b2]) => t >= a - 1e-6 && t <= b2 + 1e-6);
+    };
+
+    for (let i = 0; i < n; i++) {
+      const e = seg[i];
+      if (!e) continue;
+      const b = loop[(i + 1) % n];
+      const skips = skipsOf[i];
+      const parts = _railSplitBySkipRanges(e.a.x, e.a.z, b.x, b.z, skips);
+      for (const p of parts) {
+        // t вдоль ребра: 0 — вершина начала, 1 — вершина конца (не обрезано скипом).
+        const s0 = ((p.ax - e.a.x) * e.ux + (p.az - e.a.z) * e.uz);
+        const s1 = ((p.bx - e.a.x) * e.ux + (p.bz - e.a.z) * e.uz);
+        if (s1 - s0 < 0.05) continue;
+        // Стыки на углах: доски ВДОЛЬ X доводим до наружной грани соседней доски,
+        // доски вдоль Z — до её внутренней грани. Так угловой квадрат закрыт ровно
+        // один раз, без наложения (иначе на перекрытии дрались бы верхние грани).
+        const join = (mi, ox, oz, neighbourStart) => {
+          const m = seg[mi];
+          // Соседнее ребро идёт вдоль стены дома — доски там нет, стыковать не с чем:
+          // доводим нашу доску прямо до вершины (иначе она обрывалась в 16 см от стены).
+          if (!m || !coveredAt(mi, neighbourStart)) return 0;
+          const fwd = m.nx * ox + m.nz * oz;      // нормаль соседа смотрит по ходу?
+          const outer = fwd > 0 ? NOSING_OUT : -(NOSING_W - NOSING_OUT);
+          const inner = fwd > 0 ? -(NOSING_W - NOSING_OUT) : NOSING_OUT;
+          return e.alongX ? outer : inner;
+        };
+        // Сосед в начале ребра — предыдущее ребро (стык на его КОНЦЕ), в конце — следующее
+        // (стык на его НАЧАЛЕ).
+        const extA = (s0 < 1e-4) ? join((i - 1 + n) % n, -e.ux, -e.uz, false) : 0;
+        const extB = (s1 > e.L - 1e-4) ? join((i + 1) % n, e.ux, e.uz, true) : 0;
+        const t0 = s0 - extA, t1 = s1 + extB;
+        const len = t1 - t0;
+        if (len < 0.05) continue;
+
+        const cAlong = (t0 + t1) / 2;
+        // Поперёк: от кромки 10 мм наружу и 160 мм внутрь → центр в 75 мм внутрь.
+        const cx = e.a.x + e.ux * cAlong + e.nx * (NOSING_OUT - NOSING_W / 2);
+        const cz = e.a.z + e.uz * cAlong + e.nz * (NOSING_OUT - NOSING_W / 2);
+        const dimX = e.alongX ? len : NOSING_W;
+        const dimZ = e.alongX ? NOSING_W : len;
+        const m = new THREE.Mesh(new THREE.BoxGeometry(dimX, NOSING_H, dimZ), mat);
+        m.position.set(cx, deckTopY + NOSING_LIFT - NOSING_H / 2, cz);
+        m.castShadow = m.receiveShadow = true;
+        // Текстура ВСЕГДА вдоль доски. Поперёк привязываемся к наружной кромке и
+        // берём ребро зашивки (TERRACE_SIDE_TILE): на 170 мм ложится ровно одна доска.
+        if (typeof _applyBoxUV === 'function') {
+          const outerX = e.a.x + e.nx * NOSING_OUT, outerZ = e.a.z + e.nz * NOSING_OUT;
+          _applyBoxUV(m, TERRACE_SIDE_TILE,
+            e.alongX ? { x: 0, y: 0, z: -outerZ } : { x: -outerX, y: 0, z: 0 });
+          if (!e.alongX) _rotateBoxTopUV90(m.geometry);
+        }
+        parent.add(m);
+        threeState.deckMeshes.push(m);
+        built++;
+      }
+    }
+  }
+  return built;
+}
+
 // Настил террасы/крыльца по плановому полигону foot (world {x,z}). Призма от земли
 // (Y=0) до deckHeight: верх = настил (доски вдоль X или Z), боковые грани = дощатая
 // «юбка», низ закрыт. UV world-based (как _applyBoxUV) → непрерывный тайл между
@@ -229,19 +338,19 @@ function _buildTerracePoly(parent, M, foot, deckHeight, plankAlongX, meshArrayNa
   for (const p of foot) { pos.push(p.x, yBot, p.z); const t = topUV(p.x, p.z); uv.push(t[0], t[1]); } // низ  n..2n-1
   for (let i = 1; i < n - 1; i++) idx.push(0, i + 1, i);          // верх (нормаль +Y)
   for (let i = 1; i < n - 1; i++) idx.push(n, n + i, n + i + 1);  // низ  (нормаль −Y)
-  // Юбка: на каждое ребро — свой квад. Текстура повёрнута на 90° относительно
-  // настила (U идёт по высоте, V вдоль ребра → доски вертикально), ребро
-  // UV-бокса — TERRACE_SIDE_TILE.
+  // Юбка: на каждое ребро — свой квад. Доски ГОРИЗОНТАЛЬНЫЕ (TODO.md, этап 1 п.8):
+  // грувы текстуры — линии постоянного V, поэтому V идёт ПО ВЫСОТЕ, а U вдоль ребра.
+  // Ребро UV-бокса — TERRACE_SIDE_TILE (доска зашивки шире доски настила).
   const TS = TERRACE_SIDE_TILE;
   for (let i = 0; i < n; i++) {
     const a = foot[i], b = foot[(i + 1) % n];
     const alongX = Math.abs(b.x - a.x) >= Math.abs(b.z - a.z);
-    const vA = (alongX ? a.x : a.z) / TS, vB = (alongX ? b.x : b.z) / TS;
+    const uA = (alongX ? a.x : a.z) / TS, uB = (alongX ? b.x : b.z) / TS;
     const base = pos.length / 3;
-    pos.push(a.x, yTop, a.z); uv.push(yTop / TS, vA);
-    pos.push(b.x, yTop, b.z); uv.push(yTop / TS, vB);
-    pos.push(b.x, yBot, b.z); uv.push(yBot / TS, vB);
-    pos.push(a.x, yBot, a.z); uv.push(yBot / TS, vA);
+    pos.push(a.x, yTop, a.z); uv.push(uA, yTop / TS);
+    pos.push(b.x, yTop, b.z); uv.push(uB, yTop / TS);
+    pos.push(b.x, yBot, b.z); uv.push(uB, yBot / TS);
+    pos.push(a.x, yBot, a.z); uv.push(uA, yBot / TS);
     idx.push(base, base + 1, base + 2, base, base + 2, base + 3); // наружу (foot CCW)
   }
   const geo = new THREE.BufferGeometry();
@@ -932,9 +1041,17 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
     // Подступенок — материал ТЕРРАСЫ (M.terraceSide), доски ГОРИЗОНТАЛЬНО:
     // боковые грани box-UV дают именно горизонтальные грувы; ребро UV-бокса — как
     // у боковин террасы (TERRACE_SIDE_TILE), чтобы доска была одного размера.
+    //
+    // UV по ВЫСОТЕ у каждого подступенка СВОИ, от верхней кромки (TODO.md, этап 1
+    // п.9): подступенок ниже доски зашивки (≈0.16 м против 0.17 м), и при мировой
+    // проекции шов доски приходился на середину то одной ступени, то другой.
+    // Привязка к кромке уводит шов за пределы подступенка — он выходит цельным.
+    // По горизонтали проекция остаётся мировой (доска продолжается вдоль ступени).
     const riser = mesh(box(rdimX, riserH, rdimZ), M.terraceSide || matStep);
     riser.position.set(rcx, riserCenterY, rcz);
-    if (typeof _applyBoxUV === 'function') _applyBoxUV(riser, TERRACE_SIDE_TILE);
+    if (typeof _applyBoxUV === 'function') {
+      _applyBoxUV(riser, TERRACE_SIDE_TILE, { x: 0, y: -(riserCenterY + riserH / 2), z: 0 });
+    }
     stairGroup.add(riser);
     threeState.stepMeshes.push(riser);
   }
@@ -1006,14 +1123,14 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       const idx = [];
       for (const tri of tris) idx.push(tri[0], tri[1], tri[2]);
 
-      // UV щеки — как у боковины («юбки») террасы: U по высоте, V вдоль спуска
-      // (доски вертикально), ребро UV-бокса TERRACE_SIDE_TILE. Раньше UV не было
-      // вовсе — текстура товара на щёки просто не ложилась.
+      // UV щеки — как у боковины («юбки») террасы: доски ГОРИЗОНТАЛЬНЫЕ
+      // (TODO.md, этап 1 п.8), поэтому V идёт по высоте, а U вдоль спуска.
+      // Ребро UV-бокса — TERRACE_SIDE_TILE.
       const TSc = TERRACE_SIDE_TILE;
       const uvs = [];
       for (let k = 0; k < verts3D.length; k += 3) {
         const along = (bestSide.axisAlong === 'X') ? verts3D[k + 2] : verts3D[k];
-        uvs.push(verts3D[k + 1] / TSc, along / TSc);
+        uvs.push(along / TSc, verts3D[k + 1] / TSc);
       }
 
       const geo = new THREE.BufferGeometry();

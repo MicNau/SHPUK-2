@@ -377,7 +377,7 @@ function getHouseMats() {
     envMapIntensity: eI * 0.7,
   });
   wall.normalScale  = new THREE.Vector2(0.5, 0.5);
-  _assignHouseMatTex(wall, _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'beige'));
+  _assignHouseMatTex(wall, _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'white'));
 
   // Цоколь — бетон (однотонный) или камень (текстура).
   const base = new THREE.MeshStandardMaterial({
@@ -624,16 +624,19 @@ function _applyBoxUV(mesh, tileSize, groupOffset) {
   });
 }
 
-// Ребро кубической UV-проекции (метров) — ЕДИНОЕ для всей сцены: текстура
-// повторяется ровно раз в метр на любой поверхности, поэтому масштаб рисунка
-// одинаков у дома, террасы, дорожек и грядок.
+// Ребро кубической UV-проекции (метров) — ЕДИНОЕ для дома: текстура повторяется
+// ровно раз в метр, поэтому масштаб рисунка одинаков у стен, цоколя и крыши.
 const UV_TILE = 1.0;
-// Тайл deck-текстуры (терраса/крыльцо/ступени/дорожки/грядки) — тот же 1 м.
-const DECK_TILE = UV_TILE;
-// Боковины («юбка») террасы и крыльца: текстура повёрнута на 90° относительно
-// настила, ребро UV-бокса 1.3 м (TODO). Отдельный тайл — потому что доска
-// боковины крупнее шага настила.
-const TERRACE_SIDE_TILE = 1.3;
+
+// Тайл deck-текстур считается от ШИРИНЫ ДОСКИ (TODO.md, этап 1 п.9): в текстуре
+// ровно DECK_BOARDS_PER_TILE досок на тайл, значит тайл = ширина доски × их число.
+// Замер по assets/deck_diff.jpg: 10 грувов на 1024 px, шаг 113 px → 9 досок на тайл.
+// Тем же числом досок считаются и текстуры товаров — других данных о шаге у нас нет.
+const DECK_BOARDS_PER_TILE = 9;
+const DECK_BOARD_W = 0.15;   // доска настила: терраса, крыльцо, проступи, дорожки, грядки
+const SIDE_BOARD_W = 0.17;   // доска зашивки: юбка террасы, щёки лестницы, подступенки
+const DECK_TILE = DECK_BOARD_W * DECK_BOARDS_PER_TILE;          // 1.35 м
+const TERRACE_SIDE_TILE = SIDE_BOARD_W * DECK_BOARDS_PER_TILE;  // 1.53 м
 
 // Кубическая deck-UV проекция с ориентацией досок вдоль нужной оси.
 // Текстура: грувы (стыки досок) — горизонтальные линии (const V). После _applyBoxUV
@@ -676,18 +679,31 @@ function _applyDeckProductTextures(M, textures) {
 
 // Деко-элементы, у каждого свой материал настила (S.elementMat[el]): терраса у бассейна
 // и причал берут те же карточки каталога, что терраса, но доска у них может быть своя.
-const DECK_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'pier'];
+const DECK_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace'];
 
 // Материал настила для конкретного элемента: дефолтный baseDeck, либо его клон с
 // текстурами товара / цветом из S.elementMat[el]. Клон попадёт в меш и будет
 // освобождён clearGroup при следующей пересборке.
+// Элементы, которые до выбора товара рендерятся УСЛОВНЫМ серым, а не дефолтной
+// текстурой доски (TODO.md, этап 1 п.6): терраса, ступени, ограждение и перила
+// (перила берут материал ограждения). Цвет — тот же, что у полотна условного
+// забора: он читается как «черновик», а не как готовый материал.
+// Дорожки, грядки и терраса у бассейна в список не входят — там прежний вид.
+const SCHEMATIC_UNTIL_PRODUCT = new Set(['terrace', 'steps', 'railing']);
+function _schematicDeckMat() {
+  const c = (typeof FENCE_SCHEMATIC_COLOR !== 'undefined') ? FENCE_SCHEMATIC_COLOR : 0xb0a89c;
+  return new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.05 });
+}
+
 function _resolveDeckMat(baseDeck, el) {
   const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat[el] : null;
-  if (!em) return baseDeck;
+  if (!em) return SCHEMATIC_UNTIL_PRODUCT.has(el) ? _schematicDeckMat() : baseDeck;
   const m = baseDeck.clone();
   if (em.textures && _applyDeckProductTextures({ deck: m }, em.textures)) return m;
   if (em.color) { m.color.set(em.color); return m; }
   m.dispose();
+  // Товар выбран, но ни текстур, ни цвета у него нет — условный вид тоже не годится
+  // (пользователь уже сделал выбор), берём дефолтную доску.
   return baseDeck;
 }
 
@@ -699,8 +715,15 @@ function _resolveDeckMat(baseDeck, el) {
 const HOUSE_ROOF_TILE  = UV_TILE;
 const HOUSE_WALL_TILE  = UV_TILE;
 const HOUSE_BASE_TILE  = UV_TILE;
-const TERRACE_MIN_H = 0.10;   // минимальная высота настила террасы, м (TODO.md → ТЕРРАСА)
-const HOUSE_WOOD_COLOR = 0x4a2f18; // «дерево» — вариант рам/дверей по умолчанию (S.frameMat = 'wood')
+const TERRACE_MIN_H = 0.15;   // минимальная высота настила террасы, м (TODO.md, этап 1 п.2)
+// Палитра дома (стены/фундамент/рамы) — те же значения, что в HOUSE_COLORS (state.js).
+const HOUSE_PALETTE = {
+  white:    { c: 0xffffff },
+  beige:    { c: 0xc7ba95 },
+  gray:     { c: 0x7e7e7e },
+  brown:    { c: 0x61564d },
+  darkgray: { c: 0x1d2630 },
+};
 
 // Текстурный набор для материала дома: {color, map, normalMap, roughnessMap}.
 // Для однотонных (штукатурка/бетон) карты = null. repeat=1 — тайлинг задаётся
@@ -712,23 +735,12 @@ function _houseTexSet(kind, variant) {
       metal_green: { c: 0xffffff, d: 'roof_diff_02', n: 'roof_norm_02', r: 'roof_roug_02' },
       metal_red:   { c: 0xffffff, d: 'roof_diff_03', n: 'roof_norm_03', r: 'roof_roug_03' },
     },
-    wall: {
-      white: { c: 0xf2f0ec },
-      beige: { c: 0xefe2c8 },
-      brown: { c: 0x7a5533 },
-    },
-    base: {
-      beige:    { c: 0xd9c9a8 },
-      brown:    { c: 0x7a5533 },
-      darkgray: { c: 0x4a4a4a },
-    },
-    // Рамы окон и двери — только цвет. Дублируется в HOUSE_MATERIALS.frame (state.js),
-    // откуда рисуются образцы в UI; менять синхронно.
-    frame: {
-      wood:  { c: HOUSE_WOOD_COLOR },   // текущий (дерево)
-      white: { c: 0xf2f2f0 },
-      dark:  { c: 0x2b1a0d },
-    },
+    // Стены, фундамент и рамы — ОДНА палитра из пяти цветов (TODO.md, этап 1 п.10).
+    // Дублируется в HOUSE_COLORS (state.js), откуда рисуются образцы в UI; менять
+    // синхронно. Текстур ни у одной из трёх групп нет — только цвет.
+    wall:  HOUSE_PALETTE,
+    base:  HOUSE_PALETTE,
+    frame: HOUSE_PALETTE,
   };
   const grp = D[kind] || {};
   const e = grp[variant] || grp[Object.keys(grp)[0]] || { c: 0xffffff };
@@ -832,9 +844,9 @@ function _applyHouseTexSet(mesh, tex, tileSize, uvFn) {
 function _applyHouseMaterials(parent) {
   if (!parent) return;
   const roofT = _houseTexSet('roof', (typeof S !== 'undefined' && S.roofMat) || 'tile');
-  const wallT = _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'beige');
+  const wallT = _houseTexSet('wall', (typeof S !== 'undefined' && S.wallMat) || 'white');
   const baseT = _houseTexSet('base', (typeof S !== 'undefined' && S.baseMat) || 'beige');
-  const frameC = _houseTexSet('frame', (typeof S !== 'undefined' && S.frameMat) || 'wood').color;
+  const frameC = _houseTexSet('frame', (typeof S !== 'undefined' && S.frameMat) || 'brown').color;
   parent.traverse(o => {
     if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
     const nm = o.material.name || '';
@@ -932,7 +944,6 @@ function buildScene3d() {
   threeState.stepMeshes    = [];
   threeState.fenceMeshes   = [];
   threeState.railingMeshes = [];
-  threeState.canopyMeshes  = [];
   threeState.bedMeshes     = [];
   threeState.furnitureMeshes = [];    // садовая мебель (GLB по точкам S.furniture)
   threeState.facadeSegs    = [];      // элементы фасада (segId) — соберём после сборки дома
@@ -1149,23 +1160,33 @@ function buildScene3d() {
     }
   }
 
+  // Мировые bbox блоков секции — нужны настилу и полуступени.
+  const _rectsWorld = polys => polys.map(pp => {
+    const w = canvasToWorld(pp, houseL, houseW);
+    return {
+      minX: Math.min(...w.map(p => p.x)), maxX: Math.max(...w.map(p => p.x)),
+      minZ: Math.min(...w.map(p => p.z)), maxZ: Math.max(...w.map(p => p.z)),
+    };
+  });
+
   const terraceRectPolys = _terraceRectsToPolygons('terrace');
   if (S.sections.includes('terrace')) {
     M.deck = _resolveDeckMat(_baseDeck, 'terrace');
     _buildRectDecks(terraceRectPolys, terraceLevel - 0.01, _houseEdgesW);
+    // Полуступень по свободному контуру (всё, кроме участков у стен дома).
+    try { buildTerraceNosing(houseGroup, M, _rectsWorld(terraceRectPolys), terraceLevel - 0.01); }
+    catch (e) { console.error('[buildTerraceNosing]', e); }
   }
 
   // Отдельно стоящие террасы: тот же настил, но доски вдоль длинной стороны блока
-  // (дом на них не влияет). Причал — на своей отметке 0.5 м над землёй/водой.
+  // (дом на них не влияет).
   const poolRectPolys = _terraceRectsToPolygons('pool_terrace');
   if (S.sections.includes('pool_terrace') && poolRectPolys.length) {
     M.deck = _resolveDeckMat(_baseDeck, 'pool_terrace');
     _buildRectDecks(poolRectPolys, terraceLevel - 0.01, null);
-  }
-  const pierRectPolys = _terraceRectsToPolygons('pier');
-  if (S.sections.includes('pier') && pierRectPolys.length) {
-    M.deck = _resolveDeckMat(_baseDeck, 'pier');
-    _buildRectDecks(pierRectPolys, 0.5, null);
+    // Отдельно стоящая — свободен весь контур.
+    try { buildTerraceNosing(houseGroup, M, _rectsWorld(poolRectPolys), terraceLevel - 0.01); }
+    catch (e) { console.error('[buildTerraceNosing pool]', e); }
   }
 
   if (S.sections.includes('paths') && S.pts.paths.filter(p=>!p.break).length >= 2) {
@@ -1236,13 +1257,11 @@ function buildScene3d() {
         })
       : []);
     const poolRectsW = rectsWorldOf('pool_terrace');
-    const pierRectsW = rectsWorldOf('pier');
     const inRects = (x, z, list) =>
       list.some(r => x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ);
     const surfaceYAt = (x, z) => {
       if (S.sections.includes('terrace') && inRects(x, z, allRectsWorld)) return deckY;
       if (inRects(x, z, poolRectsW)) return deckY;
-      if (inRects(x, z, pierRectsW)) return 0.5;   // причал — своя отметка
       return 0;                                    // земля
     };
     try {
@@ -1250,43 +1269,16 @@ function buildScene3d() {
     } catch (e) { console.error('[buildFurniture3d]', e); }
   }
 
-  // Навес строим ДО перил: высоту высоких столбов перила берут рейкастом по готовым плитам навеса.
-  // Навес включается тумблером в редакторе ОГРАЖДЕНИЙ (TODO.md → ОГРАЖДЕНИЯ 3).
-  const terraceCanopyOn = tgOn('railing-roof');
-  if (terraceCanopyOn && S.sections.includes('terrace')) {
-    // Колонны навеса красятся материалом ограждения (см. buildTerraceCanopies).
-    M.railing = _resolveDeckMat(_baseDeck, 'railing');
-    let _cols = 0;
-    try {
-      _cols = buildTerraceCanopies(houseGroup, M, terraceRectPolys, terraceLevel, houseL, houseW);
-    } catch (e) { console.error('[buildTerraceCanopies]', e); }
-    // Колонн не построили (ограждение держит навес само) — заготовку освобождаем.
-    if (!_cols && M.railing && M.railing !== _baseDeck) M.railing.dispose();
-    M.railing = null;
-  }
-
   // Ограждение — отдельный элемент проекта: строится по НАРИСОВАННОЙ ломаной
   // (S.pts.railing), а не по контуру террасы. Высота стандартная, не настраивается.
+  // Навеса над террасой больше нет (TODO.md, этап 1 п.5) — вместе с ним ушли высокие
+  // столбы под плиту и рейкаст по её низу.
   const railingPts = (S.pts.railing || []).filter(p => !p.break);
   if (S.sections.includes('railing') && railingPts.length >= 2) {
     if (_railingCache && _railingCache.rails) {
-      // Высоту высоких столбов берём по РЕАЛЬНЫМ плитам навеса (рейкаст), а не аналитикой —
-      // на стыках блоков плита обрезана по диагонали, и аналитика (max по bbox) промахивалась.
-      let canopyUndersideY = null;
-      if (terraceCanopyOn && threeState.canopyMeshes.length) {
-        houseGroup.updateMatrixWorld(true);          // плиты навеса только что добавлены
-        const _rc = new THREE.Raycaster();
-        const _down = new THREE.Vector3(0, -1, 0);
-        const deckY = terraceLevel;
-        canopyUndersideY = (x, z) => {               // мировой Y НИЗА плиты навеса над точкой (или null)
-          _rc.set(new THREE.Vector3(x, deckY + 10, z), _down);
-          const hits = _rc.intersectObjects(threeState.canopyMeshes, true);
-          return hits.length ? hits[hits.length - 1].point.y : null;   // нижнее пересечение = низ плиты
-        };
-      }
       // Материал ограждения — свой (товар раздела 2331, тег fencing).
       buildRailingLine3d(houseGroup, S.pts.railing, terraceLevel, houseL, houseW,
-                         canopyUndersideY, _resolveDeckMat(_baseDeck, 'railing'));
+                         null, _resolveDeckMat(_baseDeck, 'railing'));
     } else {
       // GLB ограждения ещё не загружен — грузим и перестраиваем сцену (как грядки).
       ensureRailingLoaded().then(c => { if (c && threeState) buildScene3d(); });
@@ -1303,7 +1295,7 @@ function buildScene3d() {
       threeState.occupiedZones.push({ type:'poly', points:canvasToWorld(polyPts,houseL,houseW) });
     }
   }
-  for (const [secId, polys] of [['pool_terrace', poolRectPolys], ['pier', pierRectPolys]]) {
+  for (const [secId, polys] of [['pool_terrace', poolRectPolys]]) {
     if (!S.sections.includes(secId)) continue;
     for (const polyPts of polys) {
       threeState.occupiedZones.push({ type:'poly', points:canvasToWorld(polyPts,houseL,houseW) });
