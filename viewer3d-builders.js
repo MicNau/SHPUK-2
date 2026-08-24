@@ -229,19 +229,19 @@ function _buildTerracePoly(parent, M, foot, deckHeight, plankAlongX, meshArrayNa
   for (const p of foot) { pos.push(p.x, yBot, p.z); const t = topUV(p.x, p.z); uv.push(t[0], t[1]); } // низ  n..2n-1
   for (let i = 1; i < n - 1; i++) idx.push(0, i + 1, i);          // верх (нормаль +Y)
   for (let i = 1; i < n - 1; i++) idx.push(n, n + i, n + i + 1);  // низ  (нормаль −Y)
-  // Юбка: на каждое ребро — свой квад. Текстура повёрнута на 90° относительно
-  // настила (U идёт по высоте, V вдоль ребра → доски вертикально), ребро
-  // UV-бокса — TERRACE_SIDE_TILE.
+  // Юбка: на каждое ребро — свой квад. Доски ГОРИЗОНТАЛЬНЫЕ (TODO.md, этап 1 п.8):
+  // грувы текстуры — линии постоянного V, поэтому V идёт ПО ВЫСОТЕ, а U вдоль ребра.
+  // Ребро UV-бокса — TERRACE_SIDE_TILE (доска зашивки шире доски настила).
   const TS = TERRACE_SIDE_TILE;
   for (let i = 0; i < n; i++) {
     const a = foot[i], b = foot[(i + 1) % n];
     const alongX = Math.abs(b.x - a.x) >= Math.abs(b.z - a.z);
-    const vA = (alongX ? a.x : a.z) / TS, vB = (alongX ? b.x : b.z) / TS;
+    const uA = (alongX ? a.x : a.z) / TS, uB = (alongX ? b.x : b.z) / TS;
     const base = pos.length / 3;
-    pos.push(a.x, yTop, a.z); uv.push(yTop / TS, vA);
-    pos.push(b.x, yTop, b.z); uv.push(yTop / TS, vB);
-    pos.push(b.x, yBot, b.z); uv.push(yBot / TS, vB);
-    pos.push(a.x, yBot, a.z); uv.push(yBot / TS, vA);
+    pos.push(a.x, yTop, a.z); uv.push(uA, yTop / TS);
+    pos.push(b.x, yTop, b.z); uv.push(uB, yTop / TS);
+    pos.push(b.x, yBot, b.z); uv.push(uB, yBot / TS);
+    pos.push(a.x, yBot, a.z); uv.push(uA, yBot / TS);
     idx.push(base, base + 1, base + 2, base, base + 2, base + 3); // наружу (foot CCW)
   }
   const geo = new THREE.BufferGeometry();
@@ -932,9 +932,17 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
     // Подступенок — материал ТЕРРАСЫ (M.terraceSide), доски ГОРИЗОНТАЛЬНО:
     // боковые грани box-UV дают именно горизонтальные грувы; ребро UV-бокса — как
     // у боковин террасы (TERRACE_SIDE_TILE), чтобы доска была одного размера.
+    //
+    // UV по ВЫСОТЕ у каждого подступенка СВОИ, от верхней кромки (TODO.md, этап 1
+    // п.9): подступенок ниже доски зашивки (≈0.16 м против 0.17 м), и при мировой
+    // проекции шов доски приходился на середину то одной ступени, то другой.
+    // Привязка к кромке уводит шов за пределы подступенка — он выходит цельным.
+    // По горизонтали проекция остаётся мировой (доска продолжается вдоль ступени).
     const riser = mesh(box(rdimX, riserH, rdimZ), M.terraceSide || matStep);
     riser.position.set(rcx, riserCenterY, rcz);
-    if (typeof _applyBoxUV === 'function') _applyBoxUV(riser, TERRACE_SIDE_TILE);
+    if (typeof _applyBoxUV === 'function') {
+      _applyBoxUV(riser, TERRACE_SIDE_TILE, { x: 0, y: -(riserCenterY + riserH / 2), z: 0 });
+    }
     stairGroup.add(riser);
     threeState.stepMeshes.push(riser);
   }
@@ -1006,14 +1014,14 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       const idx = [];
       for (const tri of tris) idx.push(tri[0], tri[1], tri[2]);
 
-      // UV щеки — как у боковины («юбки») террасы: U по высоте, V вдоль спуска
-      // (доски вертикально), ребро UV-бокса TERRACE_SIDE_TILE. Раньше UV не было
-      // вовсе — текстура товара на щёки просто не ложилась.
+      // UV щеки — как у боковины («юбки») террасы: доски ГОРИЗОНТАЛЬНЫЕ
+      // (TODO.md, этап 1 п.8), поэтому V идёт по высоте, а U вдоль спуска.
+      // Ребро UV-бокса — TERRACE_SIDE_TILE.
       const TSc = TERRACE_SIDE_TILE;
       const uvs = [];
       for (let k = 0; k < verts3D.length; k += 3) {
         const along = (bestSide.axisAlong === 'X') ? verts3D[k + 2] : verts3D[k];
-        uvs.push(verts3D[k + 1] / TSc, along / TSc);
+        uvs.push(along / TSc, verts3D[k + 1] / TSc);
       }
 
       const geo = new THREE.BufferGeometry();
