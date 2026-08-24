@@ -154,6 +154,10 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 }
 /* Ряд под сеткой: «Участок без дома» + загрузка фото, две карточки 240px вплотную. */
 .d-house-extra { display: flex; gap: 0; flex-shrink: 0; }
+/* Кнопка «Дальше» на экране выбора дома — появляется только когда дом уже выбран
+   (пользователь вернулся на первый экран). См. _dSyncSelectNext в nav-desktop.js. */
+.d-select-actions { display: none; flex-shrink: 0; }
+.d-select-actions.active { display: flex; }
 .d-house-card-empty {
   position: relative; flex: 0 0 240px; height: 180px; background: var(--bg);
   border-radius: 0; border: 1px solid var(--gray); cursor: pointer; overflow: hidden;

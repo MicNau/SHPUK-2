@@ -676,7 +676,7 @@ function _applyDeckProductTextures(M, textures) {
 
 // Деко-элементы, у каждого свой материал настила (S.elementMat[el]): терраса у бассейна
 // и причал берут те же карточки каталога, что терраса, но доска у них может быть своя.
-const DECK_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'pier'];
+const DECK_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace'];
 
 // Материал настила для конкретного элемента: дефолтный baseDeck, либо его клон с
 // текстурами товара / цветом из S.elementMat[el]. Клон попадёт в меш и будет
@@ -699,7 +699,7 @@ function _resolveDeckMat(baseDeck, el) {
 const HOUSE_ROOF_TILE  = UV_TILE;
 const HOUSE_WALL_TILE  = UV_TILE;
 const HOUSE_BASE_TILE  = UV_TILE;
-const TERRACE_MIN_H = 0.10;   // минимальная высота настила террасы, м (TODO.md → ТЕРРАСА)
+const TERRACE_MIN_H = 0.15;   // минимальная высота настила террасы, м (TODO.md, этап 1 п.2)
 const HOUSE_WOOD_COLOR = 0x4a2f18; // «дерево» — вариант рам/дверей по умолчанию (S.frameMat = 'wood')
 
 // Текстурный набор для материала дома: {color, map, normalMap, roughnessMap}.
@@ -932,7 +932,6 @@ function buildScene3d() {
   threeState.stepMeshes    = [];
   threeState.fenceMeshes   = [];
   threeState.railingMeshes = [];
-  threeState.canopyMeshes  = [];
   threeState.bedMeshes     = [];
   threeState.furnitureMeshes = [];    // садовая мебель (GLB по точкам S.furniture)
   threeState.facadeSegs    = [];      // элементы фасада (segId) — соберём после сборки дома
@@ -1156,16 +1155,11 @@ function buildScene3d() {
   }
 
   // Отдельно стоящие террасы: тот же настил, но доски вдоль длинной стороны блока
-  // (дом на них не влияет). Причал — на своей отметке 0.5 м над землёй/водой.
+  // (дом на них не влияет).
   const poolRectPolys = _terraceRectsToPolygons('pool_terrace');
   if (S.sections.includes('pool_terrace') && poolRectPolys.length) {
     M.deck = _resolveDeckMat(_baseDeck, 'pool_terrace');
     _buildRectDecks(poolRectPolys, terraceLevel - 0.01, null);
-  }
-  const pierRectPolys = _terraceRectsToPolygons('pier');
-  if (S.sections.includes('pier') && pierRectPolys.length) {
-    M.deck = _resolveDeckMat(_baseDeck, 'pier');
-    _buildRectDecks(pierRectPolys, 0.5, null);
   }
 
   if (S.sections.includes('paths') && S.pts.paths.filter(p=>!p.break).length >= 2) {
@@ -1236,13 +1230,11 @@ function buildScene3d() {
         })
       : []);
     const poolRectsW = rectsWorldOf('pool_terrace');
-    const pierRectsW = rectsWorldOf('pier');
     const inRects = (x, z, list) =>
       list.some(r => x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ);
     const surfaceYAt = (x, z) => {
       if (S.sections.includes('terrace') && inRects(x, z, allRectsWorld)) return deckY;
       if (inRects(x, z, poolRectsW)) return deckY;
-      if (inRects(x, z, pierRectsW)) return 0.5;   // причал — своя отметка
       return 0;                                    // земля
     };
     try {
@@ -1250,43 +1242,16 @@ function buildScene3d() {
     } catch (e) { console.error('[buildFurniture3d]', e); }
   }
 
-  // Навес строим ДО перил: высоту высоких столбов перила берут рейкастом по готовым плитам навеса.
-  // Навес включается тумблером в редакторе ОГРАЖДЕНИЙ (TODO.md → ОГРАЖДЕНИЯ 3).
-  const terraceCanopyOn = tgOn('railing-roof');
-  if (terraceCanopyOn && S.sections.includes('terrace')) {
-    // Колонны навеса красятся материалом ограждения (см. buildTerraceCanopies).
-    M.railing = _resolveDeckMat(_baseDeck, 'railing');
-    let _cols = 0;
-    try {
-      _cols = buildTerraceCanopies(houseGroup, M, terraceRectPolys, terraceLevel, houseL, houseW);
-    } catch (e) { console.error('[buildTerraceCanopies]', e); }
-    // Колонн не построили (ограждение держит навес само) — заготовку освобождаем.
-    if (!_cols && M.railing && M.railing !== _baseDeck) M.railing.dispose();
-    M.railing = null;
-  }
-
   // Ограждение — отдельный элемент проекта: строится по НАРИСОВАННОЙ ломаной
   // (S.pts.railing), а не по контуру террасы. Высота стандартная, не настраивается.
+  // Навеса над террасой больше нет (TODO.md, этап 1 п.5) — вместе с ним ушли высокие
+  // столбы под плиту и рейкаст по её низу.
   const railingPts = (S.pts.railing || []).filter(p => !p.break);
   if (S.sections.includes('railing') && railingPts.length >= 2) {
     if (_railingCache && _railingCache.rails) {
-      // Высоту высоких столбов берём по РЕАЛЬНЫМ плитам навеса (рейкаст), а не аналитикой —
-      // на стыках блоков плита обрезана по диагонали, и аналитика (max по bbox) промахивалась.
-      let canopyUndersideY = null;
-      if (terraceCanopyOn && threeState.canopyMeshes.length) {
-        houseGroup.updateMatrixWorld(true);          // плиты навеса только что добавлены
-        const _rc = new THREE.Raycaster();
-        const _down = new THREE.Vector3(0, -1, 0);
-        const deckY = terraceLevel;
-        canopyUndersideY = (x, z) => {               // мировой Y НИЗА плиты навеса над точкой (или null)
-          _rc.set(new THREE.Vector3(x, deckY + 10, z), _down);
-          const hits = _rc.intersectObjects(threeState.canopyMeshes, true);
-          return hits.length ? hits[hits.length - 1].point.y : null;   // нижнее пересечение = низ плиты
-        };
-      }
       // Материал ограждения — свой (товар раздела 2331, тег fencing).
       buildRailingLine3d(houseGroup, S.pts.railing, terraceLevel, houseL, houseW,
-                         canopyUndersideY, _resolveDeckMat(_baseDeck, 'railing'));
+                         null, _resolveDeckMat(_baseDeck, 'railing'));
     } else {
       // GLB ограждения ещё не загружен — грузим и перестраиваем сцену (как грядки).
       ensureRailingLoaded().then(c => { if (c && threeState) buildScene3d(); });
@@ -1303,7 +1268,7 @@ function buildScene3d() {
       threeState.occupiedZones.push({ type:'poly', points:canvasToWorld(polyPts,houseL,houseW) });
     }
   }
-  for (const [secId, polys] of [['pool_terrace', poolRectPolys], ['pier', pierRectPolys]]) {
+  for (const [secId, polys] of [['pool_terrace', poolRectPolys]]) {
     if (!S.sections.includes(secId)) continue;
     for (const polyPts of polys) {
       threeState.occupiedZones.push({ type:'poly', points:canvasToWorld(polyPts,houseL,houseW) });

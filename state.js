@@ -13,7 +13,6 @@ const SECS = [
   {id:'beds',         lbl:'Грядки',             req:'beds'},
   {id:'furniture',    lbl:'Мебель',             req:'furniture'},
   {id:'pool_terrace', lbl:'Терраса у бассейна', req:'pool_terrace'},
-  {id:'pier',         lbl:'Причал',             req:'pier'},
 ];
 
 // Секции с ПРЯМОУГОЛЬНЫМ редактором (терраса и две её отдельно стоящие копии).
@@ -21,7 +20,7 @@ const SECS = [
 // Отличие только в примыкании к дому:
 //   • terrace — пристраивается к дому: кромки липнут к стенам, в расчёт вершины
 //     уходят с vertexType 'house';
-//   • pool_terrace / pier — ОТДЕЛЬНО СТОЯЩИЕ: снап только к сетке и к собственным
+//   • pool_terrace — ОТДЕЛЬНО СТОЯЩАЯ: снап только к сетке и к собственным
 //     блокам, все вершины 'free', в 3D направление досок берётся по длинной стороне.
 // rects/active — имена полей S; colors — палитра плана (свой цвет у каждой секции).
 const RECT_SECTIONS = {
@@ -34,11 +33,6 @@ const RECT_SECTIONS = {
     rects: 'poolRects', active: 'activePoolRect', house: false,
     label: 'Терраса у бассейна', short: 'Терр. бассейна',
     fill: 'rgba(0,80,200,.10)', stroke: '#3a63b0', bgStroke: 'rgba(0,80,200,.5)',
-  },
-  pier: {
-    rects: 'pierRects', active: 'activePierRect', house: false,
-    label: 'Причал', short: 'Причал',
-    fill: 'rgba(26,122,204,.10)', stroke: '#2a7ec4', bgStroke: 'rgba(26,122,204,.5)',
   },
 };
 
@@ -93,7 +87,7 @@ const CATALOG_COLOR_HEX = {
 };
 
 // Набор цветов на тип элемента (имена из COLORS.md). railing — ограждение террасы
-// (отдельный элемент проекта). paths/pool_terrace/pier берут набор террасной доски.
+// (отдельный элемент проекта). paths/pool_terrace берут набор террасной доски.
 const ELEMENT_COLOR_NAMES = {
   // Терраса = ДПК-набор + цвета МПК-доски (раздел 2329 доступен из селектора).
   terrace: ['Венге', 'Серый', 'Антрацит', 'Орех', 'Тик', 'Красный', 'Песочный',
@@ -147,7 +141,7 @@ const CATALOG_SECTIONS = [
 
 // Дефолтный раздел каталога для каждого элемента проекта (sidebar) → bitrix_id.
 const CONSTRUCTION_TO_SECTION = {
-  terrace: 2314, paths: 2314, pool_terrace: 2314, pier: 2314,
+  terrace: 2314, paths: 2314, pool_terrace: 2314,
   steps: 2330, beds: 2357, fence: 2348, facade: 2680, furniture: 2430,
   railing: 2331,   // «Ограждения для террасы из ДПК» — отдельный элемент проекта
 };
@@ -284,8 +278,6 @@ const S = {
   // Терраса у бассейна и причал — тот же редактор, отдельно стоящие (RECT_SECTIONS).
   poolRects: [],
   activePoolRect: null,
-  pierRects: [],
-  activePierRect: null,
   // Ступени: один rect (положение + ширина = от пользователя; глубина в 3D
   // пересчитывается автоматически из количества подступенков).
   steps: { ...DEFAULT_STEPS_RECT },
@@ -316,8 +308,8 @@ const S = {
   catSection: null,    // выбранный раздел каталога (bitrix_id) или null = дефолт по элементу
   catShowResults: false,
   estimate: {},        // elementId -> { id, name, price } — выбранный в смету товар по элементу
-  // Тумблеры canvas-редакторов (id из data-id → bool): 'railing-roof',
-  // 'steps-railing', 'railing-roof'… Зеркалируются из DOM
+  // Тумблеры canvas-редакторов (id из data-id → bool): 'steps-railing',
+  // 'porch-canopy'… Зеркалируются из DOM
   // в ttg/_dCacheToggleDefaults — 3D-слой читает ТОЛЬКО отсюда (tgOn), не DOM.
   toggles: {},
   pathWidth: 120,      // ширина дорожки, см (инпут v-paths-width зеркалится сюда)

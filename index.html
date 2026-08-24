@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=30">
+<link rel="stylesheet" href="styles-desktop.css?v=31">
 </head>
 <body>
 
@@ -26,6 +26,11 @@
         <div class="hcp"><div class="ic">🌿</div>Пустой участок, без строений</div>
         <div class="hcl">Участок без дома</div>
       </div>
+    </div>
+    <!-- «Дальше» — только для возврата на первый экран: дом уже выбран, и повторно
+         кликать по карточке (со сбросом настроек) незачем. См. _dSyncSelectNext. -->
+    <div class="d-select-actions" id="d-select-actions">
+      <button class="d-btn d-btn-next" onclick="dGoTo(2)">Дальше →</button>
     </div>
   </div>
 </div>
@@ -54,12 +59,12 @@
       <div class="d-param-group">
         <div class="d-param-head">
           <span class="d-param-label">Высота фундамента (см)</span>
-          <input class="d-param-input" type="number" id="v-found" value="80" min="50" max="120"
+          <input class="d-param-input" type="number" id="v-found" value="80" min="15" max="120"
                  oninput="dOnParam()">
         </div>
-        <input class="d-param-range" type="range" id="r-found" value="80" min="50" max="120" step="10"
+        <input class="d-param-range" type="range" id="r-found" value="80" min="15" max="120" step="5"
                oninput="document.getElementById('v-found').value=this.value; dOnParam()">
-        <div class="d-param-unit"><span>50 см</span><span>120 см</span></div>
+        <div class="d-param-unit"><span>15 см</span><span>120 см</span></div>
       </div>
 
       <!-- Per-floor параметры (генерируются динамически на основе дескриптора) -->
@@ -122,12 +127,12 @@
             <div class="d-param-group">
               <div class="d-param-head">
                 <span class="d-param-label">Высота настила, см.</span>
-                <input class="d-param-input" type="number" id="v-terrace-h" min="10" step="5"
+                <input class="d-param-input" type="number" id="v-terrace-h" min="15" step="5"
                        oninput="dSetTerraceHeight(this.value)">
               </div>
-              <input class="d-param-range" type="range" id="r-terrace-h" min="10" step="5"
+              <input class="d-param-range" type="range" id="r-terrace-h" min="15" step="5"
                      oninput="dSetTerraceHeight(this.value)">
-              <div class="d-param-unit" id="d-terrace-h-hint"><span>10 см</span><span>80 см</span></div>
+              <div class="d-param-unit" id="d-terrace-h-hint"><span>15 см</span><span>80 см</span></div>
             </div>
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="addRect('terrace')">Добавить</button>
@@ -216,23 +221,6 @@
           </div>
         </div>
 
-        <div class="d-center-canvas" id="d-canvas-pier">
-          <div class="d-canvas-header">
-            <div>
-              <div class="d-canvas-title">Причал — разметка</div>
-              <div class="d-canvas-hint">Отдельно стоящий настил над водой. Перетаскивайте прямоугольники за углы. Нажмите «ДОБАВИТЬ» чтобы добавить новый, «УДАЛИТЬ» — чтобы удалить выделенный.</div>
-            </div>
-          </div>
-          <div class="d-canvas-area" id="cw-pier"><canvas id="cv-pier"></canvas></div>
-          <div class="d-canvas-footer">
-            <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addRect('pier')">Добавить</button>
-              <button class="d-canvas-btn" onclick="delActiveRect('pier')">Удалить</button>
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('pier')">Дальше →</button>
-            </div>
-          </div>
-        </div>
-
         <div class="d-center-canvas" id="d-canvas-furniture">
           <div class="d-canvas-header">
             <div>
@@ -259,7 +247,6 @@
           </div>
           <div class="d-canvas-area" id="cw-railing"><canvas id="cv-railing"></canvas></div>
           <div class="d-canvas-footer">
-            <div class="tg" onclick="ttg(this)" data-id="railing-roof"><span class="tg-txt">Навес</span><div class="tg-ind"></div></div>
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="addBreak('railing')">Добавить</button>
               <button class="d-canvas-btn" onclick="undoPt('railing')">Отменить</button>
@@ -389,8 +376,8 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=48"></script>
-<script src="canvas.js?v=46"></script>
+<script src="state.js?v=49"></script>
+<script src="canvas.js?v=47"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=85"></script>
 <!-- Каталожный API: домен выбирается по хосту.
@@ -412,11 +399,11 @@
 <script src="backend_API/Calculator.js?v=2"></script>
 <!-- 3D viewer: core (сцена/материалы/оркестратор) → builders (конструкции) →
      railing (ограждение/навесы). Общая глобальная область, порядок важен. -->
-<script src="viewer3d-core.js?v=136"></script>
+<script src="viewer3d-core.js?v=137"></script>
 <script src="viewer3d-builders.js?v=24"></script>
-<script src="viewer3d-railing.js?v=7"></script>
+<script src="viewer3d-railing.js?v=8"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=86"></script>
+<script src="nav-desktop.js?v=87"></script>
 </body>
 </html>

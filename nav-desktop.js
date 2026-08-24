@@ -9,19 +9,23 @@ let dActiveItem = null;     // currently selected sidebar item id
 let dEditorOpen = false;    // true when canvas editor is open (locks UI)
 const dConfigured = new Set(); // items that completed configuration
 
-// All sidebar items
+// All sidebar items.
+// hidden: true — раздел есть в коде, но в меню не показывается. Так временно убрана
+// «Отделка фасада» (TODO.md, этап 1 п.14): её редактор и расчёт ещё понадобятся,
+// поэтому код остаётся на месте.
 const D_SIDEBAR_ITEMS = [
   { id: 'terrace',       lbl: 'Терраса/Крыльцо',     hasEditor: true  },
   { id: 'railing',       lbl: 'Ограждения террасы',  hasEditor: true  },
   { id: 'steps',         lbl: 'Ступени',             hasEditor: true  },
   { id: 'paths',         lbl: 'Дорожки',             hasEditor: true  },
   { id: 'fence',         lbl: 'Забор',               hasEditor: true  },
-  { id: 'facade',        lbl: 'Отделка фасада',      hasEditor: true  },
+  { id: 'facade',        lbl: 'Отделка фасада',      hasEditor: true, hidden: true },
   { id: 'beds',          lbl: 'Грядки',              hasEditor: true  },
   { id: 'furniture',     lbl: 'Садовая мебель',      hasEditor: true  },
   { id: 'pool_terrace',  lbl: 'Терраса у бассейна',  hasEditor: true  },
-  { id: 'pier',          lbl: 'Причал',              hasEditor: true  },
 ];
+// Пункты, реально попадающие в меню (и в замер ширины левой панели).
+const D_MENU_ITEMS = D_SIDEBAR_ITEMS.filter(i => !i.hidden);
 
 // Canvas init functions map
 const D_CANVAS_INIT = {
@@ -29,7 +33,6 @@ const D_CANVAS_INIT = {
   steps:        () => initStepsCanvas(),
   pool_terrace: () => initRectCanvas('pool_terrace'),
   paths:        () => initPathsCanvas(),
-  pier:         () => initRectCanvas('pier'),
   fence:        () => { initSnapCanvas('fence'); _dSyncFenceHeight(); },
   railing:      () => initSnapCanvas('railing'),
   beds:         () => initBedsCanvas(),
@@ -54,7 +57,7 @@ function dGoTo(s) {
   // Хедер убран; «СМЕТА» — плавающая кнопка (см. _dSyncSummaryBtn).
   _dSyncSummaryBtn();
 
-  if (s === 1) _dInitHouseGrid();
+  if (s === 1) { _dInitHouseGrid(); _dSyncSelectNext(); }
   else if (s === 2) _dInitParamsView();
   else if (s === 3) _dInitWorkspace();
 }
@@ -81,7 +84,7 @@ function _dSyncSidebarWidth() {
   const titleW = widest(SIDEBAR_TITLES, 36, 400);
   // Строка меню: подпись 18px/700 (активный пункт жирнее) + паддинги кнопки 2×14
   // + рамки 2×2 + два зазора по 2px + две иконки 48px + паддинг списка 2×8.
-  const labelW = widest(D_SIDEBAR_ITEMS.map(i => i.lbl), 18, 700);
+  const labelW = widest(D_MENU_ITEMS.map(i => i.lbl), 18, 700);
   probe.remove();
   const w = Math.ceil(Math.max(titleW + 2 * SIDEBAR_PAD, labelW + 28 + 4 + 4 + 96 + 16));
   document.documentElement.style.setProperty('--sidebar-w', w + 'px');
@@ -295,7 +298,7 @@ function _dResetAllConfigurations() {
   // Ключи те же, что в state.js: пропущенный ключ (например railing) обнулял бы
   // весь редактор — S.pts[name].push падал бы на undefined.
   S.pts = { paths: [], fence: [], railing: [] };
-  for (const secId of Object.keys(RECT_SECTIONS)) {   // terrace, pool_terrace, pier
+  for (const secId of Object.keys(RECT_SECTIONS)) {   // terrace, pool_terrace
     secRects(secId).length = 0;
     setSecActiveIdx(secId, null);
   }
@@ -343,6 +346,14 @@ function _dCacheToggleDefaults() {
     // только оттуда (tgOn в state.js), DOM из viewer3d-* не трогается.
     if (tg.dataset.id) S.toggles[tg.dataset.id] = tg.classList.contains('on');
   });
+}
+
+// «Дальше» на первом экране показываем, только если дом уже выбран: при первом
+// заходе идти некуда, а на возврате повторный клик по карточке сбросил бы все
+// настройки конструкций (см. _dResetAllConfigurations ниже).
+function _dSyncSelectNext() {
+  const box = document.getElementById('d-select-actions');
+  if (box) box.classList.toggle('active', !!S.houseType);
 }
 
 function dSelectHouseAndGo(typeId) {
@@ -591,11 +602,12 @@ function dOnPathWidth() {
   if (typeof onParamChange === 'function') onParamChange();
 }
 
-// Высота настила террасы, см. Диапазон — 10 см … высота фундамента (TODO.md → ТЕРРАСА):
-// выше фундамента настил лезет на цоколь, ниже 10 см его не собрать.
+// Высота настила террасы, см. Диапазон — 15 см … высота фундамента (TODO.md, этап 1
+// п.2): выше фундамента настил лезет на цоколь, ниже 15 см его не собрать.
+const TERRACE_MIN_CM = 15;
 function dTerraceHeightRange() {
   const foundCm = parseFloat(document.getElementById('v-found')?.value || 80);
-  return { min: 10, max: Math.max(10, Math.round(foundCm)) };
+  return { min: TERRACE_MIN_CM, max: Math.max(TERRACE_MIN_CM, Math.round(foundCm)) };
 }
 
 function dSetTerraceHeight(cm) {
@@ -763,7 +775,7 @@ function _dRenderSidebar() {
   const list = document.getElementById('d-sidebar-list');
   // Вернуть перенесённые узлы до перерисовки — innerHTML их бы уничтожил.
   _dUnmountEditorControls();
-  list.innerHTML = D_SIDEBAR_ITEMS.map(item => {
+  list.innerHTML = D_MENU_ITEMS.map(item => {
     const isActive = dActiveItem === item.id;
     const isCfg = dConfigured.has(item.id);
     const isLocked = dEditorOpen && dActiveItem !== item.id;
@@ -1036,7 +1048,7 @@ function _dRenderPanelContent() {
 // Элементы с настилом — материал у каждого свой (S.elementMat[el]).
 // Забор здесь же: его планки текстурируются товаром как настил (остальные части
 // модуля красятся сплошным цветом в buildFence3d) — TODO.md → ЗАБОРЫ.
-const DECK_MAT_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'pier', 'fence',
+const DECK_MAT_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'fence',
                            'railing'];
 // Текущий активный элемент красится как настил? (Ограждение террасы — нет.)
 function _activeIsDeck() {
@@ -1169,7 +1181,7 @@ function _d3dLoadingRender() {
 // id = название цвета (стабилен между типами; tooltip = название из каталога).
 function _elementColors(elId) {
   let key = elId;
-  if (elId === 'paths' || elId === 'pool_terrace' || elId === 'pier') key = 'terrace';
+  if (elId === 'paths' || elId === 'pool_terrace') key = 'terrace';
   const map = (typeof ELEMENT_COLOR_NAMES !== 'undefined') ? ELEMENT_COLOR_NAMES : {};
   const names = map[key] || map.terrace || [];
   const hexMap = (typeof CATALOG_COLOR_HEX !== 'undefined') ? CATALOG_COLOR_HEX : {};
@@ -1735,7 +1747,7 @@ function _elementMetric(el) {
 //   linear — длина × 1.05 × цена/м.пог;
 //   piece  — количество × цена/шт.
 function _computeEstimate() {
-  const order = ['terrace', 'railing', 'steps', 'paths', 'pool_terrace', 'pier', 'fence',
+  const order = ['terrace', 'railing', 'steps', 'paths', 'pool_terrace', 'fence',
                  'beds', 'facade', 'furniture'];
   const rows = [];
   for (const el of order) {
@@ -2003,7 +2015,7 @@ function _projectObjects() {
   const lbl = id => (D_SIDEBAR_ITEMS.find(i => i.id === id) || {}).lbl || id;
   const objs = [];
 
-  for (const secId of Object.keys(RECT_SECTIONS)) {   // terrace, pool_terrace, pier
+  for (const secId of Object.keys(RECT_SECTIONS)) {   // terrace, pool_terrace
     if (!S.sections.includes(secId)) continue;
     const req = buildTerraceCalcRequest(secId);
     if (req.payload) objs.push({ type: CalculationType.TERRACE, name: lbl(secId), ...req.payload });
@@ -2079,11 +2091,9 @@ function buildTerraceCalcRequest(secId) {
   // там height только у ступеней. Продолжаем слать до ответа бэкендера: лишнее поле
   // расчёту не мешает, а если оно учитывается — терять его нельзя.
   const foundCm = parseFloat(document.getElementById('v-found')?.value || 80);
-  // Отметка настила: у пристроенной террасы — вровень с фундаментом; у отдельно
-  // стоящих фиксированная (та же, что в 3D: бассейн — как терраса, причал — 0.5 м).
-  let terraceHeight;
-  if (sec === 'pier') terraceHeight = 500;
-  else terraceHeight = isEmptyLot() ? 350 : Math.round(foundCm * 10);
+  // Отметка настила: у пристроенной террасы и у террасы у бассейна — вровень
+  // с фундаментом (та же отметка, что в 3D).
+  const terraceHeight = isEmptyLot() ? 350 : Math.round(foundCm * 10);
   return {
     payload: {
       vertices,
@@ -2322,7 +2332,7 @@ function dCloseSummary() {
 // обслуживали. getActive и ttg остаются: их использует viewer3d и index.html.)
 // ══════════════════════════════════════════════
 // Парных тумблеров не осталось: ограждение стало отдельным элементом проекта,
-// а навес переехал в его настройки (TODO.md → ОГРАЖДЕНИЯ 2–3).
+// а навес над террасой убран совсем (TODO.md, этап 1 п.5).
 const TG_PAIRS = {};
 function ttg(el) {
   el.classList.toggle('on');
