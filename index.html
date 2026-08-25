@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=30">
+<link rel="stylesheet" href="styles-desktop.css?v=35">
 </head>
 <body>
 
@@ -26,6 +26,11 @@
         <div class="hcp"><div class="ic">🌿</div>Пустой участок, без строений</div>
         <div class="hcl">Участок без дома</div>
       </div>
+    </div>
+    <!-- «Дальше» — только для возврата на первый экран: дом уже выбран, и повторно
+         кликать по карточке (со сбросом настроек) незачем. См. _dSyncSelectNext. -->
+    <div class="d-select-actions" id="d-select-actions">
+      <button class="d-btn d-btn-next" onclick="dGoTo(2)">Дальше →</button>
     </div>
   </div>
 </div>
@@ -54,12 +59,12 @@
       <div class="d-param-group">
         <div class="d-param-head">
           <span class="d-param-label">Высота фундамента (см)</span>
-          <input class="d-param-input" type="number" id="v-found" value="80" min="50" max="120"
+          <input class="d-param-input" type="number" id="v-found" value="80" min="15" max="120"
                  oninput="dOnParam()">
         </div>
-        <input class="d-param-range" type="range" id="r-found" value="80" min="50" max="120" step="10"
+        <input class="d-param-range" type="range" id="r-found" value="80" min="15" max="120" step="5"
                oninput="document.getElementById('v-found').value=this.value; dOnParam()">
-        <div class="d-param-unit"><span>50 см</span><span>120 см</span></div>
+        <div class="d-param-unit"><span>15 см</span><span>120 см</span></div>
       </div>
 
       <!-- Per-floor параметры (генерируются динамически на основе дескриптора) -->
@@ -122,16 +127,17 @@
             <div class="d-param-group">
               <div class="d-param-head">
                 <span class="d-param-label">Высота настила, см.</span>
-                <input class="d-param-input" type="number" id="v-terrace-h" min="10" step="5"
+                <input class="d-param-input" type="number" id="v-terrace-h" min="15" step="5"
                        oninput="dSetTerraceHeight(this.value)">
               </div>
-              <input class="d-param-range" type="range" id="r-terrace-h" min="10" step="5"
+              <input class="d-param-range" type="range" id="r-terrace-h" min="15" step="5"
                      oninput="dSetTerraceHeight(this.value)">
-              <div class="d-param-unit" id="d-terrace-h-hint"><span>10 см</span><span>80 см</span></div>
+              <div class="d-param-unit" id="d-terrace-h-hint"><span>15 см</span><span>80 см</span></div>
             </div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addRect('terrace')">Добавить</button>
-              <button class="d-canvas-btn" onclick="delActiveRect('terrace')">Удалить</button>
+              <button class="d-canvas-btn" onclick="addRect('terrace')">Ещё одна</button>
+              <button class="d-canvas-btn" onclick="delActiveRect('terrace')">Удалить выбранную</button>
+              <button class="d-canvas-btn" onclick="dResetSection('terrace')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('terrace')">Дальше →</button>
             </div>
           </div>
@@ -148,6 +154,7 @@
           <div class="d-canvas-footer">
             <div class="tg on" onclick="ttg(this)" data-id="steps-railing"><span class="tg-txt">Перила лестницы</span><div class="tg-ind"></div></div>
             <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="dResetSection('steps')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('steps')">Дальше →</button>
             </div>
           </div>
@@ -157,15 +164,15 @@
           <div class="d-canvas-header">
             <div>
               <div class="d-canvas-title">Грядки — размещение</div>
-              <div class="d-canvas-hint">Перетаскивайте грядку. «ДОБАВИТЬ» — новая грядка, «ПОВЕРНУТЬ» — развернуть выбранную, «УДАЛИТЬ» — убрать выбранную.</div>
+              <div class="d-canvas-hint">Грядку перетаскивайте мышью, клик по ней разворачивает её на 90°. «ЕЩЁ ОДНА» добавляет грядку, «УДАЛИТЬ ВЫБРАННУЮ» — убирает.</div>
             </div>
           </div>
           <div class="d-canvas-area" id="cw-beds"><canvas id="cv-beds"></canvas></div>
           <div class="d-canvas-footer">
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addBed()">Добавить</button>
-              <button class="d-canvas-btn" onclick="rotateActiveBed()">Повернуть</button>
-              <button class="d-canvas-btn" onclick="delActiveBed()">Удалить</button>
+              <button class="d-canvas-btn" onclick="addBed()">Ещё одна</button>
+              <button class="d-canvas-btn" onclick="delActiveBed()">Удалить выбранную</button>
+              <button class="d-canvas-btn" onclick="dResetSection('beds')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('beds')">Дальше →</button>
             </div>
           </div>
@@ -175,14 +182,17 @@
           <div class="d-canvas-header">
             <div>
               <div class="d-canvas-title">Терраса у бассейна — разметка</div>
-              <div class="d-canvas-hint">Отдельно стоящая терраса. Перетаскивайте прямоугольники за углы. Нажмите «ДОБАВИТЬ» чтобы добавить новый, «УДАЛИТЬ» — чтобы удалить выделенный.</div>
+              <div class="d-canvas-hint">Отдельно стоящая терраса: перетаскивайте прямоугольники за углы. «БАССЕЙН ▭» и «БАССЕЙН ○» ставят бассейн — его двигают за тело и меняют размер за угол; в настиле на его месте будет вырез. Повторное нажатие убирает бассейн.</div>
             </div>
           </div>
           <div class="d-canvas-area" id="cw-pool_terrace"><canvas id="cv-pool_terrace"></canvas></div>
           <div class="d-canvas-footer">
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addRect('pool_terrace')">Добавить</button>
-              <button class="d-canvas-btn" onclick="delActiveRect('pool_terrace')">Удалить</button>
+              <button class="d-canvas-btn" onclick="addRect('pool_terrace')">Ещё одна</button>
+              <button class="d-canvas-btn" onclick="delActiveRect('pool_terrace')">Удалить выбранную</button>
+              <button class="d-canvas-btn" onclick="dSetPool('rect')">Бассейн ▭</button>
+              <button class="d-canvas-btn" onclick="dSetPool('round')">Бассейн ○</button>
+              <button class="d-canvas-btn" onclick="dResetSection('pool_terrace')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('pool_terrace')">Дальше →</button>
             </div>
           </div>
@@ -192,7 +202,7 @@
           <div class="d-canvas-header">
             <div>
               <div class="d-canvas-title">Дорожки — разметка</div>
-              <div class="d-canvas-hint">Ставьте точки в углах дорожки. Нажмите «ДОБАВИТЬ» для новой линии, «ОТМЕНИТЬ» — чтобы убрать последнюю точку.</div>
+              <div class="d-canvas-hint">Участок дорожки уже намечен перед фасадом. Кликом ставьте новые точки, выбранную точку можно перетащить или удалить кнопкой. «ЕЩЁ ЛИНИЯ» начинает отдельную дорожку.</div>
             </div>
           </div>
           <div class="d-canvas-area" id="cw-paths"><canvas id="cv-paths"></canvas></div>
@@ -208,27 +218,10 @@
               <div class="d-param-unit"><span>60 см</span><span>300 см</span></div>
             </div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addBreak('paths')">Добавить</button>
-              <button class="d-canvas-btn" onclick="undoPt('paths')">Отменить</button>
-              <button class="d-canvas-btn" onclick="clrPts('paths')">Очистить</button>
+              <button class="d-canvas-btn" onclick="addBreak('paths')">Ещё линия</button>
+              <button class="d-canvas-btn" onclick="delLinePoint('paths')">Удалить точку</button>
+              <button class="d-canvas-btn" onclick="dResetSection('paths')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('paths')">Дальше →</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="d-center-canvas" id="d-canvas-pier">
-          <div class="d-canvas-header">
-            <div>
-              <div class="d-canvas-title">Причал — разметка</div>
-              <div class="d-canvas-hint">Отдельно стоящий настил над водой. Перетаскивайте прямоугольники за углы. Нажмите «ДОБАВИТЬ» чтобы добавить новый, «УДАЛИТЬ» — чтобы удалить выделенный.</div>
-            </div>
-          </div>
-          <div class="d-canvas-area" id="cw-pier"><canvas id="cv-pier"></canvas></div>
-          <div class="d-canvas-footer">
-            <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addRect('pier')">Добавить</button>
-              <button class="d-canvas-btn" onclick="delActiveRect('pier')">Удалить</button>
-              <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('pier')">Дальше →</button>
             </div>
           </div>
         </div>
@@ -237,14 +230,15 @@
           <div class="d-canvas-header">
             <div>
               <div class="d-canvas-title">Садовая мебель — точки размещения</div>
-              <div class="d-canvas-hint">Отмечайте точками, куда поставить мебель. Комплект мебели считается одним объектом. «ПОВЕРНУТЬ» — развернуть точку на 90°, стрелка указывает «перёд» мебели. «УДАЛИТЬ» — убрать выбранную точку. При выборе товара мебель ставится по очереди, начиная с активной точки.</div>
+              <div class="d-canvas-hint">Отмечайте точками, куда поставить мебель: клик по плану ставит точку, клик по готовой точке разворачивает её на 90° (стрелка — «перёд» мебели), перетаскивание двигает. Комплект мебели считается одним объектом; при выборе товара мебель ставится по очереди, начиная с активной точки.</div>
             </div>
           </div>
           <div class="d-canvas-area" id="cw-furniture"><canvas id="cv-furniture"></canvas></div>
           <div class="d-canvas-footer">
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="rotateActiveFurniture(1)">Повернуть</button>
-              <button class="d-canvas-btn" onclick="delActiveFurniture()">Удалить</button>
+              <button class="d-canvas-btn" onclick="addFurniturePoint()">Ещё одна</button>
+              <button class="d-canvas-btn" onclick="delActiveFurniture()">Удалить выбранную</button>
+              <button class="d-canvas-btn" onclick="dResetSection('furniture')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('furniture')">Дальше →</button>
             </div>
           </div>
@@ -254,16 +248,14 @@
           <div class="d-canvas-header">
             <div>
               <div class="d-canvas-title">Ограждения террасы — разметка</div>
-              <div class="d-canvas-hint">Ставьте точки в углах ограждения. Нажмите «ДОБАВИТЬ» для новой линии, «ОТМЕНИТЬ» — чтобы убрать последнюю точку.</div>
+              <div class="d-canvas-hint">Ограждение строится по свободному краю террасы автоматически, у лестницы разрывается само. Нажмите «ОБОЗНАЧИТЬ ВХОД», чтобы сделать проём, и перетаскивайте его точки по периметру.</div>
             </div>
           </div>
           <div class="d-canvas-area" id="cw-railing"><canvas id="cv-railing"></canvas></div>
           <div class="d-canvas-footer">
-            <div class="tg" onclick="ttg(this)" data-id="railing-roof"><span class="tg-txt">Навес</span><div class="tg-ind"></div></div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addBreak('railing')">Добавить</button>
-              <button class="d-canvas-btn" onclick="undoPt('railing')">Отменить</button>
-              <button class="d-canvas-btn" onclick="clrPts('railing')">Очистить</button>
+              <button class="d-canvas-btn" onclick="dRailingEntry()">Обозначить вход</button>
+              <button class="d-canvas-btn" onclick="dResetSection('railing')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('railing')">Дальше →</button>
             </div>
           </div>
@@ -281,6 +273,7 @@
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="dFacadeSelectAll()">Выбрать всё</button>
               <button class="d-canvas-btn" onclick="dFacadeClear()">Сбросить</button>
+              <button class="d-canvas-btn" onclick="dResetSection('facade')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('facade')">Дальше →</button>
             </div>
           </div>
@@ -290,7 +283,7 @@
           <div class="d-canvas-header">
             <div>
               <div class="d-canvas-title">Забор — разметка</div>
-              <div class="d-canvas-hint">Ставьте точки в углах забора. Нажмите «ДОБАВИТЬ» для новой линии, «ОТМЕНИТЬ» — чтобы убрать последнюю точку.</div>
+              <div class="d-canvas-hint">Участок забора уже намечен. Кликом ставьте новые точки, выбранную точку можно перетащить или удалить кнопкой. Ближе 3 м к дому и террасе забор не ставится — зона показана пунктиром. «КАЛИТКА» делает проём 1 м.</div>
             </div>
           </div>
           <div class="d-canvas-area" id="cw-fence"><canvas id="cv-fence"></canvas></div>
@@ -304,9 +297,10 @@
               <span class="bed-h-unit">м</span>
             </div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addBreak('fence')">Добавить</button>
-              <button class="d-canvas-btn" onclick="undoPt('fence')">Отменить</button>
-              <button class="d-canvas-btn" onclick="clrPts('fence')">Очистить</button>
+              <button class="d-canvas-btn" onclick="addBreak('fence')">Ещё линия</button>
+              <button class="d-canvas-btn" onclick="delLinePoint('fence')">Удалить точку</button>
+              <button class="d-canvas-btn" onclick="dFenceGate()">Калитка</button>
+              <button class="d-canvas-btn" onclick="dResetSection('fence')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('fence')">Дальше →</button>
             </div>
           </div>
@@ -328,24 +322,12 @@
       <div class="d-panel-header">
         <div class="d-panel-title" id="d-panel-title">Материалы</div>
       </div>
-      <!-- Фильтры приколочены, скроллится только список карточек. -->
+      <!-- Фильтры цвета и цены переехали в ЛЕВУЮ панель, под кнопку раздела
+           (TODO.md, этап 2 п.1) — здесь остался только суб-тумблер террасы. -->
       <div class="d-panel-body" id="d-panel-body">
         <div class="d-panel-filters">
           <!-- Sub-toggle (Терраса / Ограждение — only for terrace) -->
           <div class="d-panel-sub-toggle" id="d-panel-sub-toggle" style="display:none;"></div>
-
-          <!-- Color filter. Скрывается для мебели: у её товаров поле color пустое. -->
-          <div class="d-color-section" id="d-color-section">
-            <div class="d-color-title">Цвет:</div>
-            <div class="d-color-grid" id="d-color-grid"></div>
-          </div>
-
-          <!-- Price filter. Скрывается для мебели: тиры заданы в ₽/м.пог (доска),
-               у мебели цена за изделие — фильтр по ним бессмыслен. -->
-          <div class="d-color-section" style="margin-top:6px;" id="d-price-section">
-            <div class="d-color-title">Цена:</div>
-            <div class="d-price-grid" id="d-price-grid"></div>
-          </div>
         </div>
 
         <!-- Results (auto-shown) — единственный скроллящийся блок панели -->
@@ -364,6 +346,15 @@
 <!-- ═══ PHOTO OVERLAY (лупа на карточке товара) ═══ -->
 <div class="d-photo-overlay" id="d-photo-overlay" onclick="dHidePhoto()">
   <img id="d-photo-img" src="" alt="">
+</div>
+
+<!-- ═══ HINT OVERLAY (инструкция при первом заходе в редактор) ═══ -->
+<div class="d-hint-overlay" id="d-hint-overlay">
+  <div class="d-hint-box">
+    <div class="d-hint-title" id="d-hint-title"></div>
+    <div class="d-hint-text" id="d-hint-text"></div>
+    <button class="d-btn d-btn-next" onclick="dHideEditorHint()">Понятно</button>
+  </div>
 </div>
 
 <!-- ═══ SUMMARY OVERLAY ═══ -->
@@ -389,8 +380,8 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=48"></script>
-<script src="canvas.js?v=46"></script>
+<script src="state.js?v=56"></script>
+<script src="canvas.js?v=52"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=85"></script>
 <!-- Каталожный API: домен выбирается по хосту.
@@ -412,11 +403,11 @@
 <script src="backend_API/Calculator.js?v=2"></script>
 <!-- 3D viewer: core (сцена/материалы/оркестратор) → builders (конструкции) →
      railing (ограждение/навесы). Общая глобальная область, порядок важен. -->
-<script src="viewer3d-core.js?v=136"></script>
-<script src="viewer3d-builders.js?v=23"></script>
-<script src="viewer3d-railing.js?v=7"></script>
+<script src="viewer3d-core.js?v=142"></script>
+<script src="viewer3d-builders.js?v=33"></script>
+<script src="viewer3d-railing.js?v=10"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=86"></script>
+<script src="nav-desktop.js?v=97"></script>
 </body>
 </html>

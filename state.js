@@ -13,7 +13,6 @@ const SECS = [
   {id:'beds',         lbl:'Грядки',             req:'beds'},
   {id:'furniture',    lbl:'Мебель',             req:'furniture'},
   {id:'pool_terrace', lbl:'Терраса у бассейна', req:'pool_terrace'},
-  {id:'pier',         lbl:'Причал',             req:'pier'},
 ];
 
 // Секции с ПРЯМОУГОЛЬНЫМ редактором (терраса и две её отдельно стоящие копии).
@@ -21,7 +20,7 @@ const SECS = [
 // Отличие только в примыкании к дому:
 //   • terrace — пристраивается к дому: кромки липнут к стенам, в расчёт вершины
 //     уходят с vertexType 'house';
-//   • pool_terrace / pier — ОТДЕЛЬНО СТОЯЩИЕ: снап только к сетке и к собственным
+//   • pool_terrace — ОТДЕЛЬНО СТОЯЩАЯ: снап только к сетке и к собственным
 //     блокам, все вершины 'free', в 3D направление досок берётся по длинной стороне.
 // rects/active — имена полей S; colors — палитра плана (свой цвет у каждой секции).
 const RECT_SECTIONS = {
@@ -34,11 +33,6 @@ const RECT_SECTIONS = {
     rects: 'poolRects', active: 'activePoolRect', house: false,
     label: 'Терраса у бассейна', short: 'Терр. бассейна',
     fill: 'rgba(0,80,200,.10)', stroke: '#3a63b0', bgStroke: 'rgba(0,80,200,.5)',
-  },
-  pier: {
-    rects: 'pierRects', active: 'activePierRect', house: false,
-    label: 'Причал', short: 'Причал',
-    fill: 'rgba(26,122,204,.10)', stroke: '#2a7ec4', bgStroke: 'rgba(26,122,204,.5)',
   },
 };
 
@@ -93,7 +87,7 @@ const CATALOG_COLOR_HEX = {
 };
 
 // Набор цветов на тип элемента (имена из COLORS.md). railing — ограждение террасы
-// (отдельный элемент проекта). paths/pool_terrace/pier берут набор террасной доски.
+// (отдельный элемент проекта). paths/pool_terrace берут набор террасной доски.
 const ELEMENT_COLOR_NAMES = {
   // Терраса = ДПК-набор + цвета МПК-доски (раздел 2329 доступен из селектора).
   terrace: ['Венге', 'Серый', 'Антрацит', 'Орех', 'Тик', 'Красный', 'Песочный',
@@ -147,7 +141,7 @@ const CATALOG_SECTIONS = [
 
 // Дефолтный раздел каталога для каждого элемента проекта (sidebar) → bitrix_id.
 const CONSTRUCTION_TO_SECTION = {
-  terrace: 2314, paths: 2314, pool_terrace: 2314, pier: 2314,
+  terrace: 2314, paths: 2314, pool_terrace: 2314,
   steps: 2330, beds: 2357, fence: 2348, facade: 2680, furniture: 2430,
   railing: 2331,   // «Ограждения для террасы из ДПК» — отдельный элемент проекта
 };
@@ -183,6 +177,15 @@ const SECTION_TAG_ONLY = new Set([2430, 2330]);
 
 // Материалы дома (шаг «Параметры дома»). Образцы — квадраты: с текстурой (img из
 // assets/) или однотонные (color). id используются в 3D (_houseTexSet в viewer3d-core).
+// Палитра дома: один набор на стены, фундамент и рамы (TODO.md, этап 1 п.10).
+const HOUSE_COLORS = [
+  { id: 'white',    color: '#ffffff' },   // белый
+  { id: 'beige',    color: '#c7ba95' },   // бежевый
+  { id: 'gray',     color: '#7e7e7e' },   // нейтрально серый
+  { id: 'brown',    color: '#61564d' },   // коричневый
+  { id: 'darkgray', color: '#1d2630' },   // холодный тёмно-серый
+];
+
 const HOUSE_MATERIALS = {
   roof: {
     label: 'Материал крыши',
@@ -192,36 +195,12 @@ const HOUSE_MATERIALS = {
       { id: 'metal_red',   img: 'assets/roof_diff_03.jpg' }, // металл красный
     ],
   },
-  // Фундамент и стены — только цвет, без текстур (TODO). Значения продублированы
-  // в _houseTexSet (viewer3d-core.js) — менять синхронно, иначе образец в UI
-  // разойдётся с цветом в 3D.
-  base: {
-    label: 'Цвет фундамента',
-    items: [
-      { id: 'beige',    color: '#d9c9a8' },                  // бежевый
-      { id: 'brown',    color: '#7a5533' },                  // коричневый
-      { id: 'darkgray', color: '#4a4a4a' },                  // тёмно-серый
-    ],
-  },
-  wall: {
-    label: 'Цвет стен',
-    items: [
-      { id: 'white', color: '#f2f0ec' },                     // белый
-      { id: 'beige', color: '#efe2c8' },                     // бежевый
-      { id: 'brown', color: '#7a5533' },                     // коричневый
-    ],
-  },
-  // Рамы окон и полотна дверей (меши с материалами mat_frame*/mat_door). Текстур нет,
-  // только цвет; те же значения продублированы в _houseTexSet (viewer3d-core.js) —
-  // менять синхронно, иначе образец в UI разойдётся с цветом в 3D.
-  frame: {
-    label: 'Материал рам',
-    items: [
-      { id: 'wood',  color: '#4a2f18' },                     // текущий (дерево)
-      { id: 'white', color: '#f2f2f0' },                     // белый
-      { id: 'dark',  color: '#2b1a0d' },                     // тёмно-коричневый
-    ],
-  },
+  // Стены, фундамент и рамы — ОДНА палитра из пяти цветов (TODO.md, этап 1 п.10),
+  // без текстур. Значения продублированы в _houseTexSet (viewer3d-core.js) — менять
+  // синхронно, иначе образец в UI разойдётся с цветом в 3D.
+  base: { label: 'Цвет фундамента', items: HOUSE_COLORS },
+  wall: { label: 'Цвет стен',       items: HOUSE_COLORS },
+  frame: { label: 'Цвет рам',       items: HOUSE_COLORS },
 };
 // Ключ группы HOUSE_MATERIALS ↔ поле состояния: '<kind>Mat' (roofMat, baseMat,
 // wallMat, frameMat). На этом соглашении держатся _dRenderHouseMaterials и
@@ -284,8 +263,6 @@ const S = {
   // Терраса у бассейна и причал — тот же редактор, отдельно стоящие (RECT_SECTIONS).
   poolRects: [],
   activePoolRect: null,
-  pierRects: [],
-  activePierRect: null,
   // Ступени: один rect (положение + ширина = от пользователя; глубина в 3D
   // пересчитывается автоматически из количества подступенков).
   steps: { ...DEFAULT_STEPS_RECT },
@@ -311,13 +288,31 @@ const S = {
   curSec: 0,
   // matSubMode удалён вместе с переключателем ТЕРРАСА/ОГРАЖДЕНИЕ в каталоге:
   // ограждение — отдельный элемент проекта со своим разделом каталога.
-  catColors: new Set(),
-  catPrices: new Set(),  // выбранные ценовые тиры (можно несколько)
+  // Фильтры ограждения (TODO.md, этап 2 п.5): вид крышки столба и его сечение.
+  // Сечение влияет на 3D; по виду крышки бэкенд атрибута не отдаёт — фильтруем
+  // товары по названию, см. _railingFilterProducts в nav-desktop.js.
+  railFilters: { cap: null, postW: null },
+  // Фильтры грядок: высота борта (мм) и тип крепежа. Высота применяется к 3D
+  // (S.bedH), тип крепежа — отбор товара по названию, см. _bedFilterProducts.
+  bedFilters: { h: null, mount: null },
+  // Бассейн на террасе у бассейна (TODO.md, этап 2 п.14): прямоугольный или круглый.
+  // Координаты плана; у круглого w === h (диаметр). null — бассейна нет.
+  pool: null,
+  // Калитка в заборе (TODO.md, этап 2 п.8): точка на ломаной, вокруг неё проём
+  // фиксированной ширины FENCE_GATE_W. null — калитки нет.
+  fenceGate: null,
+  // «Вход» в ограждении террасы — разрыв, заданный двумя точками на периметре
+  // (доли длины главной петли, TODO.md этап 2 п.4). null — входа нет.
+  railingEntry: null,
+  // Фильтры каталога — СВОИ у каждого раздела (TODO.md, этап 2 п.1): выбранный
+  // цвет террасной доски не должен обнулять выдачу в заборе. Ключ — id пункта меню,
+  // значение — { colors:Set, prices:Set }. Доступ через catFilter() ниже.
+  catFilters: {},
   catSection: null,    // выбранный раздел каталога (bitrix_id) или null = дефолт по элементу
   catShowResults: false,
   estimate: {},        // elementId -> { id, name, price } — выбранный в смету товар по элементу
-  // Тумблеры canvas-редакторов (id из data-id → bool): 'railing-roof',
-  // 'steps-railing', 'railing-roof'… Зеркалируются из DOM
+  // Тумблеры canvas-редакторов (id из data-id → bool): 'steps-railing',
+  // 'porch-canopy'… Зеркалируются из DOM
   // в ttg/_dCacheToggleDefaults — 3D-слой читает ТОЛЬКО отсюда (tgOn), не DOM.
   toggles: {},
   pathWidth: 120,      // ширина дорожки, см (инпут v-paths-width зеркалится сюда)
@@ -333,12 +328,38 @@ const S = {
   // материале (S.elementMat.facade) = «весь фасад». Материал панелей — S.elementMat.facade.
   wallZones: {},
   // Материалы дома (шаг «Параметры дома»).
-  roofMat: 'tile',     // tile | metal_green | metal_red
-  baseMat: 'beige',    // beige | brown | darkgray (только цвет, без текстур)
-  wallMat: 'beige',    // white | beige | brown (только цвет, без текстур)
-  frameMat: 'wood',    // wood | white | dark — рамы окон и двери
+  roofMat: 'tile',     // tile | metal_green | metal_red (единственная группа с текстурами)
+  // Стены, фундамент и рамы — общая палитра HOUSE_COLORS:
+  // white | beige | gray | brown | darkgray (только цвет, без текстур).
+  baseMat: 'beige',
+  wallMat: 'white',
+  frameMat: 'brown'
 };
 // (TOTAL и глобальный step удалены — прогресс-бар мобильного wizard'а.)
+
+// Варианты фильтров ограждения (TODO.md, этап 2 п.5).
+const RAIL_CAP_TYPES = [
+  { id: 'plastic', lbl: 'Пластмасса', re: /пластик|пластмасс|plastic|пвх/i },
+  { id: 'dpk',     lbl: 'ДПК',        re: /дпк|wpc|композит/i },
+  { id: 'metal',   lbl: 'Металл',     re: /металл|алюмин|сталь|metal/i },
+];
+const RAIL_POST_WIDTHS = [100, 125];   // мм
+
+// Фильтры грядок (TODO.md, этап 2 п.11): высота борта и тип крепежа.
+const BED_HEIGHTS = [150, 200, 225, 270, 300];   // мм
+const BED_MOUNTS = [
+  { id: 'plastic_hinge', lbl: 'Пластиковый шарнир', re: /шарнир|hinge/i },
+  { id: 'plastic_angle', lbl: 'Пластиковый угол',   re: /пластик\w*\s+угол|пластиков\w*\s+уголок/i },
+  { id: 'metal_angle',   lbl: 'Металлический угол', re: /металл\w*\s+угол|металлическ\w*\s+уголок/i },
+];
+
+// Фильтры каталога выбранного раздела (создаются лениво). secId — id пункта меню.
+function catFilter(secId) {
+  const key = secId || '_';
+  let f = S.catFilters[key];
+  if (!f) { f = S.catFilters[key] = { colors: new Set(), prices: new Set() }; }
+  return f;
+}
 
 // Участок без дома. Единый источник истины для canvas.js / viewer3d-core.js:
 // десктоп хранит в S.houseType typeId ('type_NN') или 'no_house' («Пустой участок»);

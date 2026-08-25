@@ -1,21 +1,21 @@
 // ══════════════════════════════════════════════
-// VIEWER3D-RAILING.JS — периметр террасы, ограждение, навесы
+// VIEWER3D-RAILING.JS — периметр террасы и ограждение
 // Выделен из viewer3d-core.js:
 //   • terracePerimeterSegments + skip-диапазоны (стены дома / проём ступеней /
 //     стыки террасных блоков)
 //   • union-контур террасных блоков (_terraceUnionLoops), орто-инсеты
-//   • buildRailing3d — GLB-секции mod_railing, высокие столбы-опоры навеса
-//   • навесы террасы (_terraceCanopyParams, _buildCanopySlab, buildTerraceCanopies)
+//   • buildRailing3d — GLB-секции mod_railing
+// (Навес над террасой убран по TODO.md, этап 1 п.5: вместе с ним ушли высокие
+// столбы-опоры, плиты навеса и колонны.)
 // Общая глобальная область видимости с остальными viewer3d-* (см. шапку
 // viewer3d-builders.js); подключается последним из трёх.
 // ══════════════════════════════════════════════
 
 // ══════════════════════════════════════════════
-// ПЕРИМЕТР ТЕРРАСЫ — общий расчёт для перил И опор навеса.
+// ПЕРИМЕТР ТЕРРАСЫ — расчёт сегментов для перил.
 // Возвращает массив сегментов {ax,az,bx,bz} по внешнему контуру террасного rect,
 // исключая участки: у стен дома (pad 0.30 м), у входа на ступени (pad 0.40 м),
-// на стыках с другими террасными rect'ами. Перила рисуются по этим сегментам;
-// колонны навеса ставятся по их концам — поэтому опоры всегда на углах перил.
+// на стыках с другими террасными rect'ами. Перила рисуются по этим сегментам.
 // ══════════════════════════════════════════════
 
 // t-диапазоны на сегменте, прилегающие к одному из targetEdges (параллельны ~6° И ближе pad).
@@ -159,53 +159,6 @@ const RAIL_INSET = 0.10;
 // навеса на углу проёма встают соосно с перилами лестницы.
 const STAIR_RAIL_INSET = 0.12;
 
-// Возвращает прямоугольный полигон, сжатый внутрь на inset со всех сторон
-// (порядок углов как у исходного rect). Для маленьких rect inset ограничен.
-function _insetWorldRect(worldPts, inset) {
-  const minX = Math.min(...worldPts.map(p => p.x)), maxX = Math.max(...worldPts.map(p => p.x));
-  const minZ = Math.min(...worldPts.map(p => p.z)), maxZ = Math.max(...worldPts.map(p => p.z));
-  const ix = Math.min(inset, (maxX - minX) / 2 - 0.05);
-  const iz = Math.min(inset, (maxZ - minZ) / 2 - 0.05);
-  return [
-    { x: minX + ix, z: minZ + iz },
-    { x: maxX - ix, z: minZ + iz },
-    { x: maxX - ix, z: maxZ - iz },
-    { x: minX + ix, z: maxZ - iz },
-  ];
-}
-
-const CANOPY_COL_SPACING = 2.5;   // шаг промежуточных колонн навеса на длинных пролётах
-const CANOPY_COL_HALF    = 0.07;  // половина сечения колонны (colT/2) — для обхода балясинами
-
-// Точки колонн навеса для inset-периметра: концы сегментов перил (углы + края проёма
-// под лестницу) + промежуточные на длинных пролётах, минус точки у стены дома.
-// Общая для навеса (ставит колонны) и перил (обходит колонны балясинами).
-function _terraceColumnPoints(insetPts, houseL, houseW, otherRects) {
-  const segs = terracePerimeterSegments(insetPts, houseL, houseW, otherRects || []);
-  const pts = [];
-  const add = (x, z) => { if (!pts.some(p => Math.hypot(p.x - x, p.z - z) < 0.30)) pts.push({ x, z }); };
-  for (const s of segs) {
-    add(s.ax, s.az);
-    add(s.bx, s.bz);
-    const len = Math.hypot(s.bx - s.ax, s.bz - s.az);
-    if (len > CANOPY_COL_SPACING * 1.5) {
-      const nMid = Math.floor(len / CANOPY_COL_SPACING);
-      for (let j = 1; j < nMid; j++) {
-        const t = j / nMid;
-        add(s.ax + (s.bx - s.ax) * t, s.az + (s.bz - s.az) * t);
-      }
-    }
-  }
-  // Колонны у стены дома не нужны (навес примыкает к стене).
-  const houseEdges = _railHouseEdges();
-  const wallSkipDist = 0.55;
-  return pts.filter(p => !houseEdges.some(([ax, az, bx, bz]) => {
-    const dx = bx - ax, dz = bz - az, l2 = dx*dx + dz*dz; if (l2 < 1e-6) return false;
-    let t = ((p.x - ax)*dx + (p.z - az)*dz) / l2; t = Math.max(0, Math.min(1, t));
-    return Math.hypot(p.x - (ax + t*dx), p.z - (az + t*dz)) < wallSkipDist;
-  }));
-}
-
 // Единый контур ОБЪЕДИНЕНИЯ террасных блоков (axis-aligned rect'ы) → массив орто-полигонов
 // (петель) в мире. Так перила/балясины строятся по внешнему периметру всей террасы без
 // разрывов на стыках блоков (раньше каждый блок строился отдельно → дырки на границах).
@@ -275,17 +228,14 @@ function _insetOrthoPolygon(poly, d) {
 
 // Ограждение террасы из GLB-секций (mod_railing): по ЕДИНОМУ контуру террасы столбы (post)
 // секциями фикс. ширины (~1 м, одинаковы везде) + узкий добор; перила (rails) тянутся масштабом,
-// балясины (нативное сечение, число по шагу ~0.1 м) — в каждой секции. При навесе ВЫСОКИЕ столбы
-// (до низа навеса) на углах сегмента и каждые ~2 м — они же опоры навеса. Высота высокого столба —
-// из РЕАЛЬНОЙ плиты навеса рейкастом (`canopyUndersideY`), а не аналитики: на стыках блоков плита
-// обрезана по диагонали, аналитика (max по bbox) промахивалась и столб протыкал навес.
-// worldOutline — орто-полигон периметра всей террасы (не инсетнутый); canopyUndersideY(x,z)->Y|null.
+// балясины (нативное сечение, число по шагу ~0.1 м) — в каждой секции.
+// worldOutline — орто-полигон периметра всей террасы (не инсетнутый).
 // segsOverride — готовые сегменты {ax,az,bx,bz}: так строится ограждение по
 // НАРИСОВАННОЙ ломаной (раздел «Ограждения»). Без него сегменты считаются по
 // контуру террасы, как раньше (инсет + пропуски у стен дома и лестницы).
 // matOverride — материал выбранного товара ограждения (S.elementMat.railing через
 // _resolveDeckMat). Без него — прежний цвет колонн крыльца.
-function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopyUndersideY, segsOverride, matOverride){
+function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, segsOverride, matOverride){
   if (!_railingCache || !_railingCache.rails || !_railingCache.post) return;  // GLB ещё не загружен
   if (!segsOverride && (!worldOutline || worldOutline.length < 3)) return;
   const up = new THREE.Vector3(0, 1, 0);
@@ -296,7 +246,6 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopy
 
   const segs = segsOverride
     || terracePerimeterSegments(_insetOrthoPolygon(worldOutline, RAIL_INSET), houseL, houseW, []);
-  const canopyOn = !!canopyUndersideY;
 
   function placeGeo(geo, m4) {
     const g = geo.clone(); g.applyMatrix4(m4);
@@ -316,47 +265,23 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopy
     return m;
   }
 
-  // Высокий столб-опора до низа навеса (box). Высоту берём по РЕАЛЬНОЙ плите навеса над точкой
-  // (рейкаст), сэмплируя чуть внутрь по нормали сегмента (nx,nz) — иначе на кромке луч скользит
-  // мимо края плиты. Нет навеса над точкой → null (ставится обычный столб, без протыкания).
-  function makeTallPost(px, pz, nx, nz) {
-    if (!canopyUndersideY) return null;
-    let yU = canopyUndersideY(px + nx * 0.25, pz + nz * 0.25);
-    if (yU === null) yU = canopyUndersideY(px, pz);
-    if (yU === null) return null;
-    const h = yU - deckHeight;
-    if (!isFinite(h) || h <= RAIL_POST_H) return null;   // ниже обычного столба — смысла нет
-    const colT = 0.10;
-    const b = new THREE.Mesh(new THREE.BoxGeometry(colT, h, colT), railMat);
-    b.position.set(px, deckHeight + h / 2, pz);
-    b.castShadow = b.receiveShadow = true;
-    parent.add(b); threeState.railingMeshes.push(b);
-    return b;
-  }
-  function removeMesh(m) {
-    if (!m) return;
-    if (m.parent) m.parent.remove(m);
-    const a = threeState.railingMeshes, k = a.indexOf(m); if (k >= 0) a.splice(k, 1);
-    if (m.geometry) m.geometry.dispose();
-  }
-  // Ставит столб с дедупом по общему реестру (стыки rect-ов): если рядом уже есть столб —
-  // не дублируем; короткий апгрейдим до высокого, если новый должен быть высоким.
-  function placePostAt(px, pz, wantTall, ux, uz, nx, nz) {
+  // Ставит столб с дедупом по общему реестру (стыки rect-ов): если рядом уже есть
+  // столб — не дублируем. Высоких столбов-опор больше нет: навес над террасой убран
+  // (TODO.md, этап 1 п.5), все столбы ограждения одной высоты.
+  // Сечение столба — из фильтра раздела (TODO.md, этап 2 п.5). Родное сечение модуля
+  // 100 мм, поэтому 125 мм = масштаб 1.25 В ПЛАНЕ (по X и Z), высота не меняется.
+  const postK = (typeof S !== 'undefined' && S.railFilters && S.railFilters.postW)
+    ? S.railFilters.postW / 100 : 1;
+  function placePostAt(px, pz, ux, uz) {
     if (_railPostReg) {
       for (const e of _railPostReg) {
-        if (Math.hypot(e.x - px, e.z - pz) < RAIL_POST_MERGE) {
-          if (!e.tall && wantTall) {            // апгрейд короткого до высокого
-            const t = makeTallPost(px, pz, nx, nz);
-            if (t) { removeMesh(e.mesh); e.mesh = t; e.tall = true; }
-          }
-          return;                               // существующий столб покрывает точку
-        }
+        if (Math.hypot(e.x - px, e.z - pz) < RAIL_POST_MERGE) return;   // точка уже покрыта
       }
     }
-    let mesh = wantTall ? makeTallPost(px, pz, nx, nz) : null;
-    const tall = !!mesh;
-    if (!mesh) { placeGeo(_railingCache.post, mat(px, pz, ux, uz, 1)); mesh = threeState.railingMeshes[threeState.railingMeshes.length - 1]; }
-    if (_railPostReg) _railPostReg.push({ x: px, z: pz, tall, mesh });
+    const m = mat(px, pz, ux, uz, 1);
+    if (postK !== 1) m.multiply(new THREE.Matrix4().makeScale(postK, 1, postK));
+    placeGeo(_railingCache.post, m);
+    if (_railPostReg) _railPostReg.push({ x: px, z: pz });
   }
 
   for (const s of segs) {
@@ -365,29 +290,16 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopy
     if (L < 0.20) continue;
     const ux = dx / L, uz = dz / L;
     // Секции фиксированной ширины ~1 м (одинаковы на всех сегментах) + один узкий «добор»
-    // в конце (с коротким столбом), если длина не делится на W нацело. Концы — точно на углах.
+    // в конце, если длина не делится на W нацело. Концы — точно на углах.
     const W = RAIL_SECTION_W;
     const nFull = Math.max(1, Math.floor(L / W + 1e-6));
     const rem = L - nFull * W;
     const pos = [];
     for (let i = 0; i <= nFull; i++) pos.push(i * W);
-    let hasLeftover = false;
-    if (rem > 0.15) { pos.push(L); hasLeftover = true; }   // узкая добор-секция
+    if (rem > 0.15) pos.push(L);                           // узкая добор-секция
     else pos[pos.length - 1] = L;                          // мелкий остаток — растворяем в последней
-    const lastIdx = pos.length - 1;
-    // Высокие столбы (при навесе): на углах + каждые 2 м ПО РАССТОЯНИЮ (чётные метры).
-    // Узкий добор не делаем высоким — его внутренний столб короткий (по просьбе: можно узкую секцию).
-    const isTall = i => {
-      if (!canopyOn) return false;
-      if (i === 0 || i === lastIdx) return true;            // углы сегмента
-      if (hasLeftover && i === lastIdx - 1) return false;   // вход в узкий добор — короткий
-      const k = Math.round(pos[i] / W);
-      return Math.abs(pos[i] - k * W) < 0.05 && k % 2 === 0;
-    };
-
-    const nx = -uz, nz = ux;   // внутренняя нормаль сегмента (для сэмпла навеса чуть внутрь)
     for (let i = 0; i < pos.length; i++) {
-      placePostAt(s.ax + ux * pos[i], s.az + uz * pos[i], isTall(i), ux, uz, nx, nz);
+      placePostAt(s.ax + ux * pos[i], s.az + uz * pos[i], ux, uz);
     }
     for (let k = 0; k < pos.length - 1; k++) {
       const t0 = pos[k], gap = pos[k + 1] - pos[k];
@@ -414,227 +326,10 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, canopy
   }
 }
 
-// Навес над террасой — вальмовая (hip) крыша над bbox полигона + колонны
-// по периметру (на углах и с шагом ~2.5 м по длинным рёбрам).
-// Высота согласована с навесом крыльца: низ на 2.30 м над настилом, ридж на 2.60 м.
-// Параметры одностороннего навеса одного rect: bbox, ось/сторона ridge и план-высота
-// низа плиты planeH(x,z) (canopyHigh у стены-ridge → canopyLow у дальней кромки-eave).
-function _terraceCanopyParams(worldPts, houseL, houseW) {
-  const CANOPY_LOW = 2.30, CANOPY_HIGH = 2.60;
-  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  for (const p of worldPts) {
-    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
-    if (p.z < minZ) minZ = p.z; if (p.z > maxZ) maxZ = p.z;
-  }
-  const W = maxX - minX, D = maxZ - minZ;
-  const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
-
-  // Опорная стена дома → ось ridge + сторона (ребро дома, ближайшее к центру bbox).
-  const housePoly = (_housePoly && _housePoly.corners) ? _housePoly.corners : null;
-  let ridgeAlongX, ridgeAtMaxZ = false, ridgeAtMaxX = false;
-  if (housePoly && housePoly.length >= 2) {
-    let bestDist = Infinity, bestPz = cz, bestPx = cx, bestDx = 0, bestDz = 0;
-    for (let i = 0; i < housePoly.length; i++) {
-      const a = housePoly[i], b = housePoly[(i+1) % housePoly.length];
-      const dx = b.x - a.x, dz = b.z - a.z, lenSq = dx*dx + dz*dz;
-      if (lenSq < 1e-6) continue;
-      let t = ((cx - a.x)*dx + (cz - a.z)*dz) / lenSq; t = Math.max(0, Math.min(1, t));
-      const px = a.x + t*dx, pz = a.z + t*dz, dist = Math.hypot(cx - px, cz - pz);
-      if (dist < bestDist) { bestDist = dist; bestPx = px; bestPz = pz; bestDx = dx; bestDz = dz; }
-    }
-    ridgeAlongX = Math.abs(bestDx) >= Math.abs(bestDz);
-    if (ridgeAlongX) ridgeAtMaxZ = (bestPz > cz); else ridgeAtMaxX = (bestPx > cx);
-  } else {
-    ridgeAlongX = (W >= D);   // fallback без дома
-  }
-  const dHL = CANOPY_HIGH - CANOPY_LOW;
-  const planeH = (x, z) => {
-    if (ridgeAlongX) {
-      const zr = ridgeAtMaxZ ? maxZ : minZ;
-      return CANOPY_HIGH - dHL * (D > 1e-6 ? Math.abs(z - zr) / D : 0);
-    }
-    const xr = ridgeAtMaxX ? maxX : minX;
-    return CANOPY_HIGH - dHL * (W > 1e-6 ? Math.abs(x - xr) / W : 0);
-  };
-  return { minX, maxX, minZ, maxZ, cx, cz, W, D, planeH, ridgeAlongX, ridgeAtMaxX, ridgeAtMaxZ };
-}
-
-// Обрезка выпуклого полигона foot (world {x,z}) полуплоскостью прямой через I→U,
-// оставляя сторону, где лежит keep-точка. Sutherland–Hodgman по одной грани.
-function _clipFootByDiagonal(foot, I, U, keep) {
-  const ex = U.x - I.x, ez = U.z - I.z;
-  const sideOf = (p) => ex * (p.z - I.z) - ez * (p.x - I.x);
-  const refSign = sideOf(keep) >= 0 ? 1 : -1;
-  const inside = (p) => sideOf(p) * refSign >= -1e-7;
-  const out = [];
-  for (let i = 0; i < foot.length; i++) {
-    const a = foot[i], b = foot[(i + 1) % foot.length];
-    const ina = inside(a), inb = inside(b);
-    if (ina) out.push(a);
-    if (ina !== inb) {
-      const sa = sideOf(a) * refSign, sb = sideOf(b) * refSign;
-      const t = sa / (sa - sb);
-      out.push({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
-    }
-  }
-  return out;
-}
-
-// Плита навеса по выпуклому плановому полигону foot, высоты из params.planeH.
-// Низ плиты = deckHeight + planeH, толщина canopyT вверх. Веер-триангуляция (выпуклый).
-// Материал клонируем с DoubleSide — не зависим от winding обрезанного полигона.
-function _buildCanopySlab(parent, foot, params, deckHeight, canopyT, matRoof) {
-  if (foot.length < 3) return;
-  const n = foot.length, pos = [], idx = [];
-  for (const p of foot) pos.push(p.x, deckHeight + params.planeH(p.x, p.z) + canopyT, p.z); // top [0..n-1]
-  for (const p of foot) pos.push(p.x, deckHeight + params.planeH(p.x, p.z),           p.z); // bottom [n..2n-1]
-  for (let i = 1; i < n - 1; i++) idx.push(0, i, i + 1);            // верх
-  for (let i = 1; i < n - 1; i++) idx.push(n, n + i + 1, n + i);    // низ (обратный обход)
-  for (let i = 0; i < n; i++) { const j = (i + 1) % n; idx.push(i, n + i, j, j, n + i, n + j); } // боковины
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setIndex(idx);
-  geo.computeVertexNormals();
-  const mat = matRoof.clone(); mat.side = THREE.DoubleSide;
-  const m = new THREE.Mesh(geo, mat);
-  m.castShadow = m.receiveShadow = true;
-  parent.add(m);
-  threeState.canopyMeshes.push(m);
-}
-
-// Навесы составной (multi-rect) террасы. Каждый rect → односкатная плита, обрезанная
-// по диагонали перекрытия с соседями: I — угол перекрытия, где оба ската высокие (у дома),
-// U — противоположный «уличный» угол (с колонной). Оставляем сторону центра rect → шов
-// идёт ровно по линии I→U («угловая колонна → угол дома»), плиты делят перекрытие без
-// двойного покрытия. Колонны — глобально, с дедупликацией на стыках.
-function buildTerraceCanopies(parent, M, rectPolys, deckHeight, houseL, houseW) {
-  const canopyT = 0.06, colT = 0.14;
-  const matRoof = M.roof || M.deck;
-  // Колонны навеса — из материала ОГРАЖДЕНИЯ (M.railing): навес и ограждение — одна
-  // конструкция, и стойка со стоковым цветом GLB рядом с товарным ограждением
-  // читалась как «без материала». Нет материала ограждения — прежний M.post.
-  const matPost = M.railing || M.post || M.step;
-  let colBuilt = 0;
-  const rects = rectPolys.map(pp => {
-    const wp = canvasToWorld(pp.filter(p => !p.break), houseL, houseW);
-    return { wp, P: _terraceCanopyParams(wp, houseL, houseW) };
-  }).filter(r => r.wp.length >= 3 && r.P.W > 0.3 && r.P.D > 0.3);
-
-  // Плиты с вальмовым швом на стыках перпендикулярных «крыльев».
-  // Работает и для перекрытия, и для стыка встык: для каждой пары перпендикулярных
-  // rect строится угловая «коробка» (по оси своего ската — диапазон P, по оси ската
-  // соседа — диапазон Q). I — угол у дома (оба конька), U — внешний угол (оба свеса,
-  // там колонна). Bbox ската расширяется до коробки, затем режется по диагонали I→U
-  // (оставляем сторону центра rect) → ровный шов «угловая колонна → угол дома».
-  for (let i = 0; i < rects.length; i++) {
-    const P = rects[i].P;
-    let exMinX = P.minX, exMaxX = P.maxX, exMinZ = P.minZ, exMaxZ = P.maxZ;
-    const clips = [];
-    for (let j = 0; j < rects.length; j++) {
-      if (j === i) continue;
-      const Q = rects[j].P;
-      if (P.ridgeAlongX === Q.ridgeAlongX) continue;   // нужны перпендикулярные скаты
-      // Угловой стык: диапазоны по обеим осям должны соприкасаться/перекрываться.
-      const xAdj = Math.min(P.maxX, Q.maxX) >= Math.max(P.minX, Q.minX) - 1e-6;
-      const zAdj = Math.min(P.maxZ, Q.maxZ) >= Math.max(P.minZ, Q.minZ) - 1e-6;
-      if (!xAdj || !zAdj) continue;
-      let bxMin, bxMax, bzMin, bzMax, I, U;
-      if (!P.ridgeAlongX) {            // P — уклон по X, Q — уклон по Z
-        bxMin = P.minX; bxMax = P.maxX; bzMin = Q.minZ; bzMax = Q.maxZ;
-        I = { x: P.ridgeAtMaxX ? P.maxX : P.minX, z: Q.ridgeAtMaxZ ? Q.maxZ : Q.minZ };
-        U = { x: P.ridgeAtMaxX ? P.minX : P.maxX, z: Q.ridgeAtMaxZ ? Q.minZ : Q.maxZ };
-      } else {                          // P — уклон по Z, Q — уклон по X
-        bxMin = Q.minX; bxMax = Q.maxX; bzMin = P.minZ; bzMax = P.maxZ;
-        I = { x: Q.ridgeAtMaxX ? Q.maxX : Q.minX, z: P.ridgeAtMaxZ ? P.maxZ : P.minZ };
-        U = { x: Q.ridgeAtMaxX ? Q.minX : Q.maxX, z: P.ridgeAtMaxZ ? P.minZ : P.maxZ };
-      }
-      if (bxMax - bxMin < 0.15 || bzMax - bzMin < 0.15) continue;
-      exMinX = Math.min(exMinX, bxMin); exMaxX = Math.max(exMaxX, bxMax);
-      exMinZ = Math.min(exMinZ, bzMin); exMaxZ = Math.max(exMaxZ, bzMax);
-      clips.push({ I, U });
-    }
-    let foot = [
-      { x: exMinX, z: exMinZ }, { x: exMaxX, z: exMinZ },
-      { x: exMaxX, z: exMaxZ }, { x: exMinX, z: exMaxZ },
-    ];
-    for (const c of clips) {
-      foot = _clipFootByDiagonal(foot, c.I, c.U, { x: P.cx, z: P.cz });
-      if (foot.length < 3) break;
-    }
-    rects[i].ext = { minX: exMinX, maxX: exMaxX, minZ: exMinZ, maxZ: exMaxZ };
-    _buildCanopySlab(parent, foot, P, deckHeight, canopyT, matRoof);
-  }
-
-  // Колонны: точки опор всех rect, дедуп на стыках. Высота = низ навеса над точкой =
-  // МИНИМУМ planeH по всем крыльям, что её накрывают (вальма — нижняя огибающая скатов).
-  // Брать максимум нельзя: у шва соседнее крыло near-конёк высоко, но реально над колонной
-  // — низкий скат другого крыла, и колонна пробивала бы навес.
-  const canopyHeightAt = (x, z) => {
-    let h = Infinity;
-    for (const r of rects) {
-      const e = r.ext || { minX: r.P.minX, maxX: r.P.maxX, minZ: r.P.minZ, maxZ: r.P.maxZ };
-      if (x >= e.minX - 1e-3 && x <= e.maxX + 1e-3 && z >= e.minZ - 1e-3 && z <= e.maxZ + 1e-3) {
-        h = Math.min(h, r.P.planeH(x, z));
-      }
-    }
-    return h;
-  };
-  const colPts = [];
-  for (let i = 0; i < rects.length; i++) {
-    const insetPts = _insetWorldRect(rects[i].wp, RAIL_INSET);
-    const otherRects = rects.filter((_, j) => j !== i).map(r => ({
-      minX: r.P.minX, maxX: r.P.maxX, minZ: r.P.minZ, maxZ: r.P.maxZ,
-    }));
-    for (const c of _terraceColumnPoints(insetPts, houseL, houseW, otherRects)) {
-      if (colPts.some(o => Math.hypot(o.x - c.x, o.z - c.z) < 0.30)) continue;  // дедуп по позиции
-      let h = canopyHeightAt(c.x, c.z);
-      if (!isFinite(h)) h = rects[i].P.planeH(c.x, c.z);
-      colPts.push({ x: c.x, z: c.z, h });
-    }
-  }
-  // Если ограждение размечено — опоры навеса даёт САМО ограждение (угловые столбы и
-  // каждый второй вытягиваются до низа навеса, см. makeTallPost в buildRailing3d),
-  // отдельные колонны не строим: иначе рядом со столбами вырастают «лишние» стойки.
-  // Проверяем разметку, а не тумблер: тумблера 'terrace-railing' в UI давно нет —
-  // ограждение стало отдельным элементом проекта со своей ломаной.
-  const railingOn = S.sections.includes('railing')
-    && (S.pts.railing || []).filter(p => !p.break).length >= 2;
-  const useGlbCol = (typeof HouseBuilder !== 'undefined'
-                     && HouseBuilder.placeScaledGlb
-                     && _houseCache.modules
-                     && _houseCache.modules.porch_column);
-  if (!railingOn) for (const p of colPts) {
-    colBuilt++;
-    if (useGlbCol) {
-      HouseBuilder.placeScaledGlb(
-        parent, _houseCache.modules, 'porch_column',
-        colT, p.h, colT,
-        p.x, deckHeight + p.h / 2, p.z,
-        0, 'mat_porch_column', PORCH_COLUMN_COLOR
-      );
-      // placeScaledGlb только переименовывает материалы модуля, цвет остаётся из GLB —
-      // накладываем материал ограждения на только что добавленную обёртку.
-      if (matPost) {
-        const w = parent.children[parent.children.length - 1];
-        if (w) w.traverse(c => { if (c.isMesh) c.material = matPost; });
-      }
-    } else {
-      const col = new THREE.Mesh(new THREE.BoxGeometry(colT, p.h, colT), matPost);
-      col.position.set(p.x, deckHeight + p.h / 2, p.z);
-      col.castShadow = col.receiveShadow = true;
-      parent.add(col);
-      threeState.canopyMeshes.push(col);
-    }
-  }
-  return colBuilt;
-}
-
-
-
 // Ограждение по ломаной, нарисованной пользователем (раздел «Ограждения»):
 // логика та же, что у забора, но в пределах террасы. Ни инсета, ни пропусков у
 // стен и лестницы здесь нет — где ставить перила, решает пользователь.
-function buildRailingLine3d(parent, pts, deckHeight, houseL, houseW, canopyUndersideY, mat) {
+function buildRailingLine3d(parent, pts, deckHeight, houseL, houseW, mat) {
   const segments = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [pts.filter(p => !p.break)];
   _railPostReg = [];                      // общий реестр столбов: дедуп на стыках линий
   for (const seg of segments) {
@@ -647,8 +342,212 @@ function buildRailingLine3d(parent, pts, deckHeight, houseL, houseW, canopyUnder
     }
     if (!segs.length) continue;
     try {
-      buildRailing3d(parent, null, deckHeight, houseL, houseW, canopyUndersideY, segs, mat);
+      buildRailing3d(parent, null, deckHeight, houseL, houseW, segs, mat);
     } catch (e) { console.error('[buildRailingLine3d]', e); }
   }
   _railPostReg = null;
+}
+
+// ══════════════════════════════════════════════
+// АВТОМАТИЧЕСКОЕ ОГРАЖДЕНИЕ ТЕРРАСЫ (TODO.md, этап 2 п.4)
+// Точки руками больше не ставятся: ограждение идёт по СВОБОДНОМУ периметру террасы —
+// union-контур блоков, инсет RAIL_INSET, без участков у стен дома и без проёма под
+// лестницу (то и другое уже умеет terracePerimeterSegments). Плюс «вход» — разрыв,
+// заданный двумя точками, которые пользователь двигает по периметру.
+// ══════════════════════════════════════════════
+
+// Мировые bbox блоков террасы.
+function _railTerraceRectsWorld(houseL, houseW) {
+  const rects = (typeof secRects === 'function') ? secRects('terrace') : [];
+  const out = [];
+  for (const r of rects) {
+    if (!r || r.w <= 0 || r.h <= 0) continue;
+    const w = canvasToWorld([
+      { x: r.x, y: r.y }, { x: r.x + r.w, y: r.y + r.h },
+    ], houseL, houseW);
+    out.push({
+      minX: Math.min(w[0].x, w[1].x), maxX: Math.max(w[0].x, w[1].x),
+      minZ: Math.min(w[0].z, w[1].z), maxZ: Math.max(w[0].z, w[1].z),
+    });
+  }
+  return out;
+}
+
+// Петли периметра ограждения (инсетнутые), мир. Первая — самая длинная: по ней
+// отсчитывается положение «входа».
+function railingLoopsWorld(houseL, houseW) {
+  const rects = _railTerraceRectsWorld(houseL, houseW);
+  if (!rects.length || typeof _terraceUnionLoops !== 'function') return [];
+  const loops = _terraceUnionLoops(rects)
+    .map(l => _insetOrthoPolygon(l, RAIL_INSET))
+    .filter(l => l && l.length >= 3);
+  const len = loop => {
+    let s = 0;
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[i], b = loop[(i + 1) % loop.length];
+      s += Math.hypot(b.x - a.x, b.z - a.z);
+    }
+    return s;
+  };
+  return loops.sort((a, b) => len(b) - len(a));
+}
+
+// Параметризация петли: накопленные длины вершин + полная длина.
+function railingLoopPath(loop) {
+  const cum = [0];
+  for (let i = 0; i < loop.length; i++) {
+    const a = loop[i], b = loop[(i + 1) % loop.length];
+    cum.push(cum[i] + Math.hypot(b.x - a.x, b.z - a.z));
+  }
+  return { loop, cum, L: cum[cum.length - 1] };
+}
+
+// Точка на петле по параметру t ∈ [0,1).
+function railingPointAt(path, t) {
+  const { loop, cum, L } = path;
+  if (!L) return { x: loop[0].x, z: loop[0].z };
+  let d = ((t % 1) + 1) % 1 * L;
+  for (let i = 0; i < loop.length; i++) {
+    if (d <= cum[i + 1] || i === loop.length - 1) {
+      const a = loop[i], b = loop[(i + 1) % loop.length];
+      const segLen = cum[i + 1] - cum[i];
+      const k = segLen > 1e-9 ? (d - cum[i]) / segLen : 0;
+      return { x: a.x + (b.x - a.x) * k, z: a.z + (b.z - a.z) * k };
+    }
+  }
+  return { x: loop[0].x, z: loop[0].z };
+}
+
+// Параметр ближайшей к точке позиции на петле.
+function railingParamOf(path, p) {
+  const { loop, cum, L } = path;
+  if (!L) return 0;
+  let best = 0, bestD = Infinity;
+  for (let i = 0; i < loop.length; i++) {
+    const a = loop[i], b = loop[(i + 1) % loop.length];
+    const dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz;
+    if (l2 < 1e-9) continue;
+    let k = ((p.x - a.x) * dx + (p.z - a.z) * dz) / l2;
+    k = Math.max(0, Math.min(1, k));
+    const qx = a.x + dx * k, qz = a.z + dz * k;
+    const d = Math.hypot(p.x - qx, p.z - qz);
+    if (d < bestD) { bestD = d; best = (cum[i] + Math.hypot(qx - a.x, qz - a.z)) / L; }
+  }
+  return best;
+}
+
+// Вычитает из отрезка [s0,s1] (в параметрах петли) циклический интервал входа.
+function _railCutEntry(s0, s1, e0, e1) {
+  if (e0 === null || e1 === null) return [[s0, s1]];
+  // Интервал входа может проходить через 0 — разворачиваем в один или два куска.
+  const cuts = (e0 <= e1) ? [[e0, e1]] : [[e0, 1], [0, e1]];
+  let parts = [[s0, s1]];
+  for (const [c0, c1] of cuts) {
+    const next = [];
+    for (const [a, b] of parts) {
+      if (c1 <= a || c0 >= b) { next.push([a, b]); continue; }   // не пересекается
+      if (c0 > a) next.push([a, c0]);
+      if (c1 < b) next.push([c1, b]);
+    }
+    parts = next;
+  }
+  return parts.filter(([a, b]) => b - a > 1e-6);
+}
+
+// Сегменты ограждения в МИРЕ: свободный периметр минус «вход».
+function railingAutoSegmentsWorld(houseL, houseW) {
+  const loops = railingLoopsWorld(houseL, houseW);
+  const out = [];
+  const entry = (typeof S !== 'undefined') ? S.railingEntry : null;
+  for (let li = 0; li < loops.length; li++) {
+    const loop = loops[li];
+    const path = railingLoopPath(loop);
+    const segs = terracePerimeterSegments(loop, houseL, houseW, []);
+    // Вход задан только на главной петле (li === 0).
+    const e0 = (li === 0 && entry) ? entry.t0 : null;
+    const e1 = (li === 0 && entry) ? entry.t1 : null;
+    for (const s of segs) {
+      const L = Math.hypot(s.bx - s.ax, s.bz - s.az);
+      if (L < 0.05 || !path.L) continue;
+      // Параметр середины точен: отрезок лежит на ребре петли.
+      const tMid = railingParamOf(path, { x: (s.ax + s.bx) / 2, z: (s.az + s.bz) / 2 });
+      const half = L / path.L / 2;
+      // Направление: параметр растёт вдоль обхода петли, поэтому концы могут
+      // поменяться местами — восстанавливаем по фактическим точкам.
+      const t0 = tMid - half, t1 = tMid + half;
+      for (const [a, b] of _railCutEntry(t0, t1, e0, e1)) {
+        const pa = railingPointAt(path, a), pb = railingPointAt(path, b);
+        if (Math.hypot(pb.x - pa.x, pb.z - pa.z) < 0.05) continue;
+        out.push({ ax: pa.x, az: pa.z, bx: pb.x, bz: pb.z });
+      }
+    }
+  }
+  return out;
+}
+
+// Те же сегменты в координатах плана — ими живут S.pts.railing, смета и рисование.
+// Формат прежний: точки подряд, между отрезками маркер {break:true}.
+function railingAutoPoints(houseL, houseW) {
+  const segs = railingAutoSegmentsWorld(houseL, houseW);
+  const pts = [];
+  for (const s of segs) {
+    const c = worldToCanvas([{ x: s.ax, z: s.az }, { x: s.bx, z: s.bz }], houseL, houseW);
+    if (pts.length) pts.push({ break: true });
+    pts.push(c[0], c[1]);
+  }
+  return pts;
+}
+
+// Ширина «входа» по умолчанию (м) — потом двигается двумя точками.
+const RAIL_ENTRY_W = 1.0;
+
+// Главная петля периметра (по ней отсчитывается вход) или null.
+function railingMainPath(houseL, houseW) {
+  const lw = (houseL === undefined) ? lastHouseSize() : { L: houseL, W: houseW };
+  const loops = railingLoopsWorld(lw.L, lw.W);
+  return loops.length ? railingLoopPath(loops[0]) : null;
+}
+
+// Вход по умолчанию: середина самого длинного свободного участка, ширина RAIL_ENTRY_W.
+function railingDefaultEntry(houseL, houseW) {
+  const lw = (houseL === undefined) ? lastHouseSize() : { L: houseL, W: houseW };
+  const loops = railingLoopsWorld(lw.L, lw.W);
+  if (!loops.length) return null;
+  const path = railingLoopPath(loops[0]);
+  if (!path.L) return null;
+  const saved = S.railingEntry;
+  S.railingEntry = null;                      // считаем участки БЕЗ старого входа
+  const segs = railingAutoSegmentsWorld(lw.L, lw.W);
+  S.railingEntry = saved;
+  let best = null, bestL = 0;
+  for (const s of segs) {
+    const L = Math.hypot(s.bx - s.ax, s.bz - s.az);
+    if (L > bestL) { bestL = L; best = s; }
+  }
+  if (!best || bestL < 0.6) return null;
+  const tMid = railingParamOf(path, { x: (best.ax + best.bx) / 2, z: (best.az + best.bz) / 2 });
+  const half = Math.min(RAIL_ENTRY_W, bestL - 0.4) / 2 / path.L;
+  return { t0: (tMid - half + 1) % 1, t1: (tMid + half + 1) % 1 };
+}
+
+// Точки входа в координатах плана (для рисования и перетаскивания) или null.
+function railingEntryPointsNorm() {
+  if (!S.railingEntry) return null;
+  const path = railingMainPath();
+  if (!path) return null;
+  const a = railingPointAt(path, S.railingEntry.t0);
+  const b = railingPointAt(path, S.railingEntry.t1);
+  const c = worldToCanvas([{ x: a.x, z: a.z }, { x: b.x, z: b.z }]);
+  return [c[0], c[1]];
+}
+
+// Перетаскивание точки входа: idx 0/1, p — точка плана {x,y}.
+function railingEntryDrag(idx, p) {
+  if (!S.railingEntry) return;
+  const lw = lastHouseSize();
+  const path = railingMainPath(lw.L, lw.W);
+  if (!path) return;
+  const w = canvasToWorld([p], lw.L, lw.W)[0];
+  const t = railingParamOf(path, w);
+  if (idx === 0) S.railingEntry.t0 = t; else S.railingEntry.t1 = t;
 }

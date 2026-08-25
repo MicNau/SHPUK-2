@@ -9,19 +9,23 @@ let dActiveItem = null;     // currently selected sidebar item id
 let dEditorOpen = false;    // true when canvas editor is open (locks UI)
 const dConfigured = new Set(); // items that completed configuration
 
-// All sidebar items
+// All sidebar items.
+// hidden: true — раздел есть в коде, но в меню не показывается. Так временно убрана
+// «Отделка фасада» (TODO.md, этап 1 п.14): её редактор и расчёт ещё понадобятся,
+// поэтому код остаётся на месте.
 const D_SIDEBAR_ITEMS = [
   { id: 'terrace',       lbl: 'Терраса/Крыльцо',     hasEditor: true  },
   { id: 'railing',       lbl: 'Ограждения террасы',  hasEditor: true  },
   { id: 'steps',         lbl: 'Ступени',             hasEditor: true  },
   { id: 'paths',         lbl: 'Дорожки',             hasEditor: true  },
   { id: 'fence',         lbl: 'Забор',               hasEditor: true  },
-  { id: 'facade',        lbl: 'Отделка фасада',      hasEditor: true  },
+  { id: 'facade',        lbl: 'Отделка фасада',      hasEditor: true, hidden: true },
   { id: 'beds',          lbl: 'Грядки',              hasEditor: true  },
   { id: 'furniture',     lbl: 'Садовая мебель',      hasEditor: true  },
   { id: 'pool_terrace',  lbl: 'Терраса у бассейна',  hasEditor: true  },
-  { id: 'pier',          lbl: 'Причал',              hasEditor: true  },
 ];
+// Пункты, реально попадающие в меню (и в замер ширины левой панели).
+const D_MENU_ITEMS = D_SIDEBAR_ITEMS.filter(i => !i.hidden);
 
 // Canvas init functions map
 const D_CANVAS_INIT = {
@@ -29,9 +33,8 @@ const D_CANVAS_INIT = {
   steps:        () => initStepsCanvas(),
   pool_terrace: () => initRectCanvas('pool_terrace'),
   paths:        () => initPathsCanvas(),
-  pier:         () => initRectCanvas('pier'),
   fence:        () => { initSnapCanvas('fence'); _dSyncFenceHeight(); },
-  railing:      () => initSnapCanvas('railing'),
+  railing:      () => initRailingCanvas(),
   beds:         () => initBedsCanvas(),
   facade:       () => initFacadeCanvas(),
   furniture:    () => initFurnitureCanvas(),
@@ -54,7 +57,7 @@ function dGoTo(s) {
   // Хедер убран; «СМЕТА» — плавающая кнопка (см. _dSyncSummaryBtn).
   _dSyncSummaryBtn();
 
-  if (s === 1) _dInitHouseGrid();
+  if (s === 1) { _dInitHouseGrid(); _dSyncSelectNext(); }
   else if (s === 2) _dInitParamsView();
   else if (s === 3) _dInitWorkspace();
 }
@@ -81,7 +84,7 @@ function _dSyncSidebarWidth() {
   const titleW = widest(SIDEBAR_TITLES, 36, 400);
   // Строка меню: подпись 18px/700 (активный пункт жирнее) + паддинги кнопки 2×14
   // + рамки 2×2 + два зазора по 2px + две иконки 48px + паддинг списка 2×8.
-  const labelW = widest(D_SIDEBAR_ITEMS.map(i => i.lbl), 18, 700);
+  const labelW = widest(D_MENU_ITEMS.map(i => i.lbl), 18, 700);
   probe.remove();
   const w = Math.ceil(Math.max(titleW + 2 * SIDEBAR_PAD, labelW + 28 + 4 + 4 + 96 + 16));
   document.documentElement.style.setProperty('--sidebar-w', w + 'px');
@@ -295,7 +298,7 @@ function _dResetAllConfigurations() {
   // Ключи те же, что в state.js: пропущенный ключ (например railing) обнулял бы
   // весь редактор — S.pts[name].push падал бы на undefined.
   S.pts = { paths: [], fence: [], railing: [] };
-  for (const secId of Object.keys(RECT_SECTIONS)) {   // terrace, pool_terrace, pier
+  for (const secId of Object.keys(RECT_SECTIONS)) {   // terrace, pool_terrace
     secRects(secId).length = 0;
     setSecActiveIdx(secId, null);
   }
@@ -310,8 +313,7 @@ function _dResetAllConfigurations() {
   S.mats = {};
   S.elementMat = {};
   S.estimate = {};
-  S.catColors = new Set();
-  S.catPrices = new Set();
+  S.catFilters = {};        // фильтры каталога у каждого раздела свои
   S.catSection = null;
   S.curSec = 0;
   dConfigured.clear();
@@ -343,6 +345,14 @@ function _dCacheToggleDefaults() {
     // только оттуда (tgOn в state.js), DOM из viewer3d-* не трогается.
     if (tg.dataset.id) S.toggles[tg.dataset.id] = tg.classList.contains('on');
   });
+}
+
+// «Дальше» на первом экране показываем, только если дом уже выбран: при первом
+// заходе идти некуда, а на возврате повторный клик по карточке сбросил бы все
+// настройки конструкций (см. _dResetAllConfigurations ниже).
+function _dSyncSelectNext() {
+  const box = document.getElementById('d-select-actions');
+  if (box) box.classList.toggle('active', !!S.houseType);
 }
 
 function dSelectHouseAndGo(typeId) {
@@ -591,11 +601,12 @@ function dOnPathWidth() {
   if (typeof onParamChange === 'function') onParamChange();
 }
 
-// Высота настила террасы, см. Диапазон — 10 см … высота фундамента (TODO.md → ТЕРРАСА):
-// выше фундамента настил лезет на цоколь, ниже 10 см его не собрать.
+// Высота настила террасы, см. Диапазон — 15 см … высота фундамента (TODO.md, этап 1
+// п.2): выше фундамента настил лезет на цоколь, ниже 15 см его не собрать.
+const TERRACE_MIN_CM = 15;
 function dTerraceHeightRange() {
   const foundCm = parseFloat(document.getElementById('v-found')?.value || 80);
-  return { min: 10, max: Math.max(10, Math.round(foundCm)) };
+  return { min: TERRACE_MIN_CM, max: Math.max(TERRACE_MIN_CM, Math.round(foundCm)) };
 }
 
 function dSetTerraceHeight(cm) {
@@ -763,7 +774,7 @@ function _dRenderSidebar() {
   const list = document.getElementById('d-sidebar-list');
   // Вернуть перенесённые узлы до перерисовки — innerHTML их бы уничтожил.
   _dUnmountEditorControls();
-  list.innerHTML = D_SIDEBAR_ITEMS.map(item => {
+  list.innerHTML = D_MENU_ITEMS.map(item => {
     const isActive = dActiveItem === item.id;
     const isCfg = dConfigured.has(item.id);
     const isLocked = dEditorOpen && dActiveItem !== item.id;
@@ -778,14 +789,50 @@ function _dRenderSidebar() {
             ${item.lbl}
           </button>
           ${isEditing ? '<div class="d-sb-accordion" id="d-sb-accordion"></div>' : ''}
+          ${(isActive && !isEditing) ? `
+          <div class="d-sb-filters" id="d-sb-filters">
+            <div class="d-color-section" id="d-color-section">
+              <div class="d-color-title">Цвет:</div>
+              <div class="d-color-grid" id="d-color-grid"></div>
+            </div>
+            <div class="d-color-section" id="d-price-section">
+              <div class="d-color-title">Цена:</div>
+              <div class="d-price-grid" id="d-price-grid"></div>
+            </div>
+            ${item.id === 'beds' ? `
+            <div class="d-color-section">
+              <div class="d-color-title">Высота борта:</div>
+              <div class="d-price-grid" id="d-bed-h-grid"></div>
+            </div>
+            <div class="d-color-section">
+              <div class="d-color-title">Крепёж:</div>
+              <div class="d-price-grid" id="d-bed-mount-grid"></div>
+            </div>` : ''}
+            ${item.id === 'railing' ? `
+            <div class="d-color-section">
+              <div class="d-color-title">Крышка столба:</div>
+              <div class="d-price-grid" id="d-rail-cap-grid"></div>
+            </div>
+            <div class="d-color-section">
+              <div class="d-color-title">Сечение столба:</div>
+              <div class="d-price-grid" id="d-rail-post-grid"></div>
+            </div>` : ''}
+          </div>` : ''}
         </div>
         ${isEditing ? '<div class="d-sb-actions" id="d-sb-actions"></div>' : ''}
-        ${!isEditing && isCfg && item.hasEditor ? `<button class="d-sb-edit ${isLocked ? 'locked' : ''}" title="Редактировать"
-            onclick="dEditItem('${item.id}')" ${isLocked ? 'disabled' : ''}><img src="assets/icons/icon_edit.svg" alt=""></button>` : ''}
-        ${!isEditing && isCfg ? `<button class="d-sb-delete ${isLocked ? 'locked' : ''}" title="Удалить настройки"
-            onclick="dDeleteItem('${item.id}')" ${isLocked ? 'disabled' : ''}><img src="assets/icons/icon_delete.svg" alt=""></button>` : ''}
+        ${!isEditing && isCfg && item.hasEditor ? `<button class="d-sb-edit ${isLocked ? 'locked' : ''}"
+            onclick="dEditItem('${item.id}')" ${isLocked ? 'disabled' : ''}>Изменить</button>` : ''}
       </div>`;
   }).join('');
+
+  // Фильтры каталога живут в ряду активного раздела — их надо наполнить сразу
+  // после перерисовки списка (разметку выше создаёт этот же шаблон).
+  if (document.getElementById('d-sb-filters')) {
+    _dRenderColorGrid();
+    _dRenderPriceGrid();
+    _dRenderRailFilters();
+    _dRenderBedFilters();
+  }
 
   // Кнопка «Дальше» внизу панели живёт только пока открыт редактор.
   const nextSlot = document.getElementById('d-sb-next');
@@ -796,6 +843,15 @@ function _dRenderSidebar() {
   // Правую панель материалов показываем только когда выбран элемент проекта.
   const panel = document.getElementById('d-panel');
   if (panel) panel.classList.toggle('hidden', !dActiveItem);
+
+  // Раскрытый раздел «всплывает» (TODO.md, этап 2 п.15): вместе с фильтрами ряд
+  // становится высоким и у нижних пунктов уезжает за край панели. Прокручиваем
+  // список так, чтобы ряд был виден целиком.
+  if (dActiveItem) {
+    const row = list.querySelector('.d-sb-btn[data-id="' + dActiveItem + '"]');
+    const box = row && row.closest('.d-sb-row');
+    if (box) requestAnimationFrame(() => box.scrollIntoView({ block: 'nearest' }));
+  }
 
 }
 
@@ -866,6 +922,176 @@ function dDeleteItem(secId) {
   }
 }
 
+// ── Фильтры грядок: высота борта и крепёж (TODO.md, этап 2 п.11) ──
+// Высота борта применяется сразу к 3D (S.bedH); тип крепежа своего поля у товара
+// не имеет — отбор по названию, как у крышки столба ограждения.
+function _dRenderBedFilters() {
+  const hg = document.getElementById('d-bed-h-grid');
+  if (hg) {
+    hg.innerHTML = BED_HEIGHTS.map(h =>
+      `<button class="d-price-btn ${S.bedFilters.h === h ? 'selected' : ''}"
+               onclick="dSetBedFilter('h', ${h})">
+         <span class="d-radio"></span><span class="d-price-txt"><b>${h} мм</b></span>
+       </button>`).join('');
+  }
+  const mg = document.getElementById('d-bed-mount-grid');
+  if (mg) {
+    mg.innerHTML = BED_MOUNTS.map(m =>
+      `<button class="d-price-btn ${S.bedFilters.mount === m.id ? 'selected' : ''}"
+               onclick="dSetBedFilter('mount', '${m.id}')">
+         <span class="d-radio"></span><span class="d-price-txt"><b>${m.lbl}</b></span>
+       </button>`).join('');
+  }
+}
+
+// Повторный клик снимает фильтр. Высота борта сразу видна в 3D.
+function dSetBedFilter(kind, value) {
+  S.bedFilters[kind] = (S.bedFilters[kind] === value) ? null : value;
+  if (kind === 'h') {
+    // Снятый фильтр возвращает высоту выбранного товара (или дефолт 0.20 м).
+    const fromProduct = _bedHeightFromProduct(S.elementMat && S.elementMat.beds);
+    S.bedH = S.bedFilters.h ? S.bedFilters.h / 1000 : (fromProduct || 0.20);
+    if (typeof onParamChange === 'function') onParamChange();
+  }
+  _dRenderBedFilters();
+  dShowResults();
+}
+
+// Отбор товаров грядок по типу крепежа (поля у товара нет — ищем в названии).
+function _bedFilterProducts(products) {
+  if (dActiveItem !== 'beds' || !S.bedFilters.mount) return products;
+  const m = BED_MOUNTS.find(x => x.id === S.bedFilters.mount);
+  if (!m) return products;
+  const hit = products.filter(p => m.re.test((p.name || '') + ' ' + (p.previewText || '')));
+  if (hit.length) return hit;
+  console.info('[beds] по фильтру «' + m.lbl + '» товаров не нашлось — показываем все:',
+               'у товаров нет поля с типом крепежа, отбор идёт по названию');
+  return products;
+}
+
+// ── Фильтры ограждения: крышка столба и его сечение (TODO.md, этап 2 п.5) ──
+// Сечение влияет на 3D (толщина столбов), крышка — только на подбор товара: своего
+// поля у товара нет, поэтому ищем слово в названии/описании. Если под фильтр не
+// подходит НИ ОДИН товар раздела, фильтр не применяется — иначе каталог просто
+// опустел бы на данных, где этих слов нет (см. _railingFilterProducts).
+function _dRenderRailFilters() {
+  const cap = document.getElementById('d-rail-cap-grid');
+  if (cap) {
+    cap.innerHTML = RAIL_CAP_TYPES.map(t =>
+      `<button class="d-price-btn ${S.railFilters.cap === t.id ? 'selected' : ''}"
+               onclick="dSetRailFilter('cap', '${t.id}')">
+         <span class="d-radio"></span><span class="d-price-txt"><b>${t.lbl}</b></span>
+       </button>`).join('');
+  }
+  const post = document.getElementById('d-rail-post-grid');
+  if (post) {
+    post.innerHTML = RAIL_POST_WIDTHS.map(w =>
+      `<button class="d-price-btn ${S.railFilters.postW === w ? 'selected' : ''}"
+               onclick="dSetRailFilter('postW', ${w})">
+         <span class="d-radio"></span><span class="d-price-txt"><b>${w} мм</b></span>
+       </button>`).join('');
+  }
+}
+
+// Повторный клик по выбранному варианту снимает фильтр.
+function dSetRailFilter(kind, value) {
+  S.railFilters[kind] = (S.railFilters[kind] === value) ? null : value;
+  _dRenderRailFilters();
+  if (kind === 'postW' && typeof onParamChange === 'function') onParamChange();
+  dShowResults();
+}
+
+// Отбор товаров ограждения по виду крышки. Пустой результат означает, что в данных
+// нет таких слов — тогда фильтр игнорируем и пишем об этом в консоль.
+function _railingFilterProducts(products) {
+  if (dActiveItem !== 'railing' || !S.railFilters.cap) return products;
+  const t = RAIL_CAP_TYPES.find(x => x.id === S.railFilters.cap);
+  if (!t) return products;
+  const hit = products.filter(p => t.re.test((p.name || '') + ' ' + (p.previewText || '')));
+  if (hit.length) return hit;
+  console.info('[railing] по фильтру «' + t.lbl + '» товаров не нашлось — показываем все:',
+               'у товаров нет поля с видом крышки, отбор идёт по названию');
+  return products;
+}
+
+// ── Бассейн на террасе у бассейна (TODO.md, этап 2 п.14) ──
+// Кнопка ставит бассейн выбранной формы; повторное нажатие той же формы убирает,
+// другой — меняет форму, сохраняя место и размер. Модели нет: это геометрия с
+// задаваемыми на плане размерами.
+function dSetPool(kind) {
+  if (S.pool && S.pool.kind === kind) {
+    S.pool = null;
+  } else if (S.pool) {
+    S.pool = { ...S.pool, kind };
+    if (kind === 'round') { const s = Math.max(S.pool.w, S.pool.h); S.pool.w = s; S.pool.h = s; }
+  } else {
+    if (!secRects('pool_terrace').length) { dToast('Сначала разметьте террасу у бассейна'); return; }
+    S.pool = poolDefault(kind);
+  }
+  if (typeof drawRectCanvas === 'function') drawRectCanvas('pool_terrace');
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
+// ── «Калитка» в заборе (TODO.md, этап 2 п.8) ──
+// Логика как у входа в ограждении: проём фиксированной ширины 1 м. Повторное
+// нажатие калитку убирает. Модель калитки (п.9) появится, когда придёт GLB —
+// пока в этом месте просто разрыв, а в смету уходит gateCount = 1.
+function dFenceGate() {
+  if (S.fenceGate) {
+    S.fenceGate = null;
+  } else {
+    const g = (typeof fenceGateDefault === 'function') ? fenceGateDefault() : null;
+    if (!g) { dToast('Нужен участок забора длиннее 1.4 м — калитке нужно место'); return; }
+    S.fenceGate = g;
+  }
+  if (typeof drawSnapCanvas === 'function') drawSnapCanvas('fence');
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
+// ── «Обозначить вход» в ограждении (TODO.md, этап 2 п.4) ──
+// Ставит разрыв на самом длинном свободном участке периметра; дальше пользователь
+// двигает две точки прямо на плане. Повторное нажатие вход убирает.
+function dRailingEntry() {
+  if (S.railingEntry) {
+    S.railingEntry = null;
+  } else {
+    const e = (typeof railingDefaultEntry === 'function') ? railingDefaultEntry() : null;
+    if (!e) { dToast('Сначала разметьте террасу — вход ставится на её периметре'); return; }
+    S.railingEntry = e;
+  }
+  if (typeof _railingSync === 'function') _railingSync();
+  if (typeof drawSnapCanvas === 'function') drawSnapCanvas('railing');
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
+// ── «Удалить всё» — сброс раздела в нулевое состояние, НЕ выходя из редактора ──
+// (TODO.md, этап 2 п.2). Данные раздела чистятся, редактор переинициализируется —
+// раздел выглядит так же, как при первом заходе.
+function dResetSection(secId) {
+  const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
+  const label = item ? item.lbl : secId;
+  if (!window.confirm(`Удалить всё в разделе «${label}»?`)) return;
+
+  if (S.pts && S.pts[secId]) S.pts[secId] = [];
+  if (RECT_SECTIONS[secId]) { secRects(secId).length = 0; setSecActiveIdx(secId, null); }
+  if (secId === 'steps')     S.steps = { ...DEFAULT_STEPS_RECT };
+  if (secId === 'beds')      { S.beds = []; S.activeBed = null; }
+  if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
+  if (secId === 'facade')    S.wallZones = {};
+  if (secId === 'fence')     S.fenceGate = null;
+  if (secId === 'beds')      S.bedFilters = { h: null, mount: null };
+  if (secId === 'pool_terrace') S.pool = null;
+  if (secId === 'railing') { S.railingEntry = null; S.railFilters = { cap: null, postW: null }; }
+  if (S.mats && S.mats[secId]) delete S.mats[secId];
+  if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
+  if (S.estimate && S.estimate[secId]) delete S.estimate[secId];
+
+  // Перезапускаем редактор раздела: он сам вернёт стартовую разметку.
+  const initFn = D_CANVAS_INIT[secId];
+  if (initFn) initFn();
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
 // ── Click on sidebar button ──
 function dClickItem(secId) {
   if (dEditorOpen) return; // locked
@@ -918,6 +1144,32 @@ function _dSelectItem(secId) {
 }
 
 // ── Open editor ──
+// Разделы, для которых инструкцию в этой сессии уже показывали (TODO.md, этап 1 п.15).
+const _dHintShown = new Set();
+
+// Всплывающая инструкция при ПЕРВОМ заходе в редактор раздела. Текст берём из самой
+// подсказки редактора — один источник, расходиться нечему. Помним в рамках сессии.
+function _dShowEditorHint(secId) {
+  if (_dHintShown.has(secId)) return;
+  const src = document.querySelector('#d-canvas-' + secId + ' .d-canvas-hint');
+  const text = src ? src.textContent.trim() : '';
+  if (!text) return;
+  _dHintShown.add(secId);
+  const ov = document.getElementById('d-hint-overlay');
+  const body = document.getElementById('d-hint-text');
+  const title = document.getElementById('d-hint-title');
+  if (!ov || !body) return;
+  const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
+  if (title) title.textContent = item ? item.lbl : '';
+  body.textContent = text;
+  ov.classList.add('active');
+}
+
+function dHideEditorHint() {
+  const ov = document.getElementById('d-hint-overlay');
+  if (ov) ov.classList.remove('active');
+}
+
 function _dOpenEditor(secId) {
   dActiveItem = secId;
   dEditorOpen = true;
@@ -933,8 +1185,13 @@ function _dOpenEditor(secId) {
   const canvasEl = document.getElementById('d-canvas-' + secId);
   if (canvasEl) canvasEl.classList.add('active');
 
+  // Подсказка по управлению 3D видна только на 3D-виде (TODO.md, этап 1 п.17):
+  // поверх плана она просвечивала сквозь редактор.
+  document.body.classList.add('d-editor-open');
+
   const initFn = D_CANVAS_INIT[secId];
   if (initFn) setTimeout(() => initFn(), 80);
+  _dShowEditorHint(secId);
 }
 
 // ── Назад (кнопка внизу сайдбара) ──
@@ -983,6 +1240,8 @@ function dConfirmCanvas(secId) {
 // ── Canvas helpers ──
 function _dCloseAllCanvases() {
   document.querySelectorAll('.d-center-canvas').forEach(el => el.classList.remove('active'));
+  // Редактор закрыт — снова показываем подсказку по управлению 3D (см. п.17).
+  document.body.classList.remove('d-editor-open');
 }
 
 // ── Panel lock/unlock ──
@@ -1026,7 +1285,8 @@ function _dRenderPanelContent() {
   // Палитра цветов у каждого элемента своя: выбранные для прошлого элемента цвета,
   // которых нет в текущей палитре, вычищаем — иначе невидимый выбор фильтрует выдачу.
   const _palette = new Set(_elementColors(secId).map(c => c.id));
-  S.catColors = new Set([...S.catColors].filter(n => _palette.has(n)));
+  const _f = catFilter(secId);
+  _f.colors = new Set([..._f.colors].filter(n => _palette.has(n)));
 
   // Auto-show catalog results (селектор раздела и блок образцов убраны из UI)
   dShowResults();
@@ -1036,7 +1296,7 @@ function _dRenderPanelContent() {
 // Элементы с настилом — материал у каждого свой (S.elementMat[el]).
 // Забор здесь же: его планки текстурируются товаром как настил (остальные части
 // модуля красятся сплошным цветом в buildFence3d) — TODO.md → ЗАБОРЫ.
-const DECK_MAT_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'pier', 'fence',
+const DECK_MAT_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace', 'fence',
                            'railing'];
 // Текущий активный элемент красится как настил? (Ограждение террасы — нет.)
 function _activeIsDeck() {
@@ -1079,7 +1339,9 @@ function _applySampleToActive(sample) {
     // Грядки: высота борта — свойство товара (150/200/225/270/300 мм, см. TODO.md),
     // поэтому забираем её из названия и отдаём в 3D.
     if (dActiveItem === 'beds') {
-      const h = _bedHeightFromProduct(sample);
+      // Явно выбранная в фильтре высота (TODO.md, этап 2 п.11) главнее той, что
+      // угадана по названию товара: пользователь задал её сам.
+      const h = S.bedFilters.h ? S.bedFilters.h / 1000 : _bedHeightFromProduct(sample);
       if (h) S.bedH = h;
     }
     if (typeof buildScene3d === 'function') buildScene3d();
@@ -1169,7 +1431,7 @@ function _d3dLoadingRender() {
 // id = название цвета (стабилен между типами; tooltip = название из каталога).
 function _elementColors(elId) {
   let key = elId;
-  if (elId === 'paths' || elId === 'pool_terrace' || elId === 'pier') key = 'terrace';
+  if (elId === 'paths' || elId === 'pool_terrace') key = 'terrace';
   const map = (typeof ELEMENT_COLOR_NAMES !== 'undefined') ? ELEMENT_COLOR_NAMES : {};
   const names = map[key] || map.terrace || [];
   const hexMap = (typeof CATALOG_COLOR_HEX !== 'undefined') ? CATALOG_COLOR_HEX : {};
@@ -1202,13 +1464,13 @@ function _dRenderColorGrid() {
   const sect = document.getElementById('d-color-section');
   const isFurniture = (dActiveItem === 'furniture');
   if (sect) sect.style.display = isFurniture ? 'none' : '';
-  if (isFurniture) { S.catColors = new Set(); grid.innerHTML = ''; return; }
+  if (isFurniture) { catFilter(dActiveItem).colors = new Set(); grid.innerHTML = ''; return; }
   // Показываем только те цвета палитры, под которые в разделе есть товары:
   // раньше в фильтре висели цвета из COLORS.md, обнулявшие выдачу. Пока каталог
   // не загружен, палитра показывается целиком — иначе фильтр мигал бы пустым.
   const colors = _availableColors(dActiveItem);
   grid.innerHTML = colors.map(c =>
-    `<div class="d-color-dot ${S.catColors.has(c.id) ? 'selected' : ''}"
+    `<div class="d-color-dot ${catFilter(dActiveItem).colors.has(c.id) ? 'selected' : ''}"
           title="${c.label}" style="background:${c.hex};"
           onclick="dToggleColor('${c.id.replace(/'/g, "\\'")}')"></div>`
   ).join('');
@@ -1222,9 +1484,9 @@ function _dRenderPriceGrid() {
   const sect = document.getElementById('d-price-section');
   const isFurniture = (dActiveItem === 'furniture');
   if (sect) sect.style.display = isFurniture ? 'none' : '';
-  if (isFurniture) { S.catPrices = new Set(); grid.innerHTML = ''; return; }
+  if (isFurniture) { catFilter(dActiveItem).prices = new Set(); grid.innerHTML = ''; return; }
   grid.innerHTML = PRICE_TIERS.map(t =>
-    `<button class="d-price-btn ${S.catPrices.has(t.id) ? 'selected' : ''}"
+    `<button class="d-price-btn ${catFilter(dActiveItem).prices.has(t.id) ? 'selected' : ''}"
              onclick="dSelectPrice('${t.id}')">
        <span class="d-radio"></span>
        <span class="d-price-lbl">${t.lbl}<span class="d-price-sub">${t.sub}</span></span>
@@ -1233,8 +1495,9 @@ function _dRenderPriceGrid() {
 }
 
 function dToggleColor(cid) {
-  if (S.catColors.has(cid)) S.catColors.delete(cid);
-  else S.catColors.add(cid);
+  const colors = catFilter(dActiveItem).colors;
+  if (colors.has(cid)) colors.delete(cid);
+  else colors.add(cid);
   _dRenderColorGrid();
   dShowResults();
 }
@@ -1288,18 +1551,20 @@ function _itemColors(textsOf, it) {
 // Позиции без распознанного цвета при активном фильтре скрываются.
 // textsOf(item) — массив текстов по убыванию приоритета (см. _itemColors).
 function _filterByColors(items, textsOf) {
-  if (!S.catColors.size) return items;
+  const _sel = catFilter(dActiveItem).colors;
+  if (!_sel.size) return items;
   return items.filter(it => {
     const colors = _itemColors(textsOf, it);
-    for (const c of S.catColors) if (colors.has(c)) return true;
+    for (const c of _sel) if (colors.has(c)) return true;
     return false;
   });
 }
 
 // Тиры можно включать вместе: выдача — объединение, как у фильтра цвета.
 function dSelectPrice(tid) {
-  if (S.catPrices.has(tid)) S.catPrices.delete(tid);
-  else                      S.catPrices.add(tid);
+  const prices = catFilter(dActiveItem).prices;
+  if (prices.has(tid)) prices.delete(tid);
+  else                 prices.add(tid);
   _dRenderPriceGrid();
   dShowResults();
 }
@@ -1391,9 +1656,10 @@ const PRICE_TIER_MATCH = {
 // Несколько выбранных тиров объединяются: товар проходит, если подошёл хотя бы
 // под один. Раньше тир был один и включение второго снимало первый.
 function _filterRealByPrice(products) {
-  if (!S.catPrices.size) return products;
+  const _tiers = catFilter(dActiveItem).prices;
+  if (!_tiers.size) return products;
   return products.filter(p => {
-    for (const t of S.catPrices) {
+    for (const t of _tiers) {
       const m = PRICE_TIER_MATCH[t];
       if (m && m(p)) return true;
     }
@@ -1503,12 +1769,16 @@ function _dRenderRealResults(allProducts) {
   if (!list) return;
   // Цвет — приоритетно из ПОЛЯ color (появилось в API 2026-07-29, имена совпадают
   // с палитрой COLORS.md); затем название; preview_text — fallback (см. _itemColors).
-  const products = _filterByColors(_filterRealByPrice(allProducts),
-    p => [p.color || '', p.name || '', p.previewText || '']);
+  const products = _bedFilterProducts(_railingFilterProducts(_filterByColors(_filterRealByPrice(allProducts),
+    p => [p.color || '', p.name || '', p.previewText || ''])));
   if (!products.length) {
     list.innerHTML = '<div style="padding:16px;color:#999;font-size:13px;">Нет товаров под выбранные фильтры</div>';
     return;
   }
+  // В «Садовой мебели» по кнопке открывается фото товара, в остальных разделах —
+  // текстура (TODO.md, этап 1 п.11). Раздел берём по пункту меню: _activeSectionId()
+  // возвращает НОМЕР раздела каталога, а не его id.
+  const viewLabel = (dActiveItem === 'furniture') ? 'Посмотреть' : 'Посмотреть текстуру';
   list.innerHTML = products.map(p => {
     const price = _productPrice(p);
     const thumbStyle = _productThumbStyle(p);
@@ -1529,7 +1799,7 @@ function _dRenderRealResults(allProducts) {
         <div class="d-mat-desc">${desc}</div>
         <div class="d-mat-actions">
           ${bigPic ? `<button class="d-mat-btn d-mat-btn-view"
-             onclick="dShowPhoto(event, '${bigPic.replace(/'/g, "\\'")}')">Посмотреть</button>` : ''}
+             onclick="dShowPhoto(event, '${bigPic.replace(/'/g, "\\'")}')">${viewLabel}</button>` : ''}
           <button class="d-mat-btn d-mat-btn-apply" onclick="dApplyRealMat(event, ${p.id})"
                   ${_isProductApplied(p.id) ? 'disabled' : ''}>Применить</button>
         </div>
@@ -1542,7 +1812,7 @@ function _dRenderStubResults() {
   let results = [...STUB_RESULTS];
   // Заглушки фильтруются по тем же тирам; выбранные объединяются.
   const STUB_TIER_IDS = { budget: [4], balanced: [1, 4], premium: [2, 3] };
-  const picked = [...S.catPrices];
+  const picked = [...catFilter(dActiveItem).prices];
   if (picked.length && !picked.includes('mpk')) {
     const ids = new Set(picked.flatMap(t => STUB_TIER_IDS[t] || []));
     results = results.filter(r => ids.has(r.id));
@@ -1631,7 +1901,23 @@ function dToggleMatCard(mid) {
   const el = document.getElementById('dmc-' + mid);
   const was = el.classList.contains('open');
   document.querySelectorAll('.d-mat-card.open').forEach(c => c.classList.remove('open'));
-  if (!was) el.classList.add('open');
+  if (was) return;
+  el.classList.add('open');
+  // Раскрытая карточка целиком в поле зрения (TODO.md, этап 1 п.12): у карточки внизу
+  // списка кнопки «Посмотреть»/«Применить» оказывались за краем контейнера.
+  // Ждём КОНЦА анимации раскрытия: пока max-height едет, карточка ещё низкая, и
+  // прокрутка не доводит список до конца. Таймер — страховка, если transitionend
+  // не придёт. Прокрутка мгновенная: smooth-анимация в части окружений не запускается.
+  const body = el.querySelector('.d-mat-body');
+  let scrolled = false;
+  const toView = () => {
+    if (scrolled) return;
+    scrolled = true;
+    if (body) body.removeEventListener('transitionend', toView);
+    el.scrollIntoView({ block: 'center' });
+  };
+  if (body) body.addEventListener('transitionend', toView);
+  setTimeout(toView, 450);
 }
 
 function dApplyMat(e, mid, name, color, priceStr) {
@@ -1735,7 +2021,7 @@ function _elementMetric(el) {
 //   linear — длина × 1.05 × цена/м.пог;
 //   piece  — количество × цена/шт.
 function _computeEstimate() {
-  const order = ['terrace', 'railing', 'steps', 'paths', 'pool_terrace', 'pier', 'fence',
+  const order = ['terrace', 'railing', 'steps', 'paths', 'pool_terrace', 'fence',
                  'beds', 'facade', 'furniture'];
   const rows = [];
   for (const el of order) {
@@ -2003,7 +2289,7 @@ function _projectObjects() {
   const lbl = id => (D_SIDEBAR_ITEMS.find(i => i.id === id) || {}).lbl || id;
   const objs = [];
 
-  for (const secId of Object.keys(RECT_SECTIONS)) {   // terrace, pool_terrace, pier
+  for (const secId of Object.keys(RECT_SECTIONS)) {   // terrace, pool_terrace
     if (!S.sections.includes(secId)) continue;
     const req = buildTerraceCalcRequest(secId);
     if (req.payload) objs.push({ type: CalculationType.TERRACE, name: lbl(secId), ...req.payload });
@@ -2022,7 +2308,8 @@ function _projectObjects() {
     const o = { type: el === 'fence' ? CalculationType.FENCE : CalculationType.RAILING,
                 name: lbl(el), lines, sectionProductId: _elementProductId(el) };
     // Калитки в разметке не учитываются — отдельного инструмента для них нет.
-    if (el === 'fence') { o.gateCount = 0; o.picketProductId = null; }
+    // Калитка в разметке — одна на забор (TODO.md, этап 2 п.8).
+    if (el === 'fence') { o.gateCount = S.fenceGate ? 1 : 0; o.picketProductId = null; }
     objs.push(o);
   }
   if (S.sections.includes('furniture')) {
@@ -2079,19 +2366,43 @@ function buildTerraceCalcRequest(secId) {
   // там height только у ступеней. Продолжаем слать до ответа бэкендера: лишнее поле
   // расчёту не мешает, а если оно учитывается — терять его нельзя.
   const foundCm = parseFloat(document.getElementById('v-found')?.value || 80);
-  // Отметка настила: у пристроенной террасы — вровень с фундаментом; у отдельно
-  // стоящих фиксированная (та же, что в 3D: бассейн — как терраса, причал — 0.5 м).
-  let terraceHeight;
-  if (sec === 'pier') terraceHeight = 500;
-  else terraceHeight = isEmptyLot() ? 350 : Math.round(foundCm * 10);
-  return {
-    payload: {
-      vertices,
-      doorDirection: _mainDoorDirection() || 'N',
-      deckingBoardProductId: productId,
-      terraceHeight,
-    },
+  // Отметка настила: у пристроенной террасы и у террасы у бассейна — вровень
+  // с фундаментом (та же отметка, что в 3D).
+  const terraceHeight = isEmptyLot() ? 350 : Math.round(foundCm * 10);
+  const payload = {
+    vertices,
+    doorDirection: _mainDoorDirection() || 'N',
+    deckingBoardProductId: productId,
+    terraceHeight,
   };
+  // Бассейн вырезает часть настила — площадь выреза уходит в задание (TODO.md,
+  // этап 2 п.14). Поля в опубликованном контракте нет: шлём как дополнительное,
+  // по образцу terraceHeight. Считаем ровно ту часть, что попала на блоки секции.
+  if (sec === 'pool_terrace' && S.pool && typeof _poolCutAreaM2 === 'function') {
+    const cut = _poolCutAreaM2();
+    if (cut > 0.01) {
+      payload.poolCutoutArea = Math.round(cut * 1e6);      // мм², как и вершины
+      payload.poolShape = S.pool.kind === 'round' ? 'round' : 'rect';
+    }
+  }
+  return { payload };
+}
+
+// Площадь выреза под бассейн (м²) — пересечение бассейна с блоками террасы.
+function _poolCutAreaM2() {
+  if (!S.pool || typeof poolPolygonWorld !== 'function') return 0;
+  const lw = (typeof lastHouseSize === 'function') ? lastHouseSize() : { L: 0, W: 0 };
+  const poly = poolPolygonWorld(lw.L, lw.W);
+  if (!poly) return 0;
+  let area = 0;
+  for (const pp of (typeof _terraceRectsToPolygons === 'function'
+                    ? _terraceRectsToPolygons('pool_terrace') : [])) {
+    const w = canvasToWorld(pp, lw.L, lw.W);
+    const minX = Math.min(...w.map(p => p.x)), maxX = Math.max(...w.map(p => p.x));
+    const minZ = Math.min(...w.map(p => p.z)), maxZ = Math.max(...w.map(p => p.z));
+    area += polyAreaM2(clipPolyToRect(poly, minX, maxX, minZ, maxZ));
+  }
+  return area;
 }
 
 // ── Запрос к бэкенду через Calculator + кэш по телу запроса ──
@@ -2322,7 +2633,7 @@ function dCloseSummary() {
 // обслуживали. getActive и ttg остаются: их использует viewer3d и index.html.)
 // ══════════════════════════════════════════════
 // Парных тумблеров не осталось: ограждение стало отдельным элементом проекта,
-// а навес переехал в его настройки (TODO.md → ОГРАЖДЕНИЯ 2–3).
+// а навес над террасой убран совсем (TODO.md, этап 1 п.5).
 const TG_PAIRS = {};
 function ttg(el) {
   el.classList.toggle('on');
