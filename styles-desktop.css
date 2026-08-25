@@ -371,25 +371,20 @@ body.d-editor-open .d-3d-hint { display: none; }
   border-color: var(--btn-border); box-shadow: none;
   cursor: not-allowed; pointer-events: none;
 }
-/* Правка и удаление настроенного элемента — оранжевые квадраты 48×48 справа от
-   кнопки, по верхнему краю ряда; иконки белые (assets/icons). */
-.d-sb-edit, .d-sb-delete {
-  width: 48px; height: 48px; flex-shrink: 0; background: var(--accent);
-  border: none; border-radius: var(--r); cursor: pointer; padding: 0;
-  display: flex; align-items: center; justify-content: center;
+/* Настроенный раздел правится ОДНОЙ кнопкой «Изменить» справа от его кнопки
+   (TODO.md, этап 2 п.2). Квадратов с иконками правки и удаления больше нет:
+   сброс раздела делает кнопка «Удалить всё» внутри самого редактора. */
+.d-sb-edit {
+  height: 48px; flex-shrink: 0; padding: 0 16px; background: var(--accent);
+  border: none; border-radius: var(--r); cursor: pointer;
+  color: #fff; font-size: 16px; font-weight: 600; white-space: nowrap;
   transition: background .15s;
 }
-.d-sb-edit:hover:not(:disabled),
-.d-sb-delete:hover:not(:disabled) { background: var(--accent-hover); }
-.d-sb-edit.locked, .d-sb-edit:disabled,
-.d-sb-delete.locked, .d-sb-delete:disabled {
-  background: var(--btn-off-bg); cursor: not-allowed; pointer-events: none;
+.d-sb-edit:hover:not(:disabled) { background: var(--accent-hover); }
+.d-sb-edit.locked, .d-sb-edit:disabled {
+  background: var(--btn-off-bg); color: var(--btn-off-text);
+  cursor: not-allowed; pointer-events: none;
 }
-/* Иконки разного размера — задаём каждой свой, растягивать по общему правилу нельзя. */
-.d-sb-edit img { width: 20px; height: 20px; display: block; }
-.d-sb-delete img { width: 19px; height: 18px; display: block; }
-/* У заблокированной кнопки белая иконка на светлом фоне не видна — гасим её. */
-.d-sb-edit:disabled img, .d-sb-delete:disabled img { filter: brightness(0) invert(.65); }
 
 /* Toast-уведомление (про конфликт крыльцо↔терраса и т.п.) */
 #d-toast {
@@ -417,6 +412,15 @@ body.d-editor-open .d-3d-hint { display: none; }
    колонки кнопок — настройки уезжали вниз, оставляя пустое место. */
 .d-sb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .d-sb-accordion { padding: 10px 2px 4px; }
+/* Фильтры каталога под кнопкой выбранного раздела (TODO.md, этап 2 п.1).
+   Отступ слева — как у надписи на кнопке раздела, чтобы блок читался как её
+   продолжение. Цена в ОДНУ колонку: панель уже правой, в два столбца подписи
+   тиров ломались на три строки. */
+.d-sb-filters { padding: 12px 14px 6px; }
+.d-sb-filters .d-color-section { margin-bottom: 14px; }
+.d-sb-filters .d-color-section:last-child { margin-bottom: 0; }
+.d-sb-filters .d-color-grid { grid-template-columns: repeat(8, 1fr); }
+.d-sb-filters .d-price-grid { grid-template-columns: 1fr; gap: 6px; margin-bottom: 0; }
 .d-sb-accordion:empty { display: none; }
 .d-sb-accordion .d-param-group:last-child { margin-bottom: 0; }
 .d-sb-accordion .tg:last-child { margin-bottom: 0; }
@@ -622,17 +626,17 @@ body.d-editor-open .d-3d-hint { display: none; }
 .d-color-grid {
   display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; margin-bottom: 4px;
 }
+/* Образец цвета: диаметр на 20% меньше прежнего, обводка выбранного — ТОЛЬКО
+   внешняя (TODO.md, этап 2 п.1). Внутренняя рамка съедала и без того небольшой
+   кружок, из-за неё цвет читался хуже. */
 .d-color-dot {
-  width: 100%; aspect-ratio: 1; border-radius: 50%; cursor: pointer;
-  border: 3px solid transparent; transition: border-color .15s, transform .12s;
+  width: 80%; aspect-ratio: 1; justify-self: center;
+  border-radius: 50%; cursor: pointer;
+  border: none; transition: box-shadow .15s, transform .12s;
   box-shadow: 0 1px 3px rgba(0,0,0,.2);
 }
 .d-color-dot:hover { transform: scale(1.1); }
-/* Выбранный цвет обводится оранжевым (геометрия та же, менялся только цвет). */
-.d-color-dot.selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--accent);
-}
+.d-color-dot.selected { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--accent); }
 
 /* Material cards in panel */
 .d-mat-list {

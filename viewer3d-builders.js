@@ -185,9 +185,31 @@ let _houseBboxMinZ = 0;
 // HouseBuilder.getHouseFloorPolygon(...) с параметрами из DOM.
 let _housePoly = null;
 
+// Габариты дома последней сборки — нужны обратному преобразованию worldToCanvas
+// (редактор ограждения рисует в координатах плана то, что посчитано в мире).
+let _lastHouseL = 0, _lastHouseW = 0;
+
 function canvasToWorld(pts, houseL, houseW) {
   const gridSize=GRID, offsetX=(gridSize-houseL)/2, offsetZ=(gridSize-houseW)/2;
+  _lastHouseL = houseL; _lastHouseW = houseW;
   return pts.map(p=>({ x:p.x*gridSize-offsetX+_houseBboxMinX, z:p.y*gridSize-offsetZ+_houseBboxMinZ }));
+}
+
+// Габариты дома последней сборки — редактору плана они нужны, чтобы считать
+// геометрию ограждения в мире теми же значениями, что и 3D.
+function lastHouseSize() { return { L: _lastHouseL, W: _lastHouseW }; }
+
+// Обратное преобразование: мир → нормированные координаты плана. Габариты дома по
+// умолчанию берутся из последнего canvasToWorld — плану они неизвестны.
+function worldToCanvas(pts, houseL, houseW) {
+  const gridSize = GRID;
+  const L = (houseL !== undefined) ? houseL : _lastHouseL;
+  const W = (houseW !== undefined) ? houseW : _lastHouseW;
+  const offsetX = (gridSize - L) / 2, offsetZ = (gridSize - W) / 2;
+  return pts.map(p => ({
+    x: (p.x + offsetX - _houseBboxMinX) / gridSize,
+    y: (p.z + offsetZ - _houseBboxMinZ) / gridSize,
+  }));
 }
 
 // Преобразует прямоугольники секции (по умолчанию терраса/крыльцо) в массив
@@ -1230,9 +1252,13 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         placeGeo(RC.rails, mRail);
 
         // ── Нижний столб-ньюэл (post), вертикальный, стоит НА ЗЕМЛЕ (B продлён до Y=0) ──
+        // Сечение — как у столбов ограждения террасы: это один товар, и фильтр
+        // «сечение столба» (TODO.md, этап 2 п.5) должен действовать на обоих.
+        const postK = (typeof S !== 'undefined' && S.railFilters && S.railFilters.postW)
+          ? S.railFilters.postW / 100 : 1;
         const mPost = new THREE.Matrix4().makeBasis(headX, up, crossH);
         mPost.setPosition(B.x, B.y, B.z);
-        mPost.multiply(new THREE.Matrix4().makeScale(1, ky, 1));
+        mPost.multiply(new THREE.Matrix4().makeScale(postK, ky, postK));
         placeGeo(RC.post, mPost);
 
         // ── Балясины по видимым проступям (i=0..n-2): вертикальные, нативное сечение,

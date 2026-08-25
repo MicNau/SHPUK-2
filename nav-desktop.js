@@ -34,7 +34,7 @@ const D_CANVAS_INIT = {
   pool_terrace: () => initRectCanvas('pool_terrace'),
   paths:        () => initPathsCanvas(),
   fence:        () => { initSnapCanvas('fence'); _dSyncFenceHeight(); },
-  railing:      () => initSnapCanvas('railing'),
+  railing:      () => initRailingCanvas(),
   beds:         () => initBedsCanvas(),
   facade:       () => initFacadeCanvas(),
   furniture:    () => initFurnitureCanvas(),
@@ -313,8 +313,7 @@ function _dResetAllConfigurations() {
   S.mats = {};
   S.elementMat = {};
   S.estimate = {};
-  S.catColors = new Set();
-  S.catPrices = new Set();
+  S.catFilters = {};        // фильтры каталога у каждого раздела свои
   S.catSection = null;
   S.curSec = 0;
   dConfigured.clear();
@@ -790,14 +789,40 @@ function _dRenderSidebar() {
             ${item.lbl}
           </button>
           ${isEditing ? '<div class="d-sb-accordion" id="d-sb-accordion"></div>' : ''}
+          ${(isActive && !isEditing) ? `
+          <div class="d-sb-filters" id="d-sb-filters">
+            <div class="d-color-section" id="d-color-section">
+              <div class="d-color-title">Цвет:</div>
+              <div class="d-color-grid" id="d-color-grid"></div>
+            </div>
+            <div class="d-color-section" id="d-price-section">
+              <div class="d-color-title">Цена:</div>
+              <div class="d-price-grid" id="d-price-grid"></div>
+            </div>
+            ${item.id === 'railing' ? `
+            <div class="d-color-section">
+              <div class="d-color-title">Крышка столба:</div>
+              <div class="d-price-grid" id="d-rail-cap-grid"></div>
+            </div>
+            <div class="d-color-section">
+              <div class="d-color-title">Сечение столба:</div>
+              <div class="d-price-grid" id="d-rail-post-grid"></div>
+            </div>` : ''}
+          </div>` : ''}
         </div>
         ${isEditing ? '<div class="d-sb-actions" id="d-sb-actions"></div>' : ''}
-        ${!isEditing && isCfg && item.hasEditor ? `<button class="d-sb-edit ${isLocked ? 'locked' : ''}" title="Редактировать"
-            onclick="dEditItem('${item.id}')" ${isLocked ? 'disabled' : ''}><img src="assets/icons/icon_edit.svg" alt=""></button>` : ''}
-        ${!isEditing && isCfg ? `<button class="d-sb-delete ${isLocked ? 'locked' : ''}" title="Удалить настройки"
-            onclick="dDeleteItem('${item.id}')" ${isLocked ? 'disabled' : ''}><img src="assets/icons/icon_delete.svg" alt=""></button>` : ''}
+        ${!isEditing && isCfg && item.hasEditor ? `<button class="d-sb-edit ${isLocked ? 'locked' : ''}"
+            onclick="dEditItem('${item.id}')" ${isLocked ? 'disabled' : ''}>Изменить</button>` : ''}
       </div>`;
   }).join('');
+
+  // Фильтры каталога живут в ряду активного раздела — их надо наполнить сразу
+  // после перерисовки списка (разметку выше создаёт этот же шаблон).
+  if (document.getElementById('d-sb-filters')) {
+    _dRenderColorGrid();
+    _dRenderPriceGrid();
+    _dRenderRailFilters();
+  }
 
   // Кнопка «Дальше» внизу панели живёт только пока открыт редактор.
   const nextSlot = document.getElementById('d-sb-next');
@@ -808,6 +833,15 @@ function _dRenderSidebar() {
   // Правую панель материалов показываем только когда выбран элемент проекта.
   const panel = document.getElementById('d-panel');
   if (panel) panel.classList.toggle('hidden', !dActiveItem);
+
+  // Раскрытый раздел «всплывает» (TODO.md, этап 2 п.15): вместе с фильтрами ряд
+  // становится высоким и у нижних пунктов уезжает за край панели. Прокручиваем
+  // список так, чтобы ряд был виден целиком.
+  if (dActiveItem) {
+    const row = list.querySelector('.d-sb-btn[data-id="' + dActiveItem + '"]');
+    const box = row && row.closest('.d-sb-row');
+    if (box) requestAnimationFrame(() => box.scrollIntoView({ block: 'nearest' }));
+  }
 
 }
 
@@ -876,6 +910,92 @@ function dDeleteItem(secId) {
   if (typeof buildScene3d === 'function') {
     setTimeout(() => init3dCanvas('d-slot-workspace'), 50);
   }
+}
+
+// ── Фильтры ограждения: крышка столба и его сечение (TODO.md, этап 2 п.5) ──
+// Сечение влияет на 3D (толщина столбов), крышка — только на подбор товара: своего
+// поля у товара нет, поэтому ищем слово в названии/описании. Если под фильтр не
+// подходит НИ ОДИН товар раздела, фильтр не применяется — иначе каталог просто
+// опустел бы на данных, где этих слов нет (см. _railingFilterProducts).
+function _dRenderRailFilters() {
+  const cap = document.getElementById('d-rail-cap-grid');
+  if (cap) {
+    cap.innerHTML = RAIL_CAP_TYPES.map(t =>
+      `<button class="d-price-btn ${S.railFilters.cap === t.id ? 'selected' : ''}"
+               onclick="dSetRailFilter('cap', '${t.id}')">
+         <span class="d-radio"></span><span class="d-price-txt"><b>${t.lbl}</b></span>
+       </button>`).join('');
+  }
+  const post = document.getElementById('d-rail-post-grid');
+  if (post) {
+    post.innerHTML = RAIL_POST_WIDTHS.map(w =>
+      `<button class="d-price-btn ${S.railFilters.postW === w ? 'selected' : ''}"
+               onclick="dSetRailFilter('postW', ${w})">
+         <span class="d-radio"></span><span class="d-price-txt"><b>${w} мм</b></span>
+       </button>`).join('');
+  }
+}
+
+// Повторный клик по выбранному варианту снимает фильтр.
+function dSetRailFilter(kind, value) {
+  S.railFilters[kind] = (S.railFilters[kind] === value) ? null : value;
+  _dRenderRailFilters();
+  if (kind === 'postW' && typeof onParamChange === 'function') onParamChange();
+  dShowResults();
+}
+
+// Отбор товаров ограждения по виду крышки. Пустой результат означает, что в данных
+// нет таких слов — тогда фильтр игнорируем и пишем об этом в консоль.
+function _railingFilterProducts(products) {
+  if (dActiveItem !== 'railing' || !S.railFilters.cap) return products;
+  const t = RAIL_CAP_TYPES.find(x => x.id === S.railFilters.cap);
+  if (!t) return products;
+  const hit = products.filter(p => t.re.test((p.name || '') + ' ' + (p.previewText || '')));
+  if (hit.length) return hit;
+  console.info('[railing] по фильтру «' + t.lbl + '» товаров не нашлось — показываем все:',
+               'у товаров нет поля с видом крышки, отбор идёт по названию');
+  return products;
+}
+
+// ── «Обозначить вход» в ограждении (TODO.md, этап 2 п.4) ──
+// Ставит разрыв на самом длинном свободном участке периметра; дальше пользователь
+// двигает две точки прямо на плане. Повторное нажатие вход убирает.
+function dRailingEntry() {
+  if (S.railingEntry) {
+    S.railingEntry = null;
+  } else {
+    const e = (typeof railingDefaultEntry === 'function') ? railingDefaultEntry() : null;
+    if (!e) { dToast('Сначала разметьте террасу — вход ставится на её периметре'); return; }
+    S.railingEntry = e;
+  }
+  if (typeof _railingSync === 'function') _railingSync();
+  if (typeof drawSnapCanvas === 'function') drawSnapCanvas('railing');
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
+// ── «Удалить всё» — сброс раздела в нулевое состояние, НЕ выходя из редактора ──
+// (TODO.md, этап 2 п.2). Данные раздела чистятся, редактор переинициализируется —
+// раздел выглядит так же, как при первом заходе.
+function dResetSection(secId) {
+  const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
+  const label = item ? item.lbl : secId;
+  if (!window.confirm(`Удалить всё в разделе «${label}»?`)) return;
+
+  if (S.pts && S.pts[secId]) S.pts[secId] = [];
+  if (RECT_SECTIONS[secId]) { secRects(secId).length = 0; setSecActiveIdx(secId, null); }
+  if (secId === 'steps')     S.steps = { ...DEFAULT_STEPS_RECT };
+  if (secId === 'beds')      { S.beds = []; S.activeBed = null; }
+  if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
+  if (secId === 'facade')    S.wallZones = {};
+  if (secId === 'railing') { S.railingEntry = null; S.railFilters = { cap: null, postW: null }; }
+  if (S.mats && S.mats[secId]) delete S.mats[secId];
+  if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
+  if (S.estimate && S.estimate[secId]) delete S.estimate[secId];
+
+  // Перезапускаем редактор раздела: он сам вернёт стартовую разметку.
+  const initFn = D_CANVAS_INIT[secId];
+  if (initFn) initFn();
+  if (typeof onParamChange === 'function') onParamChange();
 }
 
 // ── Click on sidebar button ──
@@ -1071,7 +1191,8 @@ function _dRenderPanelContent() {
   // Палитра цветов у каждого элемента своя: выбранные для прошлого элемента цвета,
   // которых нет в текущей палитре, вычищаем — иначе невидимый выбор фильтрует выдачу.
   const _palette = new Set(_elementColors(secId).map(c => c.id));
-  S.catColors = new Set([...S.catColors].filter(n => _palette.has(n)));
+  const _f = catFilter(secId);
+  _f.colors = new Set([..._f.colors].filter(n => _palette.has(n)));
 
   // Auto-show catalog results (селектор раздела и блок образцов убраны из UI)
   dShowResults();
@@ -1247,13 +1368,13 @@ function _dRenderColorGrid() {
   const sect = document.getElementById('d-color-section');
   const isFurniture = (dActiveItem === 'furniture');
   if (sect) sect.style.display = isFurniture ? 'none' : '';
-  if (isFurniture) { S.catColors = new Set(); grid.innerHTML = ''; return; }
+  if (isFurniture) { catFilter(dActiveItem).colors = new Set(); grid.innerHTML = ''; return; }
   // Показываем только те цвета палитры, под которые в разделе есть товары:
   // раньше в фильтре висели цвета из COLORS.md, обнулявшие выдачу. Пока каталог
   // не загружен, палитра показывается целиком — иначе фильтр мигал бы пустым.
   const colors = _availableColors(dActiveItem);
   grid.innerHTML = colors.map(c =>
-    `<div class="d-color-dot ${S.catColors.has(c.id) ? 'selected' : ''}"
+    `<div class="d-color-dot ${catFilter(dActiveItem).colors.has(c.id) ? 'selected' : ''}"
           title="${c.label}" style="background:${c.hex};"
           onclick="dToggleColor('${c.id.replace(/'/g, "\\'")}')"></div>`
   ).join('');
@@ -1267,9 +1388,9 @@ function _dRenderPriceGrid() {
   const sect = document.getElementById('d-price-section');
   const isFurniture = (dActiveItem === 'furniture');
   if (sect) sect.style.display = isFurniture ? 'none' : '';
-  if (isFurniture) { S.catPrices = new Set(); grid.innerHTML = ''; return; }
+  if (isFurniture) { catFilter(dActiveItem).prices = new Set(); grid.innerHTML = ''; return; }
   grid.innerHTML = PRICE_TIERS.map(t =>
-    `<button class="d-price-btn ${S.catPrices.has(t.id) ? 'selected' : ''}"
+    `<button class="d-price-btn ${catFilter(dActiveItem).prices.has(t.id) ? 'selected' : ''}"
              onclick="dSelectPrice('${t.id}')">
        <span class="d-radio"></span>
        <span class="d-price-lbl">${t.lbl}<span class="d-price-sub">${t.sub}</span></span>
@@ -1278,8 +1399,9 @@ function _dRenderPriceGrid() {
 }
 
 function dToggleColor(cid) {
-  if (S.catColors.has(cid)) S.catColors.delete(cid);
-  else S.catColors.add(cid);
+  const colors = catFilter(dActiveItem).colors;
+  if (colors.has(cid)) colors.delete(cid);
+  else colors.add(cid);
   _dRenderColorGrid();
   dShowResults();
 }
@@ -1333,18 +1455,20 @@ function _itemColors(textsOf, it) {
 // Позиции без распознанного цвета при активном фильтре скрываются.
 // textsOf(item) — массив текстов по убыванию приоритета (см. _itemColors).
 function _filterByColors(items, textsOf) {
-  if (!S.catColors.size) return items;
+  const _sel = catFilter(dActiveItem).colors;
+  if (!_sel.size) return items;
   return items.filter(it => {
     const colors = _itemColors(textsOf, it);
-    for (const c of S.catColors) if (colors.has(c)) return true;
+    for (const c of _sel) if (colors.has(c)) return true;
     return false;
   });
 }
 
 // Тиры можно включать вместе: выдача — объединение, как у фильтра цвета.
 function dSelectPrice(tid) {
-  if (S.catPrices.has(tid)) S.catPrices.delete(tid);
-  else                      S.catPrices.add(tid);
+  const prices = catFilter(dActiveItem).prices;
+  if (prices.has(tid)) prices.delete(tid);
+  else                 prices.add(tid);
   _dRenderPriceGrid();
   dShowResults();
 }
@@ -1436,9 +1560,10 @@ const PRICE_TIER_MATCH = {
 // Несколько выбранных тиров объединяются: товар проходит, если подошёл хотя бы
 // под один. Раньше тир был один и включение второго снимало первый.
 function _filterRealByPrice(products) {
-  if (!S.catPrices.size) return products;
+  const _tiers = catFilter(dActiveItem).prices;
+  if (!_tiers.size) return products;
   return products.filter(p => {
-    for (const t of S.catPrices) {
+    for (const t of _tiers) {
       const m = PRICE_TIER_MATCH[t];
       if (m && m(p)) return true;
     }
@@ -1548,8 +1673,8 @@ function _dRenderRealResults(allProducts) {
   if (!list) return;
   // Цвет — приоритетно из ПОЛЯ color (появилось в API 2026-07-29, имена совпадают
   // с палитрой COLORS.md); затем название; preview_text — fallback (см. _itemColors).
-  const products = _filterByColors(_filterRealByPrice(allProducts),
-    p => [p.color || '', p.name || '', p.previewText || '']);
+  const products = _railingFilterProducts(_filterByColors(_filterRealByPrice(allProducts),
+    p => [p.color || '', p.name || '', p.previewText || '']));
   if (!products.length) {
     list.innerHTML = '<div style="padding:16px;color:#999;font-size:13px;">Нет товаров под выбранные фильтры</div>';
     return;
@@ -1591,7 +1716,7 @@ function _dRenderStubResults() {
   let results = [...STUB_RESULTS];
   // Заглушки фильтруются по тем же тирам; выбранные объединяются.
   const STUB_TIER_IDS = { budget: [4], balanced: [1, 4], premium: [2, 3] };
-  const picked = [...S.catPrices];
+  const picked = [...catFilter(dActiveItem).prices];
   if (picked.length && !picked.includes('mpk')) {
     const ids = new Set(picked.flatMap(t => STUB_TIER_IDS[t] || []));
     results = results.filter(r => ids.has(r.id));

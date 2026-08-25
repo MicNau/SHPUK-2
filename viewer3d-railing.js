@@ -268,13 +268,19 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, segsOv
   // Ставит столб с дедупом по общему реестру (стыки rect-ов): если рядом уже есть
   // столб — не дублируем. Высоких столбов-опор больше нет: навес над террасой убран
   // (TODO.md, этап 1 п.5), все столбы ограждения одной высоты.
+  // Сечение столба — из фильтра раздела (TODO.md, этап 2 п.5). Родное сечение модуля
+  // 100 мм, поэтому 125 мм = масштаб 1.25 В ПЛАНЕ (по X и Z), высота не меняется.
+  const postK = (typeof S !== 'undefined' && S.railFilters && S.railFilters.postW)
+    ? S.railFilters.postW / 100 : 1;
   function placePostAt(px, pz, ux, uz) {
     if (_railPostReg) {
       for (const e of _railPostReg) {
         if (Math.hypot(e.x - px, e.z - pz) < RAIL_POST_MERGE) return;   // точка уже покрыта
       }
     }
-    placeGeo(_railingCache.post, mat(px, pz, ux, uz, 1));
+    const m = mat(px, pz, ux, uz, 1);
+    if (postK !== 1) m.multiply(new THREE.Matrix4().makeScale(postK, 1, postK));
+    placeGeo(_railingCache.post, m);
     if (_railPostReg) _railPostReg.push({ x: px, z: pz });
   }
 
@@ -340,4 +346,208 @@ function buildRailingLine3d(parent, pts, deckHeight, houseL, houseW, mat) {
     } catch (e) { console.error('[buildRailingLine3d]', e); }
   }
   _railPostReg = null;
+}
+
+// ══════════════════════════════════════════════
+// АВТОМАТИЧЕСКОЕ ОГРАЖДЕНИЕ ТЕРРАСЫ (TODO.md, этап 2 п.4)
+// Точки руками больше не ставятся: ограждение идёт по СВОБОДНОМУ периметру террасы —
+// union-контур блоков, инсет RAIL_INSET, без участков у стен дома и без проёма под
+// лестницу (то и другое уже умеет terracePerimeterSegments). Плюс «вход» — разрыв,
+// заданный двумя точками, которые пользователь двигает по периметру.
+// ══════════════════════════════════════════════
+
+// Мировые bbox блоков террасы.
+function _railTerraceRectsWorld(houseL, houseW) {
+  const rects = (typeof secRects === 'function') ? secRects('terrace') : [];
+  const out = [];
+  for (const r of rects) {
+    if (!r || r.w <= 0 || r.h <= 0) continue;
+    const w = canvasToWorld([
+      { x: r.x, y: r.y }, { x: r.x + r.w, y: r.y + r.h },
+    ], houseL, houseW);
+    out.push({
+      minX: Math.min(w[0].x, w[1].x), maxX: Math.max(w[0].x, w[1].x),
+      minZ: Math.min(w[0].z, w[1].z), maxZ: Math.max(w[0].z, w[1].z),
+    });
+  }
+  return out;
+}
+
+// Петли периметра ограждения (инсетнутые), мир. Первая — самая длинная: по ней
+// отсчитывается положение «входа».
+function railingLoopsWorld(houseL, houseW) {
+  const rects = _railTerraceRectsWorld(houseL, houseW);
+  if (!rects.length || typeof _terraceUnionLoops !== 'function') return [];
+  const loops = _terraceUnionLoops(rects)
+    .map(l => _insetOrthoPolygon(l, RAIL_INSET))
+    .filter(l => l && l.length >= 3);
+  const len = loop => {
+    let s = 0;
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[i], b = loop[(i + 1) % loop.length];
+      s += Math.hypot(b.x - a.x, b.z - a.z);
+    }
+    return s;
+  };
+  return loops.sort((a, b) => len(b) - len(a));
+}
+
+// Параметризация петли: накопленные длины вершин + полная длина.
+function railingLoopPath(loop) {
+  const cum = [0];
+  for (let i = 0; i < loop.length; i++) {
+    const a = loop[i], b = loop[(i + 1) % loop.length];
+    cum.push(cum[i] + Math.hypot(b.x - a.x, b.z - a.z));
+  }
+  return { loop, cum, L: cum[cum.length - 1] };
+}
+
+// Точка на петле по параметру t ∈ [0,1).
+function railingPointAt(path, t) {
+  const { loop, cum, L } = path;
+  if (!L) return { x: loop[0].x, z: loop[0].z };
+  let d = ((t % 1) + 1) % 1 * L;
+  for (let i = 0; i < loop.length; i++) {
+    if (d <= cum[i + 1] || i === loop.length - 1) {
+      const a = loop[i], b = loop[(i + 1) % loop.length];
+      const segLen = cum[i + 1] - cum[i];
+      const k = segLen > 1e-9 ? (d - cum[i]) / segLen : 0;
+      return { x: a.x + (b.x - a.x) * k, z: a.z + (b.z - a.z) * k };
+    }
+  }
+  return { x: loop[0].x, z: loop[0].z };
+}
+
+// Параметр ближайшей к точке позиции на петле.
+function railingParamOf(path, p) {
+  const { loop, cum, L } = path;
+  if (!L) return 0;
+  let best = 0, bestD = Infinity;
+  for (let i = 0; i < loop.length; i++) {
+    const a = loop[i], b = loop[(i + 1) % loop.length];
+    const dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz;
+    if (l2 < 1e-9) continue;
+    let k = ((p.x - a.x) * dx + (p.z - a.z) * dz) / l2;
+    k = Math.max(0, Math.min(1, k));
+    const qx = a.x + dx * k, qz = a.z + dz * k;
+    const d = Math.hypot(p.x - qx, p.z - qz);
+    if (d < bestD) { bestD = d; best = (cum[i] + Math.hypot(qx - a.x, qz - a.z)) / L; }
+  }
+  return best;
+}
+
+// Вычитает из отрезка [s0,s1] (в параметрах петли) циклический интервал входа.
+function _railCutEntry(s0, s1, e0, e1) {
+  if (e0 === null || e1 === null) return [[s0, s1]];
+  // Интервал входа может проходить через 0 — разворачиваем в один или два куска.
+  const cuts = (e0 <= e1) ? [[e0, e1]] : [[e0, 1], [0, e1]];
+  let parts = [[s0, s1]];
+  for (const [c0, c1] of cuts) {
+    const next = [];
+    for (const [a, b] of parts) {
+      if (c1 <= a || c0 >= b) { next.push([a, b]); continue; }   // не пересекается
+      if (c0 > a) next.push([a, c0]);
+      if (c1 < b) next.push([c1, b]);
+    }
+    parts = next;
+  }
+  return parts.filter(([a, b]) => b - a > 1e-6);
+}
+
+// Сегменты ограждения в МИРЕ: свободный периметр минус «вход».
+function railingAutoSegmentsWorld(houseL, houseW) {
+  const loops = railingLoopsWorld(houseL, houseW);
+  const out = [];
+  const entry = (typeof S !== 'undefined') ? S.railingEntry : null;
+  for (let li = 0; li < loops.length; li++) {
+    const loop = loops[li];
+    const path = railingLoopPath(loop);
+    const segs = terracePerimeterSegments(loop, houseL, houseW, []);
+    // Вход задан только на главной петле (li === 0).
+    const e0 = (li === 0 && entry) ? entry.t0 : null;
+    const e1 = (li === 0 && entry) ? entry.t1 : null;
+    for (const s of segs) {
+      const L = Math.hypot(s.bx - s.ax, s.bz - s.az);
+      if (L < 0.05 || !path.L) continue;
+      // Параметр середины точен: отрезок лежит на ребре петли.
+      const tMid = railingParamOf(path, { x: (s.ax + s.bx) / 2, z: (s.az + s.bz) / 2 });
+      const half = L / path.L / 2;
+      // Направление: параметр растёт вдоль обхода петли, поэтому концы могут
+      // поменяться местами — восстанавливаем по фактическим точкам.
+      const t0 = tMid - half, t1 = tMid + half;
+      for (const [a, b] of _railCutEntry(t0, t1, e0, e1)) {
+        const pa = railingPointAt(path, a), pb = railingPointAt(path, b);
+        if (Math.hypot(pb.x - pa.x, pb.z - pa.z) < 0.05) continue;
+        out.push({ ax: pa.x, az: pa.z, bx: pb.x, bz: pb.z });
+      }
+    }
+  }
+  return out;
+}
+
+// Те же сегменты в координатах плана — ими живут S.pts.railing, смета и рисование.
+// Формат прежний: точки подряд, между отрезками маркер {break:true}.
+function railingAutoPoints(houseL, houseW) {
+  const segs = railingAutoSegmentsWorld(houseL, houseW);
+  const pts = [];
+  for (const s of segs) {
+    const c = worldToCanvas([{ x: s.ax, z: s.az }, { x: s.bx, z: s.bz }], houseL, houseW);
+    if (pts.length) pts.push({ break: true });
+    pts.push(c[0], c[1]);
+  }
+  return pts;
+}
+
+// Ширина «входа» по умолчанию (м) — потом двигается двумя точками.
+const RAIL_ENTRY_W = 1.0;
+
+// Главная петля периметра (по ней отсчитывается вход) или null.
+function railingMainPath(houseL, houseW) {
+  const lw = (houseL === undefined) ? lastHouseSize() : { L: houseL, W: houseW };
+  const loops = railingLoopsWorld(lw.L, lw.W);
+  return loops.length ? railingLoopPath(loops[0]) : null;
+}
+
+// Вход по умолчанию: середина самого длинного свободного участка, ширина RAIL_ENTRY_W.
+function railingDefaultEntry(houseL, houseW) {
+  const lw = (houseL === undefined) ? lastHouseSize() : { L: houseL, W: houseW };
+  const loops = railingLoopsWorld(lw.L, lw.W);
+  if (!loops.length) return null;
+  const path = railingLoopPath(loops[0]);
+  if (!path.L) return null;
+  const saved = S.railingEntry;
+  S.railingEntry = null;                      // считаем участки БЕЗ старого входа
+  const segs = railingAutoSegmentsWorld(lw.L, lw.W);
+  S.railingEntry = saved;
+  let best = null, bestL = 0;
+  for (const s of segs) {
+    const L = Math.hypot(s.bx - s.ax, s.bz - s.az);
+    if (L > bestL) { bestL = L; best = s; }
+  }
+  if (!best || bestL < 0.6) return null;
+  const tMid = railingParamOf(path, { x: (best.ax + best.bx) / 2, z: (best.az + best.bz) / 2 });
+  const half = Math.min(RAIL_ENTRY_W, bestL - 0.4) / 2 / path.L;
+  return { t0: (tMid - half + 1) % 1, t1: (tMid + half + 1) % 1 };
+}
+
+// Точки входа в координатах плана (для рисования и перетаскивания) или null.
+function railingEntryPointsNorm() {
+  if (!S.railingEntry) return null;
+  const path = railingMainPath();
+  if (!path) return null;
+  const a = railingPointAt(path, S.railingEntry.t0);
+  const b = railingPointAt(path, S.railingEntry.t1);
+  const c = worldToCanvas([{ x: a.x, z: a.z }, { x: b.x, z: b.z }]);
+  return [c[0], c[1]];
+}
+
+// Перетаскивание точки входа: idx 0/1, p — точка плана {x,y}.
+function railingEntryDrag(idx, p) {
+  if (!S.railingEntry) return;
+  const lw = lastHouseSize();
+  const path = railingMainPath(lw.L, lw.W);
+  if (!path) return;
+  const w = canvasToWorld([p], lw.L, lw.W)[0];
+  const t = railingParamOf(path, w);
+  if (idx === 0) S.railingEntry.t0 = t; else S.railingEntry.t1 = t;
 }

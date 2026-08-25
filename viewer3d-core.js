@@ -1269,10 +1269,13 @@ function buildScene3d() {
     } catch (e) { console.error('[buildFurniture3d]', e); }
   }
 
-  // Ограждение — отдельный элемент проекта: строится по НАРИСОВАННОЙ ломаной
-  // (S.pts.railing), а не по контуру террасы. Высота стандартная, не настраивается.
-  // Навеса над террасой больше нет (TODO.md, этап 1 п.5) — вместе с ним ушли высокие
-  // столбы под плиту и рейкаст по её низу.
+  // Ограждение идёт по СВОБОДНОМУ периметру террасы и пересчитывается на каждой
+  // сборке (TODO.md, этап 2 п.4): точки руками не ставятся, разрыв под лестницу и
+  // «вход» вычитаются автоматически. S.pts.railing — производный кэш этой разметки:
+  // по нему рисуется план, считается смета и залипают ступени.
+  if (S.sections.includes('railing') && typeof railingAutoPoints === 'function') {
+    S.pts.railing = railingAutoPoints(houseL, houseW);
+  }
   const railingPts = (S.pts.railing || []).filter(p => !p.break);
   if (S.sections.includes('railing') && railingPts.length >= 2) {
     if (_railingCache && _railingCache.rails) {

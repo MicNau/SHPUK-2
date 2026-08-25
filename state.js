@@ -288,8 +288,17 @@ const S = {
   curSec: 0,
   // matSubMode удалён вместе с переключателем ТЕРРАСА/ОГРАЖДЕНИЕ в каталоге:
   // ограждение — отдельный элемент проекта со своим разделом каталога.
-  catColors: new Set(),
-  catPrices: new Set(),  // выбранные ценовые тиры (можно несколько)
+  // Фильтры ограждения (TODO.md, этап 2 п.5): вид крышки столба и его сечение.
+  // Сечение влияет на 3D; по виду крышки бэкенд атрибута не отдаёт — фильтруем
+  // товары по названию, см. _railingFilterProducts в nav-desktop.js.
+  railFilters: { cap: null, postW: null },
+  // «Вход» в ограждении террасы — разрыв, заданный двумя точками на периметре
+  // (доли длины главной петли, TODO.md этап 2 п.4). null — входа нет.
+  railingEntry: null,
+  // Фильтры каталога — СВОИ у каждого раздела (TODO.md, этап 2 п.1): выбранный
+  // цвет террасной доски не должен обнулять выдачу в заборе. Ключ — id пункта меню,
+  // значение — { colors:Set, prices:Set }. Доступ через catFilter() ниже.
+  catFilters: {},
   catSection: null,    // выбранный раздел каталога (bitrix_id) или null = дефолт по элементу
   catShowResults: false,
   estimate: {},        // elementId -> { id, name, price } — выбранный в смету товар по элементу
@@ -318,6 +327,22 @@ const S = {
   frameMat: 'brown'
 };
 // (TOTAL и глобальный step удалены — прогресс-бар мобильного wizard'а.)
+
+// Варианты фильтров ограждения (TODO.md, этап 2 п.5).
+const RAIL_CAP_TYPES = [
+  { id: 'plastic', lbl: 'Пластмасса', re: /пластик|пластмасс|plastic|пвх/i },
+  { id: 'dpk',     lbl: 'ДПК',        re: /дпк|wpc|композит/i },
+  { id: 'metal',   lbl: 'Металл',     re: /металл|алюмин|сталь|metal/i },
+];
+const RAIL_POST_WIDTHS = [100, 125];   // мм
+
+// Фильтры каталога выбранного раздела (создаются лениво). secId — id пункта меню.
+function catFilter(secId) {
+  const key = secId || '_';
+  let f = S.catFilters[key];
+  if (!f) { f = S.catFilters[key] = { colors: new Set(), prices: new Set() }; }
+  return f;
+}
 
 // Участок без дома. Единый источник истины для canvas.js / viewer3d-core.js:
 // десктоп хранит в S.houseType typeId ('type_NN') или 'no_house' («Пустой участок»);
