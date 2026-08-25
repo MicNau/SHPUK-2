@@ -897,27 +897,45 @@ function drawSnapCanvas(name) {
   // (TODO.md, этап 2 п.10). Рисуем пунктиром по контурам, отодвинутым наружу.
   if (name === 'fence') {
     const lim = FENCE_MIN_CLEAR / GRID;
-    ctx.strokeStyle = 'rgba(210,60,60,.45)';
-    ctx.lineWidth = 1.5 / cx.scale;
-    ctx.setLineDash([6 / cx.scale, 4 / cx.scale]);
-    const box = (x0, y0, x1, y1) => {
-      ctx.beginPath();
-      ctx.rect((x0 - lim) * W, (y0 - lim) * H, (x1 - x0 + 2 * lim) * W, (y1 - y0 + 2 * lim) * H);
-      ctx.stroke();
-    };
+    const zones = [];
     if (typeof isEmptyLot !== 'function' || !isEmptyLot()) {
       const hp = getHousePolygonNorm();
       if (hp && hp.bboxNorm) {
         const b = hp.bboxNorm;
-        box(b.nx, b.ny, b.nx + b.nw, b.ny + b.nh);
+        zones.push({ x0: b.nx, y0: b.ny, x1: b.nx + b.nw, y1: b.ny + b.nh });
       }
     }
     for (const sec of ['terrace', 'pool_terrace']) {
       for (const r of (typeof secRects === 'function' ? secRects(sec) : [])) {
-        if (r && r.w > 0 && r.h > 0) box(r.x, r.y, r.x + r.w, r.y + r.h);
+        if (r && r.w > 0 && r.h > 0) zones.push({ x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h });
       }
     }
+    ctx.save();
+    ctx.strokeStyle = 'rgba(210,60,60,.45)';
+    ctx.fillStyle = 'rgba(210,60,60,.07)';
+    ctx.lineWidth = 1.5 / cx.scale;
+    ctx.setLineDash([6 / cx.scale, 4 / cx.scale]);
+    for (const z of zones) {
+      ctx.beginPath();
+      ctx.rect((z.x0 - lim) * W, (z.y0 - lim) * H,
+               (z.x1 - z.x0 + 2 * lim) * W, (z.y1 - z.y0 + 2 * lim) * H);
+      ctx.fill(); ctx.stroke();
+    }
     ctx.setLineDash([]);
+    // Подпись — в самой зоне, в полосе под нижней гранью (там же, где по умолчанию
+    // идёт забор). Две строки, чтобы влезть в 3-метровую полосу.
+    if (zones.length) {
+      const zx0 = Math.min(...zones.map(z => z.x0)), zx1 = Math.max(...zones.map(z => z.x1));
+      const zy1 = Math.max(...zones.map(z => z.y1));
+      const lineH = 11 * PLAN_FONT_K / cx.scale;
+      const midY = (zy1 + lim / 2) * H;
+      ctx.fillStyle = 'rgba(176,38,38,.9)';
+      ctx.font = planFont(9, cx.scale, 'bold');
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('Установка забора ближе 3 метров', (zx0 + zx1) / 2 * W, midY - lineH / 2);
+      ctx.fillText('от строения запрещена СНИПом', (zx0 + zx1) / 2 * W, midY + lineH / 2);
+    }
+    ctx.restore();
   }
 
   // Калитка на заборе — метка проёма шириной FENCE_GATE_W (TODO.md, этап 2 п.8).

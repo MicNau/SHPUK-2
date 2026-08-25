@@ -2062,20 +2062,63 @@ function _fenceBoxPost(group, x, z, angle, panelH, frameMat) {
   group.add(post);
 }
 
-// Замыкающий столб для забора ИЗ МОДЕЛИ товара: клонируем секцию и выбрасываем из неё
-// полотно — остаётся каркас (столб). Так свободный конец получает столб той же формы,
-// что и остальные. Клон без каркасных мешей → false, зовущий ставит box-столб.
+// Столб в модели товара: узкая вдоль пролёта и высокая деталь (или прямо названная
+// столбом). Возвращает габарит по X в системе прототипа или null. Меши во всю секцию
+// — горизонтальные прогоны, поперечины, полотно — столбом не считаются.
+const FENCE_POST_RE = /post|stolb|столб|стойк|pillar|opora|опор/i;
+
+function _fencePostSpan(o, nativeW, nativeH) {
+  const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
+  if (FENCE_PANEL_RE.test(nm)) return null;
+  const bb = new THREE.Box3().setFromObject(o);
+  if (!isFinite(bb.min.x) || !isFinite(bb.max.x)) return null;
+  const w = bb.max.x - bb.min.x, h = bb.max.y - bb.min.y;
+  if (w > nativeW * 0.5) return null;                      // деталь во всю секцию — не столб
+  if (!FENCE_POST_RE.test(nm) && (w > Math.max(0.35, nativeW * 0.25) || h < nativeH * 0.5)) return null;
+  return { minX: bb.min.x, maxX: bb.max.x };
+}
+
+// Разбор прототипа: есть ли в модели столб в начале секции (X≈0) и в её конце
+// (X≈nativeW). Считается один раз и кэшируется в userData.
+function _fenceProtoPosts(proto) {
+  if (proto.userData._posts) return proto.userData._posts;
+  const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
+  const tol = _fencePostTol(nw);
+  proto.updateMatrixWorld(true);
+  const info = { any: false, atStart: false, atEnd: false };
+  proto.traverse(o => {
+    if (!o.isMesh) return;
+    const p = _fencePostSpan(o, nw, nh);
+    if (!p) return;
+    info.any = true;
+    if (p.minX <= tol) info.atStart = true;
+    if (p.maxX >= nw - tol) info.atEnd = true;
+  });
+  proto.userData._posts = info;
+  return info;
+}
+
+function _fencePostTol(nativeW) { return Math.max(0.15, nativeW * 0.08); }
+
+// Замыкающий столб для забора ИЗ МОДЕЛИ товара: клонируем секцию и оставляем в ней
+// ТОЛЬКО столб начала секции — всё остальное (полотно, горизонтальные прогоны,
+// крепёж) выбрасываем. Раньше выбрасывалось лишь полотно, и на свободном конце
+// вместе со столбом висели прогоны длиной в целую секцию, а сам столб оказывался
+// не в конце пролёта (баг с рендера 2026-08-25). Столбов не нашли → false,
+// зовущий ставит box-столб.
 function _fenceModelPost(proto, group, x, z, angle, sy, frameMat) {
+  const info = _fenceProtoPosts(proto);
+  if (!info.any || !info.atStart) return false;
+  const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
+  const tol = _fencePostTol(nw);
   const inst = proto.clone(true);
-  inst.position.set(x, 0, z);
-  inst.rotation.y = angle;
-  inst.scale.set(1, sy, 1);   // столб по длине не тянем — только по высоте
+  inst.updateMatrixWorld(true);              // фильтруем, пока клон стоит в нуле
   const drop = [];
   let kept = 0;
   inst.traverse(o => {
     if (!o.isMesh) return;
-    const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
-    if (!FENCE_PANEL_RE.test(nm)) {
+    const p = _fencePostSpan(o, nw, nh);
+    if (p && p.minX <= tol) {
       o.material = frameMat;             // в threeState.fenceMeshes не идёт: примерка
       o.castShadow = o.receiveShadow = true;  // образца красит только полотно
       kept++;
@@ -2083,6 +2126,11 @@ function _fenceModelPost(proto, group, x, z, angle, sy, frameMat) {
   });
   if (!kept) return false;
   for (const o of drop) if (o.parent) o.parent.remove(o);
+  // Столб начала секции, поставленный в конец пролёта, — это столб начала
+  // следующей (несуществующей) секции: ровно то, что нужно на свободном конце.
+  inst.position.set(x, 0, z);
+  inst.rotation.y = angle;
+  inst.scale.set(1, sy, 1);   // столб по длине не тянем — только по высоте
   group.add(inst);
   return true;
 }
@@ -2240,9 +2288,12 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
       // Замыкающий столб пролёта: у модели столб стоит в НАЧАЛЕ секции, поэтому
       // свободный конец забора оставался без столба — ставим его отдельно (клоном
       // каркаса модели, а если каркасных мешей в ней нет — обычным box-столбом).
+      // Если в модели столб есть и в конце секции, последняя секция пролёта уже
+      // закрыта своим столбом — ничего не добавляем.
       const ex = a.x + ux * segLen, ez = a.z + uz * segLen;
       if (!postSet.has(postKey(ex, ez))) {
         postSet.add(postKey(ex, ez));
+        if (proto && _fenceProtoPosts(proto).atEnd) return;
         if (!proto || !_fenceModelPost(proto, fenceGroup, ex, ez, angle, sy, frameMat)) {
           _fenceBoxPost(fenceGroup, ex, ez, angle, panelH, frameMat);
         }
