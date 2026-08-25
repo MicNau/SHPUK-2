@@ -2086,14 +2086,22 @@ function _fenceProtoPosts(proto) {
   const tol = _fencePostTol(nw);
   proto.updateMatrixWorld(true);
   const info = { any: false, atStart: false, atEnd: false };
+  const posts = [], other = [];
   proto.traverse(o => {
     if (!o.isMesh) return;
     const p = _fencePostSpan(o, nw, nh);
-    if (!p) return;
+    if (!p) { other.push(o.name || '(без имени)'); return; }
+    posts.push(`${o.name || '(без имени)'} [${p.minX.toFixed(2)}…${p.maxX.toFixed(2)}]`);
     info.any = true;
     if (p.minX <= tol) info.atStart = true;
     if (p.maxX >= nw - tol) info.atEnd = true;
   });
+  // На стенде должно быть видно, как разобрана конкретная модель: если столб слит
+  // с прогонами в один меш, он сюда не попадёт и на свободном конце встанет
+  // простой box-столб (это фолбэк, а не баг разбора).
+  console.info('[fence] столбы в модели:', posts.length ? posts.join(', ') : 'не распознаны',
+               '| начало секции:', info.atStart, '| конец секции:', info.atEnd,
+               '| прочие меши:', other.join(', '));
   proto.userData._posts = info;
   return info;
 }
