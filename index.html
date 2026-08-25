@@ -164,15 +164,14 @@
           <div class="d-canvas-header">
             <div>
               <div class="d-canvas-title">Грядки — размещение</div>
-              <div class="d-canvas-hint">Перетаскивайте грядку. «ДОБАВИТЬ» — новая грядка, «ПОВЕРНУТЬ» — развернуть выбранную, «УДАЛИТЬ» — убрать выбранную.</div>
+              <div class="d-canvas-hint">Грядку перетаскивайте мышью, клик по ней разворачивает её на 90°. «ЕЩЁ ОДНА» добавляет грядку, «УДАЛИТЬ ВЫБРАННУЮ» — убирает.</div>
             </div>
           </div>
           <div class="d-canvas-area" id="cw-beds"><canvas id="cv-beds"></canvas></div>
           <div class="d-canvas-footer">
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addBed()">Добавить</button>
-              <button class="d-canvas-btn" onclick="rotateActiveBed()">Повернуть</button>
-              <button class="d-canvas-btn" onclick="delActiveBed()">Удалить</button>
+              <button class="d-canvas-btn" onclick="addBed()">Ещё одна</button>
+              <button class="d-canvas-btn" onclick="delActiveBed()">Удалить выбранную</button>
               <button class="d-canvas-btn" onclick="dResetSection('beds')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('beds')">Дальше →</button>
             </div>
@@ -229,14 +228,14 @@
           <div class="d-canvas-header">
             <div>
               <div class="d-canvas-title">Садовая мебель — точки размещения</div>
-              <div class="d-canvas-hint">Отмечайте точками, куда поставить мебель. Комплект мебели считается одним объектом. «ПОВЕРНУТЬ» — развернуть точку на 90°, стрелка указывает «перёд» мебели. «УДАЛИТЬ» — убрать выбранную точку. При выборе товара мебель ставится по очереди, начиная с активной точки.</div>
+              <div class="d-canvas-hint">Отмечайте точками, куда поставить мебель: клик по плану ставит точку, клик по готовой точке разворачивает её на 90° (стрелка — «перёд» мебели), перетаскивание двигает. Комплект мебели считается одним объектом; при выборе товара мебель ставится по очереди, начиная с активной точки.</div>
             </div>
           </div>
           <div class="d-canvas-area" id="cw-furniture"><canvas id="cv-furniture"></canvas></div>
           <div class="d-canvas-footer">
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="rotateActiveFurniture(1)">Повернуть</button>
-              <button class="d-canvas-btn" onclick="delActiveFurniture()">Удалить</button>
+              <button class="d-canvas-btn" onclick="addFurniturePoint()">Ещё одна</button>
+              <button class="d-canvas-btn" onclick="delActiveFurniture()">Удалить выбранную</button>
               <button class="d-canvas-btn" onclick="dResetSection('furniture')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('furniture')">Дальше →</button>
             </div>
@@ -379,8 +378,8 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=54"></script>
-<script src="canvas.js?v=49"></script>
+<script src="state.js?v=55"></script>
+<script src="canvas.js?v=50"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=85"></script>
 <!-- Каталожный API: домен выбирается по хосту.
@@ -407,6 +406,6 @@
 <script src="viewer3d-railing.js?v=10"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=95"></script>
+<script src="nav-desktop.js?v=96"></script>
 </body>
 </html>

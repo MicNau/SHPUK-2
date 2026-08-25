@@ -1045,6 +1045,8 @@ function initPathsCanvas() { initSnapCanvas('paths'); }
 const FURN_HIT_R = 16;      // радиус захвата точки (экранные px при scale=1)
 
 let furnDrag = false, furnDragIdx = -1;
+// Точку реально сдвинули? Отличает перетаскивание от клика (клик = поворот на 90°).
+let _furnMoved = false;
 
 function initFurnitureCanvas() {
   const wrap = document.getElementById('cw-furniture');
@@ -1089,6 +1091,7 @@ function initFurnitureCanvas() {
       S.activeFurniture = S.furniture.length - 1;
       if (typeof onParamChange === 'function') onParamChange();
     }
+    _furnMoved = (hit < 0);        // новая точка — это не «клик по точке»
     furnDrag = true; furnDragIdx = S.activeFurniture;
     wrap.style.cursor = 'move';
     drawFurnitureCanvas();
@@ -1098,13 +1101,19 @@ function initFurnitureCanvas() {
     if (!furnDrag || furnDragIdx < 0 || !S.furniture[furnDragIdx]) return;
     const { x, y, W } = getWorld(e.clientX, e.clientY);
     const p = S.furniture[furnDragIdx];
-    p.x = Math.max(0, Math.min(1, snapNorm(x / W)));
-    p.y = Math.max(0, Math.min(1, snapNorm(y / W)));
+    const nx = Math.max(0, Math.min(1, snapNorm(x / W)));
+    const ny = Math.max(0, Math.min(1, snapNorm(y / W)));
+    if (nx !== p.x || ny !== p.y) _furnMoved = true;
+    p.x = nx; p.y = ny;
     drawFurnitureCanvas();
   });
   document.addEventListener('mouseup', e => {
     if (!furnDrag || e.button !== 0) return;
+    const idx = furnDragIdx;
     furnDrag = false; furnDragIdx = -1; wrap.style.cursor = '';   // вернуть курсор из стилей (.d-canvas-area)
+    // Клик по точке БЕЗ сдвига разворачивает её на 90° — как у грядок
+    // (TODO.md, этап 2 пп.12-13).
+    if (!_furnMoved && idx >= 0) { S.activeFurniture = idx; rotateActiveFurniture(1); return; }
     if (typeof onParamChange === 'function') onParamChange();   // пересборка 3D
   });
 
@@ -1118,6 +1127,21 @@ function initFurnitureCanvas() {
     e.preventDefault();
     rotateActiveFurniture(e.shiftKey ? -1 : 1);
   });
+}
+
+// «Ещё одна» — новая точка рядом с активной (кнопка вместо клика по пустому месту,
+// TODO.md этап 2 п.13). Клик по плану точку тоже ставит — так быстрее расставлять.
+function addFurniturePoint() {
+  if (!S.furniture) S.furniture = [];
+  const step = SNAP / GRID * 2;
+  const a = (S.activeFurniture !== null) ? S.furniture[S.activeFurniture] : null;
+  const x = a ? Math.min(1, a.x + step) : 0.5;
+  const y = a ? a.y : 0.6;
+  S.furniture.push({ x: snapNorm(x), y: snapNorm(y), rot: a ? (a.rot || 0) : 0, product: null });
+  S.activeFurniture = S.furniture.length - 1;
+  drawFurnitureCanvas();
+  if (typeof _dSyncFurniturePanel === 'function') _dSyncFurniturePanel();
+  if (typeof onParamChange === 'function') onParamChange();
 }
 
 // Поворот выбранной точки на ±90°. dir: 1 — против часовой на плане (+Y в 3D).
@@ -2378,10 +2402,15 @@ function snapBedMove(ds, dx, dy) {
   return { x: c.x, y: c.y, w: ds.w, h: ds.h };
 }
 
+// Грядку реально сдвинули? Нужен, чтобы отличить клик (разворот на 90°, TODO.md
+// этап 2 п.12) от перетаскивания.
+let _bedMoved = false;
+
 function applyBedDrag(wx, wy, W) {
   if (bedDragIdx < 0 || !S.beds[bedDragIdx]) return;
   const ds = bedDragStart;
   const dx = (wx - ds.mx) / W, dy = (wy - ds.my) / W;
+  if (Math.hypot(dx, dy) > 0.002) _bedMoved = true;   // ~6 см на плане
   const res = snapBedMove(ds, dx, dy);
   const b = S.beds[bedDragIdx];
   b.x = res.x; b.y = res.y; b.w = res.w; b.h = res.h;
@@ -2414,7 +2443,19 @@ function attachBedsEvents(wrap) {
     const b = S.beds[hit.idx];
     bedDrag = 'move'; bedDragIdx = hit.idx;
     bedDragStart = { mx: worldX, my: worldY, x: b.x, y: b.y, w: b.w, h: b.h };
+    _bedMoved = false;
     return true;
+  };
+
+  // Клик по грядке БЕЗ перетаскивания разворачивает её на 90° (TODO.md, этап 2 п.12).
+  // Отличаем клик от перетаскивания по факту сдвига: applyBedDrag ставит _bedMoved.
+  const endBedDrag = () => {
+    if (!bedDrag) return;
+    const wasIdx = bedDragIdx;
+    bedDrag = null; bedDragStart = null; bedDragIdx = -1;
+    wrap.style.cursor = '';
+    if (!_bedMoved && wasIdx >= 0) { S.activeBed = wasIdx; rotateActiveBed(); }
+    else if (typeof onParamChange === 'function') onParamChange();
   };
 
   // ── TOUCH ──
@@ -2476,10 +2517,7 @@ function attachBedsEvents(wrap) {
     const { x, y, W } = getWorld(e.clientX, e.clientY);
     applyBedDrag(x, y, W);
   });
-  document.addEventListener('mouseup', () => {
-    if (!bedDrag) return;
-    bedDrag = null; bedDragStart = null; bedDragIdx = -1; wrap.style.cursor = '';   // вернуть курсор из стилей (.d-canvas-area)
-  });
+  document.addEventListener('mouseup', endBedDrag);
 
   wrap.addEventListener('wheel', e => {
     e.preventDefault();

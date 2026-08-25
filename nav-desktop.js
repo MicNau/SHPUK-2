@@ -799,6 +799,15 @@ function _dRenderSidebar() {
               <div class="d-color-title">Цена:</div>
               <div class="d-price-grid" id="d-price-grid"></div>
             </div>
+            ${item.id === 'beds' ? `
+            <div class="d-color-section">
+              <div class="d-color-title">Высота борта:</div>
+              <div class="d-price-grid" id="d-bed-h-grid"></div>
+            </div>
+            <div class="d-color-section">
+              <div class="d-color-title">Крепёж:</div>
+              <div class="d-price-grid" id="d-bed-mount-grid"></div>
+            </div>` : ''}
             ${item.id === 'railing' ? `
             <div class="d-color-section">
               <div class="d-color-title">Крышка столба:</div>
@@ -822,6 +831,7 @@ function _dRenderSidebar() {
     _dRenderColorGrid();
     _dRenderPriceGrid();
     _dRenderRailFilters();
+    _dRenderBedFilters();
   }
 
   // Кнопка «Дальше» внизу панели живёт только пока открыт редактор.
@@ -910,6 +920,53 @@ function dDeleteItem(secId) {
   if (typeof buildScene3d === 'function') {
     setTimeout(() => init3dCanvas('d-slot-workspace'), 50);
   }
+}
+
+// ── Фильтры грядок: высота борта и крепёж (TODO.md, этап 2 п.11) ──
+// Высота борта применяется сразу к 3D (S.bedH); тип крепежа своего поля у товара
+// не имеет — отбор по названию, как у крышки столба ограждения.
+function _dRenderBedFilters() {
+  const hg = document.getElementById('d-bed-h-grid');
+  if (hg) {
+    hg.innerHTML = BED_HEIGHTS.map(h =>
+      `<button class="d-price-btn ${S.bedFilters.h === h ? 'selected' : ''}"
+               onclick="dSetBedFilter('h', ${h})">
+         <span class="d-radio"></span><span class="d-price-txt"><b>${h} мм</b></span>
+       </button>`).join('');
+  }
+  const mg = document.getElementById('d-bed-mount-grid');
+  if (mg) {
+    mg.innerHTML = BED_MOUNTS.map(m =>
+      `<button class="d-price-btn ${S.bedFilters.mount === m.id ? 'selected' : ''}"
+               onclick="dSetBedFilter('mount', '${m.id}')">
+         <span class="d-radio"></span><span class="d-price-txt"><b>${m.lbl}</b></span>
+       </button>`).join('');
+  }
+}
+
+// Повторный клик снимает фильтр. Высота борта сразу видна в 3D.
+function dSetBedFilter(kind, value) {
+  S.bedFilters[kind] = (S.bedFilters[kind] === value) ? null : value;
+  if (kind === 'h') {
+    // Снятый фильтр возвращает высоту выбранного товара (или дефолт 0.20 м).
+    const fromProduct = _bedHeightFromProduct(S.elementMat && S.elementMat.beds);
+    S.bedH = S.bedFilters.h ? S.bedFilters.h / 1000 : (fromProduct || 0.20);
+    if (typeof onParamChange === 'function') onParamChange();
+  }
+  _dRenderBedFilters();
+  dShowResults();
+}
+
+// Отбор товаров грядок по типу крепежа (поля у товара нет — ищем в названии).
+function _bedFilterProducts(products) {
+  if (dActiveItem !== 'beds' || !S.bedFilters.mount) return products;
+  const m = BED_MOUNTS.find(x => x.id === S.bedFilters.mount);
+  if (!m) return products;
+  const hit = products.filter(p => m.re.test((p.name || '') + ' ' + (p.previewText || '')));
+  if (hit.length) return hit;
+  console.info('[beds] по фильтру «' + m.lbl + '» товаров не нашлось — показываем все:',
+               'у товаров нет поля с типом крепежа, отбор идёт по названию');
+  return products;
 }
 
 // ── Фильтры ограждения: крышка столба и его сечение (TODO.md, этап 2 п.5) ──
@@ -1004,6 +1061,7 @@ function dResetSection(secId) {
   if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
   if (secId === 'facade')    S.wallZones = {};
   if (secId === 'fence')     S.fenceGate = null;
+  if (secId === 'beds')      S.bedFilters = { h: null, mount: null };
   if (secId === 'railing') { S.railingEntry = null; S.railFilters = { cap: null, postW: null }; }
   if (S.mats && S.mats[secId]) delete S.mats[secId];
   if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
@@ -1262,7 +1320,9 @@ function _applySampleToActive(sample) {
     // Грядки: высота борта — свойство товара (150/200/225/270/300 мм, см. TODO.md),
     // поэтому забираем её из названия и отдаём в 3D.
     if (dActiveItem === 'beds') {
-      const h = _bedHeightFromProduct(sample);
+      // Явно выбранная в фильтре высота (TODO.md, этап 2 п.11) главнее той, что
+      // угадана по названию товара: пользователь задал её сам.
+      const h = S.bedFilters.h ? S.bedFilters.h / 1000 : _bedHeightFromProduct(sample);
       if (h) S.bedH = h;
     }
     if (typeof buildScene3d === 'function') buildScene3d();
@@ -1690,8 +1750,8 @@ function _dRenderRealResults(allProducts) {
   if (!list) return;
   // Цвет — приоритетно из ПОЛЯ color (появилось в API 2026-07-29, имена совпадают
   // с палитрой COLORS.md); затем название; preview_text — fallback (см. _itemColors).
-  const products = _railingFilterProducts(_filterByColors(_filterRealByPrice(allProducts),
-    p => [p.color || '', p.name || '', p.previewText || '']));
+  const products = _bedFilterProducts(_railingFilterProducts(_filterByColors(_filterRealByPrice(allProducts),
+    p => [p.color || '', p.name || '', p.previewText || ''])));
   if (!products.length) {
     list.innerHTML = '<div style="padding:16px;color:#999;font-size:13px;">Нет товаров под выбранные фильтры</div>';
     return;
