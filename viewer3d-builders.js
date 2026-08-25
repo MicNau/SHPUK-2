@@ -1996,12 +1996,44 @@ function ensureFenceModel(url, label) {
     if (typeof THREE === 'undefined' || !THREE.GLTFLoader) { resolve(null); return; }
     show(null);
     new THREE.GLTFLoader().load(url,
-      gltf => { _fenceCache[url] = gltf.scene; _fenceLoading[url] = null; done(); resolve(gltf.scene); },
+      gltf => { const proto = _fenceNormalizeProto(gltf.scene);
+                _fenceCache[url] = proto; _fenceLoading[url] = null; done(); resolve(proto); },
       ev => { show(ev && ev.total > 0 ? Math.min(100, Math.round(ev.loaded / ev.total * 100)) : null); },
       err => { console.warn('[fence] не загрузилась модель', url, err);
                _fenceCache[url] = null; _fenceLoading[url] = null; done(); resolve(null); });
   });
   return _fenceLoading[url];
+}
+
+// Приводит модель товара к нашим осям: начало секции в X=0, низ на земле (Y=0),
+// полотно по оси линии (центр по Z). Родные габариты запоминаем — по ним считается
+// масштаб секции. Без этого масштаб брался от жёстких FENCE_SECTION_W × FENCE_NATIVE_H,
+// и модель с другой шириной/высотой или со сдвинутым origin расползалась: длинные
+// прогоны уезжали за крайние столбы (баг с рендера 2026-08-25).
+function _fenceNormalizeProto(scene) {
+  const proto = new THREE.Group();
+  proto.add(scene);
+  const box = new THREE.Box3().setFromObject(scene);
+  if (!isFinite(box.min.x) || !isFinite(box.max.x)) return proto;
+  scene.position.x -= box.min.x;                       // начало секции — в нуле
+  scene.position.y -= box.min.y;                       // низ — на земле
+  scene.position.z -= (box.min.z + box.max.z) / 2;     // полотно — по оси линии
+  const w = box.max.x - box.min.x, h = box.max.y - box.min.y;
+  proto.userData.nativeW = (w > 0.2) ? w : FENCE_SECTION_W;
+  proto.userData.nativeH = (h > 0.2) ? h : FENCE_NATIVE_H;
+  console.info('[fence] габариты модели:', proto.userData.nativeW.toFixed(2), '×',
+               proto.userData.nativeH.toFixed(2), 'м');
+  return proto;
+}
+
+// Родные габариты прототипа (с запасными значениями, если модель не нормализовалась).
+function _fenceNativeW(proto) {
+  const w = proto && proto.userData && proto.userData.nativeW;
+  return (w > 0.2) ? w : FENCE_SECTION_W;
+}
+function _fenceNativeH(proto) {
+  const h = proto && proto.userData && proto.userData.nativeH;
+  return (h > 0.2) ? h : FENCE_NATIVE_H;
 }
 
 // Планочная UV для полотна УСЛОВНОГО забора (без модели товара). Доски идут вдоль
@@ -2037,7 +2069,7 @@ function _fenceModelPost(proto, group, x, z, angle, sy, frameMat) {
   const inst = proto.clone(true);
   inst.position.set(x, 0, z);
   inst.rotation.y = angle;
-  inst.scale.set(1, sy, 1);
+  inst.scale.set(1, sy, 1);   // столб по длине не тянем — только по высоте
   const drop = [];
   let kept = 0;
   inst.traverse(o => {
@@ -2100,7 +2132,9 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
   const inst = proto.clone(true);
   inst.position.set(x, 0, z);
   inst.rotation.y = angle;
-  inst.scale.set(spanW / FENCE_SECTION_W, sy, 1);
+  // Масштаб — от РОДНЫХ габаритов модели: секция ровно занимает пролёт, как бы ни
+  // была нарисована модель. Профиль поперёк линии (Z) не трогаем.
+  inst.scale.set(spanW / _fenceNativeW(proto), sy, 1);
   let panels = 0;
   inst.traverse(o => {
     if (!o.isMesh) return;
@@ -2136,7 +2170,8 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
 
   const fenceGroup = new THREE.Group();
   const panelH = (typeof S !== 'undefined' && S.fenceH) ? S.fenceH : 1.5;
-  const sy = panelH / FENCE_NATIVE_H;
+  // Масштаб модели по высоте — от её РОДНОЙ высоты (после нормализации она известна).
+  const sy = proto ? (panelH / _fenceNativeH(proto)) : 1;
   // Материал условного забора: если к нему применён товар — его текстуры/цвет
   // (M.deck приходит уже разрешённым из _resolveDeckMat), иначе прежний
   // нейтральный «условный» цвет. Раньше текстура товара сюда не доезжала:
