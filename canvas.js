@@ -219,6 +219,7 @@ function initSnapCanvas(name) {
     if (_lineDragged) { _lineDragged = false; return; }
     if ((name === 'paths' || name === 'fence')
         && _lineHitPoint(name, _snapPointerNorm(wrap, name, e)) !== null) return;
+    if (name === 'fence' && _gateHit(_snapPointerNorm(wrap, name, e))) return;
     const cvEl=document.getElementById('cv-'+name); if (!cvEl) return;
     const r=wrap.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
     const sx=(e.clientX-r.left)*dpr, sy=(e.clientY-r.top)*dpr;
@@ -265,6 +266,16 @@ function initSnapCanvas(name) {
       const ny2 = nearest(snY, terrY); snY = (ny2 !== null) ? ny2 : (nearest(snY, wallY) ?? snY);
     }
 
+    // Дорожки: клик по первой точке текущей линии ЗАМЫКАЕТ контур (TODO п.7) —
+    // точка ставится ровно в неё, и дорожка получается кольцевой.
+    if (name === 'paths') {
+      const segs = splitAtBreaks(S.pts.paths || []);
+      const cur = segs[segs.length - 1];
+      if (cur && cur.length > 2 && Math.hypot(cur[0].x - snX, cur[0].y - snY) < 0.02) {
+        snX = cur[0].x; snY = cur[0].y;
+      }
+    }
+
     // Забор нельзя ставить ближе FENCE_MIN_CLEAR к дому и террасе (TODO.md, этап 2 п.10).
     if (name === 'fence' && _fenceTooClose({ x: snX, y: snY })) {
       if (typeof dToast === 'function') dToast('Забор нельзя ставить ближе 3 м от дома и террасы');
@@ -281,6 +292,14 @@ function initSnapCanvas(name) {
   wrap.addEventListener('mousedown', e => {
     if (e.button !== 0) return;
     const p = _snapPointerNorm(wrap, name, e);
+    // Калитка выбирается и таскается как точка (TODO п.13) — проверяем её первой.
+    if (name === 'fence' && _gateHit(p)) {
+      _lineSel = { name, idx: 'gate' };
+      _lineDrag = true; _lineDragged = false;
+      drawSnapCanvas(name);
+      e.preventDefault();
+      return;
+    }
     const idx = _lineHitPoint(name, p);
     if (idx === null) return;
     _lineSel = { name, idx };
@@ -292,6 +311,15 @@ function initSnapCanvas(name) {
 
   wrap.addEventListener('mousemove', e => {
     if (!_lineDrag || _lineSel.name !== name) return;
+    // Калитку ведём по самой линии забора, без снапа к сетке.
+    if (_lineSel.idx === 'gate') {
+      const q = _fenceProjectToLine(_snapPointerNorm(wrap, name, e));
+      if (!q) return;
+      S.fenceGate = q;
+      _lineDragged = true;
+      drawSnapCanvas(name);
+      return;
+    }
     const p = _snapPointerNorm(wrap, name, e, true);
     if (name === 'fence' && _fenceTooClose(p)) return;   // ближе 3 м не пускаем
     const pt = S.pts[name][_lineSel.idx];
@@ -407,6 +435,33 @@ function _lineEnsureDefault(name) {
   }
 }
 
+// Калитка на плане — такая же управляемая метка, как точка ломаной (TODO п.13):
+// выбирается кликом, перетаскивается вдоль забора, удаляется кнопкой «Удалить
+// точку». В _lineSel она обозначается idx === 'gate'.
+function _gateHit(p) {
+  if (!S.fenceGate) return false;
+  return Math.hypot(S.fenceGate.x - p.x, S.fenceGate.y - p.y) < 0.02;
+}
+
+// Ближайшая точка НА ломаной забора: калитка не должна сходить с линии.
+function _fenceProjectToLine(p) {
+  const segs = splitAtBreaks(S.pts.fence || []);
+  let best = null, bd = Infinity;
+  for (const seg of segs) {
+    for (let i = 0; i < seg.length - 1; i++) {
+      const a = seg[i], b = seg[i + 1];
+      const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+      if (l2 < 1e-12) continue;
+      let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2;
+      t = Math.max(0, Math.min(1, t));
+      const q = { x: a.x + dx * t, y: a.y + dy * t };
+      const d = Math.hypot(p.x - q.x, p.y - q.y);
+      if (d < bd) { bd = d; best = q; }
+    }
+  }
+  return best;
+}
+
 // Калитка: ставится в середину самого длинного отрезка забора (или в выбранную
 // точку, если она есть). Хранится в координатах плана; проём вычитается в 3D.
 function fenceGateDefault() {
@@ -426,6 +481,14 @@ function fenceGateDefault() {
 function delLinePoint(name) {
   const pts = S.pts[name] || [];
   const idx = (_lineSel.name === name) ? _lineSel.idx : null;
+  // Выбранная калитка удаляется этой же кнопкой (TODO п.13).
+  if (idx === 'gate') {
+    S.fenceGate = null;
+    _lineSel = { name, idx: null };
+    drawSnapCanvas(name);
+    if (typeof onParamChange === 'function') onParamChange();
+    return;
+  }
   if (idx === null || !pts[idx]) {
     if (typeof dToast === 'function') dToast('Сначала выберите точку на плане');
     return;
@@ -910,16 +973,16 @@ function drawSnapCanvas(name) {
         if (r && r.w > 0 && r.h > 0) zones.push({ x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h });
       }
     }
+    // Заливка не нужна — достаточно контура (TODO п.11).
     ctx.save();
     ctx.strokeStyle = 'rgba(210,60,60,.45)';
-    ctx.fillStyle = 'rgba(210,60,60,.07)';
     ctx.lineWidth = 1.5 / cx.scale;
     ctx.setLineDash([6 / cx.scale, 4 / cx.scale]);
     for (const z of zones) {
       ctx.beginPath();
       ctx.rect((z.x0 - lim) * W, (z.y0 - lim) * H,
                (z.x1 - z.x0 + 2 * lim) * W, (z.y1 - z.y0 + 2 * lim) * H);
-      ctx.fill(); ctx.stroke();
+      ctx.stroke();
     }
     ctx.setLineDash([]);
     // Подпись — в самой зоне, в полосе под нижней гранью (там же, где по умолчанию
@@ -941,9 +1004,10 @@ function drawSnapCanvas(name) {
   // Калитка на заборе — метка проёма шириной FENCE_GATE_W (TODO.md, этап 2 п.8).
   if (name === 'fence' && S.fenceGate) {
     const g = S.fenceGate;
-    ctx.strokeStyle = DIM_COL; ctx.fillStyle = '#fff';
-    ctx.lineWidth = 2.5 / cx.scale;
-    ctx.beginPath(); ctx.arc(g.x * W, g.y * H, 7 / cx.scale, 0, Math.PI * 2);
+    const gSel = (_lineSel.name === 'fence' && _lineSel.idx === 'gate');
+    ctx.strokeStyle = DIM_COL; ctx.fillStyle = gSel ? DIM_COL : '#fff';
+    ctx.lineWidth = (gSel ? 3.5 : 2.5) / cx.scale;
+    ctx.beginPath(); ctx.arc(g.x * W, g.y * H, (gSel ? 9 : 7) / cx.scale, 0, Math.PI * 2);
     ctx.fill(); ctx.stroke();
     ctx.fillStyle = DIM_COL; ctx.font = planFont(10, cx.scale, 'bold'); ctx.textAlign = 'center';
     ctx.fillText('калитка', g.x * W, g.y * H - 12 / cx.scale);
