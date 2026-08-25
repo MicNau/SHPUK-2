@@ -2043,11 +2043,13 @@ function _defaultRect(secId) {
       ? { x: snapNorm(clamp(b.nx - w0 - gap, w0)), y: snapNorm(clamp(b.ny, h0)), w: w0, h: h0 }
       : { x: snapNorm(0.12), y: snapNorm(0.25), w: w0, h: h0 };
   }
-  // terrace — у нижнего края дома, по центру фасада.
+  // terrace — у нижнего края дома, по центру фасада. Кромку у стены НЕ снапим на
+  // сетку: стена на 0.5 м обычно не попадает, и снап отрывал террасу от дома на
+  // несколько сантиметров (TODO п.2). Вдоль стены (по X) снап остаётся.
   if (b) {
     return {
       x: snapNorm(b.nx + b.nw / 2 - 2 / GRID),
-      y: snapNorm(b.ny + b.nh),
+      y: b.ny + b.nh,
       w: w0, h: snapNorm(2 / GRID),
     };
   }

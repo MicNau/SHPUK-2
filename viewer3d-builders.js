@@ -1427,10 +1427,9 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         placeGeo(RC.rails, mRail);
 
         // ── Нижний столб-ньюэл (post), вертикальный, стоит НА ЗЕМЛЕ (B продлён до Y=0) ──
-        // Сечение — как у столбов ограждения террасы: это один товар, и фильтр
-        // «сечение столба» (TODO.md, этап 2 п.5) должен действовать на обоих.
-        const postK = (typeof S !== 'undefined' && S.railFilters && S.railFilters.postW)
-          ? S.railFilters.postW / 100 : 1;
+        // Сечение — как у столбов ограждения террасы: это один товар, поэтому
+        // берётся из него же (S.railPostW, мм), а не из фильтра каталога.
+        const postK = (typeof S !== 'undefined' && S.railPostW) ? S.railPostW / 100 : 1;
         const mPost = new THREE.Matrix4().makeBasis(headX, up, crossH);
         mPost.setPosition(B.x, B.y, B.z);
         mPost.multiply(new THREE.Matrix4().makeScale(postK, ky, postK));
