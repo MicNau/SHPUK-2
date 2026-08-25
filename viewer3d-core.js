@@ -1082,6 +1082,9 @@ function buildScene3d() {
   // _buildTerracePoly, углы перпендикулярных крыльев сшиваются миттером.
   //   hEdges — рёбра дома (направление досок вдоль ближайшей стены); null у
   //   отдельно стоящих: там доски идут вдоль длинной стороны блока.
+  // Полигон бассейна текущей сборки: ставится перед настилом террасы у бассейна,
+  // остальным секциям вырез не нужен.
+  let _poolPoly = null;
   const _buildRectDecks = (polys, deckH, _hEdges) => {
     const E = 0.04;   // допуск (м)
     const plankDir = (cx, cz, fallback) => {
@@ -1141,7 +1144,14 @@ function buildScene3d() {
         { x: R.eMinX, z: R.eMinZ }, { x: R.eMaxX, z: R.eMinZ },
         { x: R.eMaxX, z: R.eMaxZ }, { x: R.eMinX, z: R.eMaxZ },
       ];
-      try { _buildTerracePoly(houseGroup, M, foot, deckH, R.plankAlongX, 'deckMeshes'); }
+      // Вырез под бассейн — только у террасы у бассейна и только та его часть,
+      // что попадает в этот блок (TODO.md, этап 2 п.14).
+      let holes = null;
+      if (_poolPoly) {
+        const cut = clipPolyToRect(_poolPoly, R.eMinX, R.eMaxX, R.eMinZ, R.eMaxZ);
+        if (cut.length >= 3 && polyAreaM2(cut) > 0.05) holes = [cut];
+      }
+      try { _buildTerracePoly(houseGroup, M, foot, deckH, R.plankAlongX, 'deckMeshes', holes); }
       catch (e) { console.error('[_buildTerracePoly]', e); }
     }
     for (const ct of cornerTris) {
@@ -1183,7 +1193,13 @@ function buildScene3d() {
   const poolRectPolys = _terraceRectsToPolygons('pool_terrace');
   if (S.sections.includes('pool_terrace') && poolRectPolys.length) {
     M.deck = _resolveDeckMat(_baseDeck, 'pool_terrace');
+    _poolPoly = (typeof poolPolygonWorld === 'function') ? poolPolygonWorld(houseL, houseW) : null;
     _buildRectDecks(poolRectPolys, terraceLevel - 0.01, null);
+    if (_poolPoly) {
+      try { buildPool3d(houseGroup, _poolPoly, terraceLevel - 0.01); }
+      catch (e) { console.error('[buildPool3d]', e); }
+    }
+    _poolPoly = null;
     // Отдельно стоящая — свободен весь контур.
     try { buildTerraceNosing(houseGroup, M, _rectsWorld(poolRectPolys), terraceLevel - 0.01); }
     catch (e) { console.error('[buildTerraceNosing pool]', e); }

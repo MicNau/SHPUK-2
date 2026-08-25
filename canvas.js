@@ -2036,6 +2036,49 @@ function hitRect(secId, wx, wy, W) {
   return null;
 }
 
+// ── БАССЕЙН на плане (TODO.md, этап 2 п.14) ──
+// Перетаскивание за тело, изменение размера — за правый нижний угол.
+let _poolDrag = null;
+
+function _poolHit(nx, ny, scale) {
+  const p = S.pool;
+  if (!p) return null;
+  const R = (HANDLE_R / scale) / planPx(document.getElementById('cv-pool_terrace') || {});
+  const hr = Math.max(0.012, R || 0.012);
+  if (Math.hypot(nx - (p.x + p.w), ny - (p.y + p.h)) < hr) return 'resize';
+  if (p.kind === 'round') {
+    const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
+    return (Math.hypot(nx - cx, ny - cy) <= p.w / 2) ? 'move' : null;
+  }
+  return (nx >= p.x && nx <= p.x + p.w && ny >= p.y && ny <= p.y + p.h) ? 'move' : null;
+}
+
+function applyPoolDrag(nx, ny) {
+  const d = _poolDrag; if (!d || !S.pool) return;
+  const dx = nx - d.mx, dy = ny - d.my;
+  const MIN = 1.0 / GRID;                        // минимальный габарит бассейна — 1 м
+  if (d.kind === 'move') {
+    S.pool.x = snapNorm(d.p.x + dx);
+    S.pool.y = snapNorm(d.p.y + dy);
+  } else {
+    let w = Math.max(MIN, snapNorm(d.p.w + dx));
+    let h = Math.max(MIN, snapNorm(d.p.h + dy));
+    if (S.pool.kind === 'round') { const s2 = Math.max(w, h); w = s2; h = s2; }
+    S.pool.w = w; S.pool.h = h;
+  }
+  drawRectCanvas('pool_terrace');
+}
+
+// Бассейн по умолчанию — по центру первого блока террасы у бассейна.
+function poolDefault(kind) {
+  const rects = secRects('pool_terrace');
+  const r = rects && rects.length ? rects[0] : null;
+  const size = Math.min(3.0 / GRID, r ? Math.min(r.w, r.h) * 0.6 : 3.0 / GRID);
+  const cx = r ? r.x + r.w / 2 : 0.5, cy = r ? r.y + r.h / 2 : 0.5;
+  return { kind, x: snapNorm(cx - size / 2), y: snapNorm(cy - size / 2),
+           w: snapNorm(size), h: snapNorm(size) };
+}
+
 function applyRectDrag(secId, wx, wy, W) {
   const rects = secRects(secId);
   if (trDragIdx < 0 || !rects[trDragIdx]) return;
@@ -2070,6 +2113,14 @@ function attachRectEvents(wrap, secId) {
   };
 
   const startDrag = (worldX, worldY, W) => {
+    // Бассейн лежит поверх настила — проверяем его раньше блоков (этап 2 п.14).
+    if (secId === 'pool_terrace' && S.pool) {
+      const ph = _poolHit(worldX / W, worldY / W, (CV[secId] && CV[secId].scale) || 1);
+      if (ph) {
+        _poolDrag = { kind: ph, mx: worldX / W, my: worldY / W, p: { ...S.pool } };
+        return true;
+      }
+    }
     const hit = hitRect(secId, worldX, worldY, W);
     if (!hit) {
       // Клик в пустое место — снимаем активность.
@@ -2155,11 +2206,22 @@ function attachRectEvents(wrap, secId) {
     }
   });
   document.addEventListener('mousemove', e => {
+    if (_poolDrag && secId === 'pool_terrace') {
+      const {x, y, W} = getWorld(e.clientX, e.clientY);
+      applyPoolDrag(x / W, y / W);
+      return;
+    }
     if (!trDrag || trDragSec !== secId) return;
     const {x, y, W} = getWorld(e.clientX, e.clientY);
     applyRectDrag(secId, x, y, W);
   });
   document.addEventListener('mouseup', () => {
+    if (_poolDrag && secId === 'pool_terrace') {
+      _poolDrag = null;
+      wrap.style.cursor = '';
+      if (typeof onParamChange === 'function') onParamChange();
+      return;
+    }
     if (!trDrag || trDragSec !== secId) return;
     trDrag = null; trDragStart = null; trDragIdx = -1; trDragSec = null;
     wrap.style.cursor = '';   // вернуть курсор из стилей (.d-canvas-area)
@@ -2255,12 +2317,36 @@ function drawRectCanvas(secId) {
     }
   }
 
+  // Бассейн (TODO.md, этап 2 п.14): рисуем поверх настила, с ручкой в правом
+  // нижнем углу — за неё меняется размер, за тело перетаскивается.
+  if (secId === 'pool_terrace' && S.pool) {
+    const p = S.pool;
+    ctx.fillStyle = 'rgba(47,127,168,.35)';
+    ctx.strokeStyle = '#2f7fa8';
+    ctx.lineWidth = 2.5 / cx.scale;
+    ctx.beginPath();
+    if (p.kind === 'round') {
+      ctx.ellipse((p.x + p.w / 2) * W, (p.y + p.h / 2) * H, p.w / 2 * W, p.h / 2 * H, 0, 0, Math.PI * 2);
+    } else {
+      ctx.rect(p.x * W, p.y * H, p.w * W, p.h * H);
+    }
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#2f7fa8';
+    ctx.font = planFont(10, cx.scale, 'bold'); ctx.textAlign = 'center';
+    ctx.fillText('Бассейн ' + (p.w * GRID).toFixed(1) + '×' + (p.h * GRID).toFixed(1) + ' м',
+                 (p.x + p.w / 2) * W, (p.y + p.h / 2) * H + 4 / cx.scale);
+    ctx.beginPath();
+    ctx.arc((p.x + p.w) * W, (p.y + p.h) * H, HANDLE_R / cx.scale, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = '#2f7fa8'; ctx.lineWidth = 2 / cx.scale; ctx.stroke();
+  }
+
   // Подсказка если пусто
   if (!rects.length) {
     ctx.fillStyle = '#aaa';
     ctx.font = planFont(13, cx.scale);
     ctx.textAlign = 'center';
-    ctx.fillText('Нажмите «ДОБАВИТЬ» чтобы разметить объект', W/2, H * 0.92);
+    ctx.fillText('Нажмите «ЕЩЁ ОДНА» чтобы разметить объект', W/2, H * 0.92);
   }
 
   ctx.restore();
