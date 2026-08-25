@@ -1967,6 +1967,71 @@ function _trimPathJunctions(lines, halfW) {
   return out;
 }
 
+// Вычесть из набора интервалов [0..1] другой набор.
+function _subtractRanges(keep, cuts) {
+  let out = keep;
+  for (const [c0, c1] of cuts) {
+    const next = [];
+    for (const [k0, k1] of out) {
+      if (c1 <= k0 || c0 >= k1) { next.push([k0, k1]); continue; }   // не пересекаются
+      if (c0 > k0) next.push([k0, Math.min(c0, k1)]);
+      if (c1 < k1) next.push([Math.max(c1, k0), k1]);
+    }
+    out = next.filter(([a, b]) => b - a > 1e-6);
+  }
+  return out;
+}
+
+// Полотно дорожки как замкнутый полигон (левый борт вперёд + правый назад).
+function _pathRibbonPoly(wp, halfW) {
+  const { left, right } = _offsetPolyline(wp, halfW);
+  return [right[0], ...left, ...right.slice(1).reverse()];
+}
+
+// Осевые линии дорожек, разрезанные там, где их накрывает полотно ДРУГОЙ дорожки
+// (TODO п.7). Нужно смете: пересечение попадало в неё дважды — один раз от каждой
+// дорожки. Куски, накрытые более ранней линией, просто выбрасываются: площадь там
+// уже посчитана, а физически это одно и то же покрытие.
+// Ответвления (T-стыки) подрезаются, как и в 3D, тем же _trimPathJunctions.
+function pathLinesNoOverlap(lines, halfW) {
+  if (typeof _offsetPolyline !== 'function') return lines;
+  const trimmed = _trimPathJunctions(lines, halfW);
+  const ribbons = trimmed.map(wp => _pathRibbonPoly(wp, halfW));
+  const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
+  const out = [];
+  trimmed.forEach((wp, i) => {
+    if (i === 0) { out.push(wp); return; }
+    let cur = null, openEnd = false;
+    const flush = () => {
+      if (cur && cur.length >= 2) {
+        let L = 0;
+        for (let k = 1; k < cur.length; k++) L += Math.hypot(cur[k].x - cur[k-1].x, cur[k].z - cur[k-1].z);
+        if (L > 0.05) out.push(cur);
+      }
+      cur = null;
+    };
+    for (let k = 0; k < wp.length - 1; k++) {
+      const a = wp[k], b = wp[k + 1];
+      let keep = [[0, 1]];
+      for (let j = 0; j < i; j++) {
+        keep = _subtractRanges(keep, _polyCutRanges(a.x, a.z, b.x, b.z, ribbons[j], 0));
+      }
+      keep.sort((p, q) => p[0] - q[0]);
+      let first = true;
+      for (const [t0, t1] of keep) {
+        const p0 = lerp(a, b, t0), p1 = lerp(a, b, t1);
+        if (cur && openEnd && first && t0 < 1e-6) cur.push(p1);      // продолжение той же линии
+        else { flush(); cur = [p0, p1]; }
+        first = false;
+        openEnd = (t1 > 1 - 1e-6);
+      }
+      if (!keep.length) { flush(); openEnd = false; }
+    }
+    flush();
+  });
+  return out;
+}
+
 // Дорожки: сеть линий (разделены break). Рендерим посегментными рибонами (митёные углы +
 // доски ⟂ каждому сегменту), а пересечения чиним тримингом концов-ответвлений (T-стыки)
 // на полуширину — конец линии примыкает к краю встречной дорожки без наложения.

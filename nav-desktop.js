@@ -935,8 +935,8 @@ function dDeleteItem(secId) {
 // Высота борта применяется сразу к 3D (S.bedH); тип крепежа своего поля у товара
 // не имеет — отбор по названию, как у крышки столба ограждения.
 // Оба фильтра — МУЛЬТИВЫБОР (TODO п.15): в S.bedFilters лежат массивы значений,
-// пустой массив = фильтр не задан. В 3D показывается ПОСЛЕДНЯЯ выбранная высота —
-// геометрия у грядки одна, а выбранных высот может быть несколько.
+// пустой массив = фильтр не задан. Это фильтры КАТАЛОГА: на 3D они не влияют —
+// до выбора товара грядка обозначается местом, после рисуется по товару.
 function _bedFilterList(kind) {
   const v = S.bedFilters ? S.bedFilters[kind] : null;
   return Array.isArray(v) ? v : (v == null ? [] : [v]);
@@ -964,36 +964,45 @@ function _dRenderBedFilters() {
 }
 
 // Повторный клик снимает своё значение, остальные выбранные остаются.
+// Фильтр только ОТБИРАЕТ КАТАЛОГ и на 3D напрямую не влияет: до выбора товара
+// грядка обозначается местом, после — рисуется по товару (высота борта берётся
+// из него, см. _bedHeightFromProduct).
 function dSetBedFilter(kind, value) {
   const list = _bedFilterList(kind);
   S.bedFilters[kind] = list.includes(value)
     ? list.filter(v => v !== value)
     : list.concat([value]);
-  if (kind === 'h') {
-    // Без фильтра — высота выбранного товара (или дефолт 0.20 м).
-    const on = _bedFilterList('h');
-    const fromProduct = _bedHeightFromProduct(S.elementMat && S.elementMat.beds);
-    S.bedH = on.length ? on[on.length - 1] / 1000 : (fromProduct || 0.20);
-    if (typeof onParamChange === 'function') onParamChange();
-  }
   _dRenderBedFilters();
   dShowResults();
 }
 
-// Отбор товаров грядок по типу крепежа (поля у товара нет — ищем в названии).
-// При мультивыборе товар подходит, если совпал ЛЮБОЙ из выбранных типов.
+// Отбор товаров грядок по фильтрам: высота борта (из названия/поля товара) и тип
+// крепежа (поля у товара нет — ищем в названии). При мультивыборе товар подходит,
+// если совпало ЛЮБОЕ из выбранных значений.
 function _bedFilterProducts(products) {
+  if (dActiveItem !== 'beds') return products;
+  let out = products;
+  const hs = _bedFilterList('h');
+  if (hs.length) {
+    const hit = out.filter(p => {
+      const h = _bedHeightFromProduct(p);
+      return h !== null && hs.includes(Math.round(h * 1000));
+    });
+    if (hit.length) out = hit;
+    else console.info('[beds] по высоте борта ' + hs.join('/') + ' мм товаров не нашлось —',
+                      'показываем все: высота распознаётся по названию товара');
+  }
   const on = _bedFilterList('mount');
-  if (dActiveItem !== 'beds' || !on.length) return products;
+  if (!on.length) return out;
   const mounts = BED_MOUNTS.filter(x => on.includes(x.id));
-  if (!mounts.length) return products;
-  const hit = products.filter(p => mounts.some(m =>
+  if (!mounts.length) return out;
+  const hit = out.filter(p => mounts.some(m =>
     m.re.test((p.name || '') + ' ' + (p.previewText || ''))));
   if (hit.length) return hit;
   console.info('[beds] по фильтру «' + mounts.map(m => m.lbl).join(', ') +
                '» товаров не нашлось — показываем все:',
                'у товаров нет поля с типом крепежа, отбор идёт по названию');
-  return products;
+  return out;
 }
 
 // ── Фильтры ограждения: крышка столба и его сечение (TODO.md, этап 2 п.5) ──
@@ -1393,13 +1402,11 @@ function _applySampleToActive(sample) {
                    modelUrl: sample.modelUrl || '' };
     S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures, ...meta }
                               : (sample.color ? { color: sample.color, ...meta } : null);
-    // Грядки: высота борта — свойство товара (150/200/225/270/300 мм, см. TODO.md),
-    // поэтому забираем её из названия и отдаём в 3D.
+    // Грядки: высота борта — свойство ТОВАРА (150/200/225/270/300 мм, см. TODO.md),
+    // забираем её из названия и отдаём в 3D. Фильтр высоты сюда не вмешивается: он
+    // отбирает каталог, а рисуется то, что выбрано (TODO п.15).
     if (dActiveItem === 'beds') {
-      // Явно выбранная в фильтре высота (TODO.md, этап 2 п.11) главнее той, что
-      // угадана по названию товара: пользователь задал её сам.
-      const on = _bedFilterList('h');
-      const h = on.length ? on[on.length - 1] / 1000 : _bedHeightFromProduct(sample);
+      const h = _bedHeightFromProduct(sample);
       if (h) S.bedH = h;
     }
     if (typeof buildScene3d === 'function') buildScene3d();
@@ -2055,11 +2062,43 @@ function _boardWidthM(name) {
   return 0.14;
 }
 
+// Площадь дорожек с ВЫЧЕТОМ перекрытий (TODO п.7): считается по тем же
+// непересекающимся линиям, что уходят в смету объектами (_pathProjectObjects),
+// поэтому цифра в панели и задание на расчёт всегда сходятся.
+function _pathsAreaM2() {
+  const w = (S.pathWidth || 120) / 100;
+  const lines = _pathCenterLines();
+  if (!lines.length) return 0;
+  const cut = (typeof pathLinesNoOverlap === 'function') ? pathLinesNoOverlap(lines, w / 2) : lines;
+  let L = 0;
+  for (const wp of cut) for (let i = 1; i < wp.length; i++) {
+    L += Math.hypot(wp[i].x - wp[i - 1].x, wp[i].z - wp[i - 1].z);
+  }
+  return L * w;
+}
+
+// Осевые линии дорожек в метрах плана ({x,z} — как ждут геометрические хелперы).
+function _pathCenterLines() {
+  const pts = S.pts.paths || [];
+  const G = _GRIDm();
+  const segs = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [pts.filter(p => !p.break)];
+  const lines = [];
+  for (const seg of segs) {
+    const raw = seg.filter(p => !p.break).map(p => ({ x: p.x * G, z: p.y * G }));
+    const wp = [];
+    for (const p of raw) {
+      if (!wp.length || Math.hypot(p.x - wp[wp.length - 1].x, p.z - wp[wp.length - 1].z) > 0.05) wp.push(p);
+    }
+    if (wp.length >= 2) lines.push(wp);
+  }
+  return lines;
+}
+
 // Метрика элемента: {kind:'deck'|'linear'|'piece', value, text}.
 function _elementMetric(el) {
   if (RECT_SECTIONS[el]) { const a = _rectsAreaM2(secRects(el)); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'steps')   { const G = _GRIDm(); const a = (S.steps.w * G) * (S.steps.h * G); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
-  if (el === 'paths')   { const len = _polyLenM(S.pts.paths); const w = (S.pathWidth || 120) / 100; const a = len * w; return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
+  if (el === 'paths')   { const a = _pathsAreaM2(); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'fence')   { const len = _polyLenM(S.pts.fence); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
   if (el === 'railing') { const len = _polyLenM(S.pts.railing); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
   if (el === 'beds')    { const n = (S.beds || []).length; return n > 0 ? { kind: 'piece', value: n, text: n + ' шт' } : null; }
@@ -2306,22 +2345,17 @@ function _furnitureProjectObject(name) {
 // затем правая обратно — как в примере контракта.
 // Каждая линия разметки (разрывы {break:true}) — отдельный объект дорожки.
 function _pathProjectObjects(name) {
-  const pts = S.pts.paths || [];
   if (typeof _offsetPolyline !== 'function') return [];
-  const G = _GRIDm();
   const halfW = ((S.pathWidth || 120) / 100) / 2;      // м
-  const segs = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [pts.filter(p => !p.break)];
   // Осевые в метрах плана; {x,z} — как ждёт _offsetPolyline (z = y плана).
-  const lines = [];
-  for (const seg of segs) {
-    const raw = seg.filter(p => !p.break).map(p => ({ x: p.x * G, z: p.y * G }));
-    const wp = [];
-    for (const p of raw) if (!wp.length || Math.hypot(p.x - wp[wp.length-1].x, p.z - wp[wp.length-1].z) > 0.05) wp.push(p);
-    if (wp.length >= 2) lines.push(wp);
-  }
+  const lines = _pathCenterLines();
   if (!lines.length) return [];
-  // Примыкания линий подрезаем так же, как в 3D: иначе перекрытия попадут в смету дважды.
-  const trimmed = (typeof _trimPathJunctions === 'function') ? _trimPathJunctions(lines, halfW) : lines;
+  // Перекрытия вычитаем (TODO п.7): примыкания подрезаются, как в 3D, а куски,
+  // накрытые полотном другой дорожки на пересечении, выбрасываются — иначе одна
+  // и та же площадь уходила в смету дважды, от каждой из пересекающихся дорожек.
+  const trimmed = (typeof pathLinesNoOverlap === 'function')
+    ? pathLinesNoOverlap(lines, halfW)
+    : ((typeof _trimPathJunctions === 'function') ? _trimPathJunctions(lines, halfW) : lines);
   const productId = _elementProductId('paths');
   const objs = [];
   trimmed.forEach((wp, i) => {
