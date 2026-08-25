@@ -198,6 +198,8 @@ function initSnapCanvas(name) {
   CV[name] = mkCvState();
   fitCanvasToWrap(wrap, cv, CV[name]);
 
+  // Дорожки и забор: при первом заходе линия уже нарисована (TODO.md, этап 2 пп.7-8).
+  if (name === 'paths' || name === 'fence') _lineEnsureDefault(name);
   drawSnapCanvas(name);
 
   // Слушатели (pan/zoom + click) вешаются на wrap ОДИН РАЗ. Раньше initSnapCanvas
@@ -212,6 +214,11 @@ function initSnapCanvas(name) {
   // Клик — добавить точку с snap (0.5m step + прилипание к стенам дома)
   wrap.addEventListener('click', e=>{
     if (CV[name].pinching) return;
+    // Клик, завершивший перетаскивание или попавший в существующую точку, новую
+    // точку не ставит — иначе выбор точки сразу дублировал бы её.
+    if (_lineDragged) { _lineDragged = false; return; }
+    if ((name === 'paths' || name === 'fence')
+        && _lineHitPoint(name, _snapPointerNorm(wrap, name, e)) !== null) return;
     const cvEl=document.getElementById('cv-'+name); if (!cvEl) return;
     const r=wrap.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
     const sx=(e.clientX-r.left)*dpr, sy=(e.clientY-r.top)*dpr;
@@ -258,9 +265,180 @@ function initSnapCanvas(name) {
       const ny2 = nearest(snY, terrY); snY = (ny2 !== null) ? ny2 : (nearest(snY, wallY) ?? snY);
     }
 
+    // Забор нельзя ставить ближе FENCE_MIN_CLEAR к дому и террасе (TODO.md, этап 2 п.10).
+    if (name === 'fence' && _fenceTooClose({ x: snX, y: snY })) {
+      if (typeof dToast === 'function') dToast('Забор нельзя ставить ближе 3 м от дома и террасы');
+      return;
+    }
     S.pts[name].push({ x:snX, y:snY });
     drawSnapCanvas(name);
+    if (typeof onParamChange === 'function') onParamChange();
   });
+
+  // Выбор и перетаскивание точки (TODO.md, этап 2 пп.7-8). Клик по пустому месту
+  // по-прежнему добавляет точку — обработчик выше; чтобы он не срабатывал после
+  // перетаскивания, ставим флаг _lineDragged (клик приходит после mouseup).
+  wrap.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    const p = _snapPointerNorm(wrap, name, e);
+    const idx = _lineHitPoint(name, p);
+    if (idx === null) return;
+    _lineSel = { name, idx };
+    _lineDrag = true;
+    _lineDragged = false;
+    drawSnapCanvas(name);
+    e.preventDefault();
+  });
+
+  wrap.addEventListener('mousemove', e => {
+    if (!_lineDrag || _lineSel.name !== name) return;
+    const p = _snapPointerNorm(wrap, name, e, true);
+    if (name === 'fence' && _fenceTooClose(p)) return;   // ближе 3 м не пускаем
+    const pt = S.pts[name][_lineSel.idx];
+    if (!pt || pt.break) return;
+    pt.x = p.x; pt.y = p.y;
+    _lineDragged = true;
+    drawSnapCanvas(name);
+  });
+
+  const endDrag = () => {
+    if (!_lineDrag) return;
+    _lineDrag = false;
+    if (_lineDragged && typeof onParamChange === 'function') onParamChange();
+  };
+  wrap.addEventListener('mouseup', endDrag);
+  wrap.addEventListener('mouseleave', endDrag);
+}
+
+// ══════════════════════════════════════════════
+// ЛОМАНЫЕ: дорожки и забор (TODO.md, этап 2 пп.7, 8, 10)
+// Точка выбирается кликом, перетаскивается мышью и удаляется кнопкой; при первом
+// заходе в раздел линия уже нарисована (участок 3 м перед фасадом).
+// ══════════════════════════════════════════════
+let _lineSel = { name: null, idx: null };   // выбранная точка
+let _lineDrag = false;                      // идёт перетаскивание
+let _lineDragged = false;                   // точка реально сдвинулась (гасит клик)
+
+const LINE_START_LEN = 3.0;    // длина стартового участка, м
+const FENCE_MIN_CLEAR = 3.0;   // минимальное расстояние забора до дома и террасы, м
+const FENCE_GATE_W = 1.0;      // ширина проёма под калитку, м
+
+// Указатель → нормированные координаты плана (со снапом, если snap=true).
+function _snapPointerNorm(wrap, name, e, snap) {
+  const cvEl = document.getElementById('cv-' + name);
+  const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const cx = CV[name] || { scale: 1, ox: 0, oy: 0 };
+  const wx = ((e.clientX - r.left) * dpr - cx.ox) / cx.scale;
+  const wy = ((e.clientY - r.top) * dpr - cx.oy) / cx.scale;
+  const W = planPx(cvEl);
+  if (!snap) return { x: wx / W, y: wy / W };
+  const step = W * SNAP / GRID;
+  return { x: Math.round(wx / step) * step / W, y: Math.round(wy / step) * step / W };
+}
+
+// Индекс точки ломаной под указателем или null.
+function _lineHitPoint(name, p) {
+  const pts = S.pts[name] || [];
+  const hit = 10 / GRID;                      // ~10 см в координатах плана… (в норме)
+  let best = 0.02, idx = null;                 // порог в долях плана
+  pts.forEach((q, i) => {
+    if (q.break) return;
+    const d = Math.hypot(q.x - p.x, q.y - p.y);
+    if (d < best) { best = d; idx = i; }
+  });
+  return idx;
+}
+
+// Ближе FENCE_MIN_CLEAR к дому или террасе? (нормированные координаты плана)
+function _fenceTooClose(p) {
+  const lim = FENCE_MIN_CLEAR / GRID;
+  // Дом
+  if (typeof isEmptyLot !== 'function' || !isEmptyLot()) {
+    const hp = getHousePolygonNorm();
+    if (hp && hp.corners && hp.corners.length >= 3) {
+      for (let i = 0; i < hp.corners.length; i++) {
+        const a = hp.corners[i], b = hp.corners[(i + 1) % hp.corners.length];
+        if (_planDistToSeg(p, a, b) < lim) return true;
+      }
+    }
+  }
+  // Террасы (пристроенная и у бассейна)
+  for (const sec of ['terrace', 'pool_terrace']) {
+    for (const r of (typeof secRects === 'function' ? secRects(sec) : [])) {
+      if (!r || r.w <= 0 || r.h <= 0) continue;
+      const c = [{ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y },
+                 { x: r.x + r.w, y: r.y + r.h }, { x: r.x, y: r.y + r.h }];
+      for (let i = 0; i < 4; i++) if (_planDistToSeg(p, c[i], c[(i + 1) % 4]) < lim) return true;
+    }
+  }
+  return false;
+}
+
+function _planDistToSeg(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+  if (l2 < 1e-12) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t));
+}
+
+// Стартовый участок 3 м перед фасадом. У забора он отодвинут на FENCE_MIN_CLEAR
+// от дома и террасы (иначе первая же линия нарушала бы правило).
+function _defaultLine(name) {
+  const hp = getHousePolygonNorm();
+  const b = (hp && hp.bboxNorm) ? hp.bboxNorm : { nx: 0.4, ny: 0.4, nw: 0.2, nh: 0.2 };
+  let y = b.ny + b.nh + 1.0 / GRID;            // метр от фасада
+  if (name === 'fence') {
+    y = b.ny + b.nh + (FENCE_MIN_CLEAR + 0.5) / GRID;
+    // Ниже террасы, если она выступает дальше дома.
+    for (const r of (typeof secRects === 'function' ? secRects('terrace') : [])) {
+      if (r && r.h > 0) y = Math.max(y, r.y + r.h + (FENCE_MIN_CLEAR + 0.5) / GRID);
+    }
+  }
+  const cx = b.nx + b.nw / 2, half = LINE_START_LEN / 2 / GRID;
+  return [{ x: cx - half, y }, { x: cx + half, y }];
+}
+
+// Разметка раздела при первом заходе: пусто → стартовый участок.
+function _lineEnsureDefault(name) {
+  if (!S.pts[name] || !S.pts[name].filter(p => !p.break).length) {
+    S.pts[name] = _defaultLine(name);
+    _lineSel = { name, idx: null };
+  }
+}
+
+// Калитка: ставится в середину самого длинного отрезка забора (или в выбранную
+// точку, если она есть). Хранится в координатах плана; проём вычитается в 3D.
+function fenceGateDefault() {
+  const segs = splitAtBreaks(S.pts.fence || []);
+  let best = null, bestL = 0;
+  for (const seg of segs) {
+    for (let i = 0; i < seg.length - 1; i++) {
+      const a = seg[i], b = seg[i + 1];
+      const L = Math.hypot(b.x - a.x, b.y - a.y) * GRID;
+      if (L > bestL) { bestL = L; best = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+    }
+  }
+  return (bestL > FENCE_GATE_W + 0.4) ? best : null;
+}
+
+// «Удалить точку» — убирает выбранную. Линия короче двух точек удаляется целиком.
+function delLinePoint(name) {
+  const pts = S.pts[name] || [];
+  const idx = (_lineSel.name === name) ? _lineSel.idx : null;
+  if (idx === null || !pts[idx]) {
+    if (typeof dToast === 'function') dToast('Сначала выберите точку на плане');
+    return;
+  }
+  pts.splice(idx, 1);
+  // Осиротевшие маркеры разрыва убираем, чтобы не осталось пустых линий.
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const prev = pts[i - 1], next = pts[i + 1];
+    if (pts[i].break && (!prev || prev.break || !next || next.break)) pts.splice(i, 1);
+  }
+  _lineSel = { name, idx: null };
+  drawSnapCanvas(name);
+  if (typeof onParamChange === 'function') onParamChange();
 }
 
 // Вычислить прямоугольник дома на canvas в нормализованных координатах 0..1
@@ -691,13 +869,16 @@ function drawSnapCanvas(name) {
     // считается автоматически (TODO.md, этап 2 п.4), руками двигать нечего — на
     // плане остаются только две точки «входа».
     let ptNum = 0;
-    if (name !== 'railing') pts.forEach(p=>{
+    if (name !== 'railing') pts.forEach((p, pi)=>{
       if (p.break) return;
       ptNum++;
-      ctx.beginPath(); ctx.arc(p.x*W,p.y*H,8/cx.scale,0,Math.PI*2);
-      ctx.fillStyle='#fff'; ctx.fill();
-      ctx.strokeStyle=color; ctx.lineWidth=2.5/cx.scale; ctx.stroke();
-      ctx.fillStyle=color; ctx.font=planFont(10, cx.scale, 'bold'); ctx.textAlign='center';
+      const sel = (_lineSel.name === name && _lineSel.idx === pi);
+      ctx.beginPath(); ctx.arc(p.x*W,p.y*H,(sel?10:8)/cx.scale,0,Math.PI*2);
+      ctx.fillStyle = sel ? color : '#fff'; ctx.fill();
+      ctx.strokeStyle=color; ctx.lineWidth=(sel?3.5:2.5)/cx.scale; ctx.stroke();
+      // У выбранной точки заливка акцентная — номер на ней пишем белым.
+      ctx.fillStyle = sel ? '#fff' : color;
+      ctx.font=planFont(10, cx.scale, 'bold'); ctx.textAlign='center';
       ctx.fillText(ptNum,p.x*W,p.y*H+4/cx.scale);
     });
 
@@ -710,6 +891,44 @@ function drawSnapCanvas(name) {
       const y0 = Math.min(...ys), y1 = Math.max(...ys);
       drawRectDims(ctx, cx, W, x0, y0, x1 - x0, y1 - y0);
     }
+  }
+
+  // Забор: показываем зону, куда ставить нельзя — 3 м от дома и террасы
+  // (TODO.md, этап 2 п.10). Рисуем пунктиром по контурам, отодвинутым наружу.
+  if (name === 'fence') {
+    const lim = FENCE_MIN_CLEAR / GRID;
+    ctx.strokeStyle = 'rgba(210,60,60,.45)';
+    ctx.lineWidth = 1.5 / cx.scale;
+    ctx.setLineDash([6 / cx.scale, 4 / cx.scale]);
+    const box = (x0, y0, x1, y1) => {
+      ctx.beginPath();
+      ctx.rect((x0 - lim) * W, (y0 - lim) * H, (x1 - x0 + 2 * lim) * W, (y1 - y0 + 2 * lim) * H);
+      ctx.stroke();
+    };
+    if (typeof isEmptyLot !== 'function' || !isEmptyLot()) {
+      const hp = getHousePolygonNorm();
+      if (hp && hp.bboxNorm) {
+        const b = hp.bboxNorm;
+        box(b.nx, b.ny, b.nx + b.nw, b.ny + b.nh);
+      }
+    }
+    for (const sec of ['terrace', 'pool_terrace']) {
+      for (const r of (typeof secRects === 'function' ? secRects(sec) : [])) {
+        if (r && r.w > 0 && r.h > 0) box(r.x, r.y, r.x + r.w, r.y + r.h);
+      }
+    }
+    ctx.setLineDash([]);
+  }
+
+  // Калитка на заборе — метка проёма шириной FENCE_GATE_W (TODO.md, этап 2 п.8).
+  if (name === 'fence' && S.fenceGate) {
+    const g = S.fenceGate;
+    ctx.strokeStyle = DIM_COL; ctx.fillStyle = '#fff';
+    ctx.lineWidth = 2.5 / cx.scale;
+    ctx.beginPath(); ctx.arc(g.x * W, g.y * H, 7 / cx.scale, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = DIM_COL; ctx.font = planFont(10, cx.scale, 'bold'); ctx.textAlign = 'center';
+    ctx.fillText('калитка', g.x * W, g.y * H - 12 / cx.scale);
   }
 
   // Точки «входа» в ограждении — две перетаскиваемые метки на периметре
@@ -826,6 +1045,8 @@ function initPathsCanvas() { initSnapCanvas('paths'); }
 const FURN_HIT_R = 16;      // радиус захвата точки (экранные px при scale=1)
 
 let furnDrag = false, furnDragIdx = -1;
+// Точку реально сдвинули? Отличает перетаскивание от клика (клик = поворот на 90°).
+let _furnMoved = false;
 
 function initFurnitureCanvas() {
   const wrap = document.getElementById('cw-furniture');
@@ -870,6 +1091,7 @@ function initFurnitureCanvas() {
       S.activeFurniture = S.furniture.length - 1;
       if (typeof onParamChange === 'function') onParamChange();
     }
+    _furnMoved = (hit < 0);        // новая точка — это не «клик по точке»
     furnDrag = true; furnDragIdx = S.activeFurniture;
     wrap.style.cursor = 'move';
     drawFurnitureCanvas();
@@ -879,13 +1101,19 @@ function initFurnitureCanvas() {
     if (!furnDrag || furnDragIdx < 0 || !S.furniture[furnDragIdx]) return;
     const { x, y, W } = getWorld(e.clientX, e.clientY);
     const p = S.furniture[furnDragIdx];
-    p.x = Math.max(0, Math.min(1, snapNorm(x / W)));
-    p.y = Math.max(0, Math.min(1, snapNorm(y / W)));
+    const nx = Math.max(0, Math.min(1, snapNorm(x / W)));
+    const ny = Math.max(0, Math.min(1, snapNorm(y / W)));
+    if (nx !== p.x || ny !== p.y) _furnMoved = true;
+    p.x = nx; p.y = ny;
     drawFurnitureCanvas();
   });
   document.addEventListener('mouseup', e => {
     if (!furnDrag || e.button !== 0) return;
+    const idx = furnDragIdx;
     furnDrag = false; furnDragIdx = -1; wrap.style.cursor = '';   // вернуть курсор из стилей (.d-canvas-area)
+    // Клик по точке БЕЗ сдвига разворачивает её на 90° — как у грядок
+    // (TODO.md, этап 2 пп.12-13).
+    if (!_furnMoved && idx >= 0) { S.activeFurniture = idx; rotateActiveFurniture(1); return; }
     if (typeof onParamChange === 'function') onParamChange();   // пересборка 3D
   });
 
@@ -899,6 +1127,21 @@ function initFurnitureCanvas() {
     e.preventDefault();
     rotateActiveFurniture(e.shiftKey ? -1 : 1);
   });
+}
+
+// «Ещё одна» — новая точка рядом с активной (кнопка вместо клика по пустому месту,
+// TODO.md этап 2 п.13). Клик по плану точку тоже ставит — так быстрее расставлять.
+function addFurniturePoint() {
+  if (!S.furniture) S.furniture = [];
+  const step = SNAP / GRID * 2;
+  const a = (S.activeFurniture !== null) ? S.furniture[S.activeFurniture] : null;
+  const x = a ? Math.min(1, a.x + step) : 0.5;
+  const y = a ? a.y : 0.6;
+  S.furniture.push({ x: snapNorm(x), y: snapNorm(y), rot: a ? (a.rot || 0) : 0, product: null });
+  S.activeFurniture = S.furniture.length - 1;
+  drawFurnitureCanvas();
+  if (typeof _dSyncFurniturePanel === 'function') _dSyncFurniturePanel();
+  if (typeof onParamChange === 'function') onParamChange();
 }
 
 // Поворот выбранной точки на ±90°. dir: 1 — против часовой на плане (+Y в 3D).
@@ -1793,6 +2036,49 @@ function hitRect(secId, wx, wy, W) {
   return null;
 }
 
+// ── БАССЕЙН на плане (TODO.md, этап 2 п.14) ──
+// Перетаскивание за тело, изменение размера — за правый нижний угол.
+let _poolDrag = null;
+
+function _poolHit(nx, ny, scale) {
+  const p = S.pool;
+  if (!p) return null;
+  const R = (HANDLE_R / scale) / planPx(document.getElementById('cv-pool_terrace') || {});
+  const hr = Math.max(0.012, R || 0.012);
+  if (Math.hypot(nx - (p.x + p.w), ny - (p.y + p.h)) < hr) return 'resize';
+  if (p.kind === 'round') {
+    const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
+    return (Math.hypot(nx - cx, ny - cy) <= p.w / 2) ? 'move' : null;
+  }
+  return (nx >= p.x && nx <= p.x + p.w && ny >= p.y && ny <= p.y + p.h) ? 'move' : null;
+}
+
+function applyPoolDrag(nx, ny) {
+  const d = _poolDrag; if (!d || !S.pool) return;
+  const dx = nx - d.mx, dy = ny - d.my;
+  const MIN = 1.0 / GRID;                        // минимальный габарит бассейна — 1 м
+  if (d.kind === 'move') {
+    S.pool.x = snapNorm(d.p.x + dx);
+    S.pool.y = snapNorm(d.p.y + dy);
+  } else {
+    let w = Math.max(MIN, snapNorm(d.p.w + dx));
+    let h = Math.max(MIN, snapNorm(d.p.h + dy));
+    if (S.pool.kind === 'round') { const s2 = Math.max(w, h); w = s2; h = s2; }
+    S.pool.w = w; S.pool.h = h;
+  }
+  drawRectCanvas('pool_terrace');
+}
+
+// Бассейн по умолчанию — по центру первого блока террасы у бассейна.
+function poolDefault(kind) {
+  const rects = secRects('pool_terrace');
+  const r = rects && rects.length ? rects[0] : null;
+  const size = Math.min(3.0 / GRID, r ? Math.min(r.w, r.h) * 0.6 : 3.0 / GRID);
+  const cx = r ? r.x + r.w / 2 : 0.5, cy = r ? r.y + r.h / 2 : 0.5;
+  return { kind, x: snapNorm(cx - size / 2), y: snapNorm(cy - size / 2),
+           w: snapNorm(size), h: snapNorm(size) };
+}
+
 function applyRectDrag(secId, wx, wy, W) {
   const rects = secRects(secId);
   if (trDragIdx < 0 || !rects[trDragIdx]) return;
@@ -1827,6 +2113,14 @@ function attachRectEvents(wrap, secId) {
   };
 
   const startDrag = (worldX, worldY, W) => {
+    // Бассейн лежит поверх настила — проверяем его раньше блоков (этап 2 п.14).
+    if (secId === 'pool_terrace' && S.pool) {
+      const ph = _poolHit(worldX / W, worldY / W, (CV[secId] && CV[secId].scale) || 1);
+      if (ph) {
+        _poolDrag = { kind: ph, mx: worldX / W, my: worldY / W, p: { ...S.pool } };
+        return true;
+      }
+    }
     const hit = hitRect(secId, worldX, worldY, W);
     if (!hit) {
       // Клик в пустое место — снимаем активность.
@@ -1912,11 +2206,22 @@ function attachRectEvents(wrap, secId) {
     }
   });
   document.addEventListener('mousemove', e => {
+    if (_poolDrag && secId === 'pool_terrace') {
+      const {x, y, W} = getWorld(e.clientX, e.clientY);
+      applyPoolDrag(x / W, y / W);
+      return;
+    }
     if (!trDrag || trDragSec !== secId) return;
     const {x, y, W} = getWorld(e.clientX, e.clientY);
     applyRectDrag(secId, x, y, W);
   });
   document.addEventListener('mouseup', () => {
+    if (_poolDrag && secId === 'pool_terrace') {
+      _poolDrag = null;
+      wrap.style.cursor = '';
+      if (typeof onParamChange === 'function') onParamChange();
+      return;
+    }
     if (!trDrag || trDragSec !== secId) return;
     trDrag = null; trDragStart = null; trDragIdx = -1; trDragSec = null;
     wrap.style.cursor = '';   // вернуть курсор из стилей (.d-canvas-area)
@@ -2012,12 +2317,36 @@ function drawRectCanvas(secId) {
     }
   }
 
+  // Бассейн (TODO.md, этап 2 п.14): рисуем поверх настила, с ручкой в правом
+  // нижнем углу — за неё меняется размер, за тело перетаскивается.
+  if (secId === 'pool_terrace' && S.pool) {
+    const p = S.pool;
+    ctx.fillStyle = 'rgba(47,127,168,.35)';
+    ctx.strokeStyle = '#2f7fa8';
+    ctx.lineWidth = 2.5 / cx.scale;
+    ctx.beginPath();
+    if (p.kind === 'round') {
+      ctx.ellipse((p.x + p.w / 2) * W, (p.y + p.h / 2) * H, p.w / 2 * W, p.h / 2 * H, 0, 0, Math.PI * 2);
+    } else {
+      ctx.rect(p.x * W, p.y * H, p.w * W, p.h * H);
+    }
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#2f7fa8';
+    ctx.font = planFont(10, cx.scale, 'bold'); ctx.textAlign = 'center';
+    ctx.fillText('Бассейн ' + (p.w * GRID).toFixed(1) + '×' + (p.h * GRID).toFixed(1) + ' м',
+                 (p.x + p.w / 2) * W, (p.y + p.h / 2) * H + 4 / cx.scale);
+    ctx.beginPath();
+    ctx.arc((p.x + p.w) * W, (p.y + p.h) * H, HANDLE_R / cx.scale, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = '#2f7fa8'; ctx.lineWidth = 2 / cx.scale; ctx.stroke();
+  }
+
   // Подсказка если пусто
   if (!rects.length) {
     ctx.fillStyle = '#aaa';
     ctx.font = planFont(13, cx.scale);
     ctx.textAlign = 'center';
-    ctx.fillText('Нажмите «ДОБАВИТЬ» чтобы разметить объект', W/2, H * 0.92);
+    ctx.fillText('Нажмите «ЕЩЁ ОДНА» чтобы разметить объект', W/2, H * 0.92);
   }
 
   ctx.restore();
@@ -2159,10 +2488,15 @@ function snapBedMove(ds, dx, dy) {
   return { x: c.x, y: c.y, w: ds.w, h: ds.h };
 }
 
+// Грядку реально сдвинули? Нужен, чтобы отличить клик (разворот на 90°, TODO.md
+// этап 2 п.12) от перетаскивания.
+let _bedMoved = false;
+
 function applyBedDrag(wx, wy, W) {
   if (bedDragIdx < 0 || !S.beds[bedDragIdx]) return;
   const ds = bedDragStart;
   const dx = (wx - ds.mx) / W, dy = (wy - ds.my) / W;
+  if (Math.hypot(dx, dy) > 0.002) _bedMoved = true;   // ~6 см на плане
   const res = snapBedMove(ds, dx, dy);
   const b = S.beds[bedDragIdx];
   b.x = res.x; b.y = res.y; b.w = res.w; b.h = res.h;
@@ -2195,7 +2529,19 @@ function attachBedsEvents(wrap) {
     const b = S.beds[hit.idx];
     bedDrag = 'move'; bedDragIdx = hit.idx;
     bedDragStart = { mx: worldX, my: worldY, x: b.x, y: b.y, w: b.w, h: b.h };
+    _bedMoved = false;
     return true;
+  };
+
+  // Клик по грядке БЕЗ перетаскивания разворачивает её на 90° (TODO.md, этап 2 п.12).
+  // Отличаем клик от перетаскивания по факту сдвига: applyBedDrag ставит _bedMoved.
+  const endBedDrag = () => {
+    if (!bedDrag) return;
+    const wasIdx = bedDragIdx;
+    bedDrag = null; bedDragStart = null; bedDragIdx = -1;
+    wrap.style.cursor = '';
+    if (!_bedMoved && wasIdx >= 0) { S.activeBed = wasIdx; rotateActiveBed(); }
+    else if (typeof onParamChange === 'function') onParamChange();
   };
 
   // ── TOUCH ──
@@ -2257,10 +2603,7 @@ function attachBedsEvents(wrap) {
     const { x, y, W } = getWorld(e.clientX, e.clientY);
     applyBedDrag(x, y, W);
   });
-  document.addEventListener('mouseup', () => {
-    if (!bedDrag) return;
-    bedDrag = null; bedDragStart = null; bedDragIdx = -1; wrap.style.cursor = '';   // вернуть курсор из стилей (.d-canvas-area)
-  });
+  document.addEventListener('mouseup', endBedDrag);
 
   wrap.addEventListener('wheel', e => {
     e.preventDefault();

@@ -230,6 +230,100 @@ function _terraceRectsToPolygons(secId) {
   return polys;
 }
 
+// ── БАССЕЙН (TODO.md, этап 2 п.14) ───────────────────────────────────────────
+// Полигон бассейна в МИРЕ: прямоугольник как есть, круглый — 32-угольником.
+const POOL_SEGMENTS = 32;
+function poolPolygonWorld(houseL, houseW) {
+  const p = (typeof S !== 'undefined') ? S.pool : null;
+  if (!p || !(p.w > 0) || !(p.h > 0)) return null;
+  if (p.kind === 'round') {
+    const c = canvasToWorld([{ x: p.x + p.w / 2, y: p.y + p.h / 2 }], houseL, houseW)[0];
+    const r = p.w / 2 * GRID;
+    const out = [];
+    for (let i = 0; i < POOL_SEGMENTS; i++) {
+      const a = i / POOL_SEGMENTS * Math.PI * 2;
+      out.push({ x: c.x + Math.cos(a) * r, z: c.z + Math.sin(a) * r });
+    }
+    return out;
+  }
+  const c = canvasToWorld([
+    { x: p.x, y: p.y }, { x: p.x + p.w, y: p.y },
+    { x: p.x + p.w, y: p.y + p.h }, { x: p.x, y: p.y + p.h },
+  ], houseL, houseW);
+  return c.map(q => ({ x: q.x, z: q.z }));
+}
+
+// Обрезка выпуклого полигона прямоугольником (Сазерленд–Ходжман). Нужна, когда
+// бассейн выходит за край блока: вырезаем только пересечение.
+function clipPolyToRect(poly, minX, maxX, minZ, maxZ) {
+  const clip = (pts, inside, isect) => {
+    const out = [];
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      const ia = inside(a), ib = inside(b);
+      if (ia) out.push(a);
+      if (ia !== ib) out.push(isect(a, b));
+    }
+    return out;
+  };
+  const lerpX = (a, b, x) => ({ x, z: a.z + (b.z - a.z) * ((x - a.x) / (b.x - a.x || 1e-9)) });
+  const lerpZ = (a, b, z) => ({ x: a.x + (b.x - a.x) * ((z - a.z) / (b.z - a.z || 1e-9)), z });
+  let p = poly.slice();
+  p = clip(p, q => q.x >= minX, (a, b) => lerpX(a, b, minX));
+  p = clip(p, q => q.x <= maxX, (a, b) => lerpX(a, b, maxX));
+  p = clip(p, q => q.z >= minZ, (a, b) => lerpZ(a, b, minZ));
+  p = clip(p, q => q.z <= maxZ, (a, b) => lerpZ(a, b, maxZ));
+  return p;
+}
+
+// Площадь полигона (м²) — уходит в смету как площадь вырезанной части.
+function polyAreaM2(poly) {
+  if (!poly || poly.length < 3) return 0;
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length];
+    a += p.x * q.z - q.x * p.z;
+  }
+  return Math.abs(a) / 2;
+}
+
+// Чаша бассейна: вода чуть ниже настила + тёмные стенки вниз. Модели бассейна нет —
+// это геометрия с задаваемыми размерами (решение продукта 2026-08-24).
+const POOL_WATER_DROP = 0.12;   // вода ниже уровня настила, м
+const POOL_DEPTH = 1.20;        // глубина чаши, м
+function buildPool3d(parent, poly, deckTopY) {
+  if (!poly || poly.length < 3) return;
+  const yW = deckTopY - POOL_WATER_DROP, yB = deckTopY - POOL_DEPTH;
+  // Вода
+  const water = new THREE.Shape(poly.map(p => new THREE.Vector2(p.x, p.z)));
+  const wg = new THREE.ShapeGeometry(water);
+  wg.rotateX(Math.PI / 2);                     // XY-плоскость → XZ
+  wg.scale(1, 1, -1);
+  wg.translate(0, yW, 0);
+  const wm = new THREE.Mesh(wg, new THREE.MeshStandardMaterial({
+    color: 0x2f7fa8, roughness: 0.18, metalness: 0.0,
+  }));
+  wm.receiveShadow = true;
+  parent.add(wm);
+  // Стенки чаши
+  const pos = [], idx = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const base = pos.length / 3;
+    pos.push(a.x, deckTopY, a.z, b.x, deckTopY, b.z, b.x, yB, b.z, a.x, yB, a.z);
+    idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const walls = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+    color: 0x5a6a72, roughness: 0.6, side: THREE.DoubleSide,
+  }));
+  walls.receiveShadow = true;
+  parent.add(walls);
+}
+
 // ── ПОЛУСТУПЕНЬ ──────────────────────────────────────────────────────────────
 // Доска по всему СВОБОДНОМУ контуру террасы (TODO.md, этап 1 п.7): 170 мм в плане,
 // 25 мм по высоте, верх заподлицо с настилом, наружу вылет 10 мм. Свободный контур —
@@ -346,7 +440,10 @@ function buildTerraceNosing(parent, M, worldRects, deckTopY) {
 // по диагонали (миттер) — доски двух перпендикулярных крыльев сходятся под 45°.
 // foot — выпуклый (CCW); диагональные рёбра-стыки внутренние (их «юбка» скрыта телом
 // соседнего крыла).
-function _buildTerracePoly(parent, M, foot, deckHeight, plankAlongX, meshArrayName) {
+// holes — необязательные вырезы (полигоны world {x,z}), например бассейн
+// (TODO.md, этап 2 п.14). С вырезом верх и низ триангулируются с дырой, а по её
+// контуру достраивается стенка — иначе настил выглядел бы бумажным.
+function _buildTerracePoly(parent, M, foot, deckHeight, plankAlongX, meshArrayName, holes) {
   const n = foot.length;
   if (n < 3 || deckHeight < 0.03) return;
   // Нормализуем контур в CCW (в плоскости x,z) — иначе верхняя грань смотрит вниз.
@@ -356,10 +453,49 @@ function _buildTerracePoly(parent, M, foot, deckHeight, plankAlongX, meshArrayNa
   const T = DECK_TILE, yTop = deckHeight, yBot = 0;
   const topUV = (x, z) => plankAlongX ? [x / T, z / T] : [z / T, x / T];
   const pos = [], uv = [], idx = [];
+
+  // ── Вырезы: дыры триангулируем через ShapeUtils (он умеет holes), стенку по
+  //    контуру дыры достраиваем отдельно. Без вырезов — прежний веер, он дешевле.
+  const cuts = (holes || []).filter(h => h && h.length >= 3).map(h => {
+    // Дыра должна идти в ОБРАТНОМ направлении относительно контура (CW при CCW-контуре).
+    let a2 = 0;
+    for (let k = 0; k < h.length; k++) { const a = h[k], b = h[(k + 1) % h.length]; a2 += a.x * b.z - b.x * a.z; }
+    return a2 > 0 ? h.slice().reverse() : h.slice();
+  });
+
+  if (cuts.length) {
+    const toV2 = p => new THREE.Vector2(p.x, p.z);
+    const contour = foot.map(toV2);
+    const holeV = cuts.map(h => h.map(toV2));
+    const flat = [...foot, ...cuts.flat()];
+    for (const p of flat) { pos.push(p.x, yTop, p.z); const t = topUV(p.x, p.z); uv.push(t[0], t[1]); }
+    for (const p of flat) { pos.push(p.x, yBot, p.z); const t = topUV(p.x, p.z); uv.push(t[0], t[1]); }
+    const N = flat.length;
+    const tris = THREE.ShapeUtils.triangulateShape(contour, holeV);
+    for (const t of tris) { idx.push(t[0], t[2], t[1]); idx.push(N + t[0], N + t[1], N + t[2]); }
+    // Стенка по контуру каждой дыры (нормаль внутрь выреза).
+    const TS0 = TERRACE_SIDE_TILE;
+    let off = foot.length;
+    for (const h of cuts) {
+      for (let i = 0; i < h.length; i++) {
+        const a = h[i], b = h[(i + 1) % h.length];
+        const alongX = Math.abs(b.x - a.x) >= Math.abs(b.z - a.z);
+        const uA = (alongX ? a.x : a.z) / TS0, uB = (alongX ? b.x : b.z) / TS0;
+        const base = pos.length / 3;
+        pos.push(a.x, yTop, a.z); uv.push(uA, yTop / TS0);
+        pos.push(b.x, yTop, b.z); uv.push(uB, yTop / TS0);
+        pos.push(b.x, yBot, b.z); uv.push(uB, yBot / TS0);
+        pos.push(a.x, yBot, a.z); uv.push(uA, yBot / TS0);
+        idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
+      }
+      off += h.length;
+    }
+  } else {
   for (const p of foot) { pos.push(p.x, yTop, p.z); const t = topUV(p.x, p.z); uv.push(t[0], t[1]); } // верх 0..n-1
   for (const p of foot) { pos.push(p.x, yBot, p.z); const t = topUV(p.x, p.z); uv.push(t[0], t[1]); } // низ  n..2n-1
   for (let i = 1; i < n - 1; i++) idx.push(0, i + 1, i);          // верх (нормаль +Y)
   for (let i = 1; i < n - 1; i++) idx.push(n, n + i, n + i + 1);  // низ  (нормаль −Y)
+  }
   // Юбка: на каждое ребро — свой квад. Доски ГОРИЗОНТАЛЬНЫЕ (TODO.md, этап 1 п.8):
   // грувы текстуры — линии постоянного V, поэтому V идёт ПО ВЫСОТЕ, а U вдоль ребра.
   // Ребро UV-бокса — TERRACE_SIDE_TILE (доска зашивки шире доски настила).
@@ -1942,6 +2078,9 @@ function _fenceSchematicSection(group, x, z, angle, spanW, panelH, panelMat, fra
 // правило продукта — «все части забора кроме панелей тёмно-серые». Раньше было
 // наоборот (список каркасных имён, остальное — полотно), и любая непонятная
 // деталь модели уезжала в текстуру товара.
+// Ширина проёма под калитку в мире (то же значение, что FENCE_GATE_W на плане).
+const FENCE_GATE_W3D = 1.0;
+
 const FENCE_PANEL_RE = /panel|polotno|полотн|board|plank|доск|штакет|ламел|lamel|fill|заполн/i;
 
 // Секция из модели товара: клон, растянутый по длине пролёта. Материалы назначаем
@@ -2015,6 +2154,9 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
   const postSet = new Set();
   const postKey = (x, z) => `${x.toFixed(2)},${z.toFixed(2)}`;
   let panelsPainted = 0;                 // сколько мешей модели опознано как полотно
+  // Калитка (TODO.md, этап 2 п.8) — точка плана, переводим в мир один раз.
+  const gateW = (typeof S !== 'undefined' && S.fenceGate)
+    ? canvasToWorld([S.fenceGate], houseL, houseW)[0] : null;
 
   const segments = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [realPts];
   for (const seg of segments) {
@@ -2027,6 +2169,27 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
       if (segLen < 0.05) continue;
       const ux = dx / segLen, uz = dz / segLen;
       const angle = Math.atan2(ux, uz) - Math.PI / 2;   // локальный +X вдоль пролёта
+      // Калитка: проём фиксированной ширины на пролёте, где она стоит (TODO.md,
+      // этап 2 п.8). Пролёт делится на два куска — до и после проёма; каждый
+      // собирается своими секциями, как обычный пролёт.
+      const parts = _fenceGateSplit(a, ux, uz, segLen, gateW);
+      for (const part of parts) {
+        _fenceRun(a.x + ux * part.t0, a.z + uz * part.t0, ux, uz, part.len, angle);
+      }
+    }
+  }
+  // Модель без опознанного полотна станет целиком тёмно-серой — на стенде это надо
+  // видеть сразу, чтобы дополнить FENCE_PANEL_RE именами из конкретного файла.
+  if (proto && !panelsPainted) {
+    console.warn('[fence] в модели товара не опознано полотно — забор целиком тёмно-серый:', url);
+  }
+  parent.add(fenceGroup);
+
+  // ── Сборка одного участка пролёта (секции + замыкающий столб) ──
+  function _fenceRun(sx, sz, ux, uz, runLen, angle) {
+      const segLen = runLen;
+      const a = { x: sx, z: sz };
+      if (segLen < 0.3) return;
       const nSec = Math.max(1, Math.round(segLen / FENCE_SECTION_W));
       const secW = segLen / nSec;
 
@@ -2049,13 +2212,22 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
           _fenceBoxPost(fenceGroup, ex, ez, angle, panelH, frameMat);
         }
       }
-    }
   }
-  // Модель без опознанного полотна станет целиком тёмно-серой — на стенде это надо
-  // видеть сразу, чтобы дополнить FENCE_PANEL_RE именами из конкретного файла.
-  if (proto && !panelsPainted) {
-    console.warn('[fence] в модели товара не опознано полотно — забор целиком тёмно-серый:', url);
-  }
-  parent.add(fenceGroup);
+}
+
+// Делит пролёт на куски вокруг калитки: [{t0, len}]. Калитка задана точкой плана
+// (S.fenceGate); на пролёт она влияет, только если лежит на нём (в пределах 0.3 м).
+function _fenceGateSplit(a, ux, uz, segLen, gate) {
+  if (!gate) return [{ t0: 0, len: segLen }];
+  const vx = gate.x - a.x, vz = gate.z - a.z;
+  const t = vx * ux + vz * uz;                                  // проекция на ось пролёта
+  const off = Math.hypot(vx - ux * t, vz - uz * t);             // отклонение от оси
+  if (off > 0.30 || t < -0.1 || t > segLen + 0.1) return [{ t0: 0, len: segLen }];
+  const half = FENCE_GATE_W3D / 2;
+  const g0 = Math.max(0, t - half), g1 = Math.min(segLen, t + half);
+  const parts = [];
+  if (g0 > 0.3) parts.push({ t0: 0, len: g0 });
+  if (segLen - g1 > 0.3) parts.push({ t0: g1, len: segLen - g1 });
+  return parts.length ? parts : [];
 }
 

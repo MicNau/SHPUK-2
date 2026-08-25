@@ -799,6 +799,15 @@ function _dRenderSidebar() {
               <div class="d-color-title">Цена:</div>
               <div class="d-price-grid" id="d-price-grid"></div>
             </div>
+            ${item.id === 'beds' ? `
+            <div class="d-color-section">
+              <div class="d-color-title">Высота борта:</div>
+              <div class="d-price-grid" id="d-bed-h-grid"></div>
+            </div>
+            <div class="d-color-section">
+              <div class="d-color-title">Крепёж:</div>
+              <div class="d-price-grid" id="d-bed-mount-grid"></div>
+            </div>` : ''}
             ${item.id === 'railing' ? `
             <div class="d-color-section">
               <div class="d-color-title">Крышка столба:</div>
@@ -822,6 +831,7 @@ function _dRenderSidebar() {
     _dRenderColorGrid();
     _dRenderPriceGrid();
     _dRenderRailFilters();
+    _dRenderBedFilters();
   }
 
   // Кнопка «Дальше» внизу панели живёт только пока открыт редактор.
@@ -912,6 +922,53 @@ function dDeleteItem(secId) {
   }
 }
 
+// ── Фильтры грядок: высота борта и крепёж (TODO.md, этап 2 п.11) ──
+// Высота борта применяется сразу к 3D (S.bedH); тип крепежа своего поля у товара
+// не имеет — отбор по названию, как у крышки столба ограждения.
+function _dRenderBedFilters() {
+  const hg = document.getElementById('d-bed-h-grid');
+  if (hg) {
+    hg.innerHTML = BED_HEIGHTS.map(h =>
+      `<button class="d-price-btn ${S.bedFilters.h === h ? 'selected' : ''}"
+               onclick="dSetBedFilter('h', ${h})">
+         <span class="d-radio"></span><span class="d-price-txt"><b>${h} мм</b></span>
+       </button>`).join('');
+  }
+  const mg = document.getElementById('d-bed-mount-grid');
+  if (mg) {
+    mg.innerHTML = BED_MOUNTS.map(m =>
+      `<button class="d-price-btn ${S.bedFilters.mount === m.id ? 'selected' : ''}"
+               onclick="dSetBedFilter('mount', '${m.id}')">
+         <span class="d-radio"></span><span class="d-price-txt"><b>${m.lbl}</b></span>
+       </button>`).join('');
+  }
+}
+
+// Повторный клик снимает фильтр. Высота борта сразу видна в 3D.
+function dSetBedFilter(kind, value) {
+  S.bedFilters[kind] = (S.bedFilters[kind] === value) ? null : value;
+  if (kind === 'h') {
+    // Снятый фильтр возвращает высоту выбранного товара (или дефолт 0.20 м).
+    const fromProduct = _bedHeightFromProduct(S.elementMat && S.elementMat.beds);
+    S.bedH = S.bedFilters.h ? S.bedFilters.h / 1000 : (fromProduct || 0.20);
+    if (typeof onParamChange === 'function') onParamChange();
+  }
+  _dRenderBedFilters();
+  dShowResults();
+}
+
+// Отбор товаров грядок по типу крепежа (поля у товара нет — ищем в названии).
+function _bedFilterProducts(products) {
+  if (dActiveItem !== 'beds' || !S.bedFilters.mount) return products;
+  const m = BED_MOUNTS.find(x => x.id === S.bedFilters.mount);
+  if (!m) return products;
+  const hit = products.filter(p => m.re.test((p.name || '') + ' ' + (p.previewText || '')));
+  if (hit.length) return hit;
+  console.info('[beds] по фильтру «' + m.lbl + '» товаров не нашлось — показываем все:',
+               'у товаров нет поля с типом крепежа, отбор идёт по названию');
+  return products;
+}
+
 // ── Фильтры ограждения: крышка столба и его сечение (TODO.md, этап 2 п.5) ──
 // Сечение влияет на 3D (толщина столбов), крышка — только на подбор товара: своего
 // поля у товара нет, поэтому ищем слово в названии/описании. Если под фильтр не
@@ -957,6 +1014,40 @@ function _railingFilterProducts(products) {
   return products;
 }
 
+// ── Бассейн на террасе у бассейна (TODO.md, этап 2 п.14) ──
+// Кнопка ставит бассейн выбранной формы; повторное нажатие той же формы убирает,
+// другой — меняет форму, сохраняя место и размер. Модели нет: это геометрия с
+// задаваемыми на плане размерами.
+function dSetPool(kind) {
+  if (S.pool && S.pool.kind === kind) {
+    S.pool = null;
+  } else if (S.pool) {
+    S.pool = { ...S.pool, kind };
+    if (kind === 'round') { const s = Math.max(S.pool.w, S.pool.h); S.pool.w = s; S.pool.h = s; }
+  } else {
+    if (!secRects('pool_terrace').length) { dToast('Сначала разметьте террасу у бассейна'); return; }
+    S.pool = poolDefault(kind);
+  }
+  if (typeof drawRectCanvas === 'function') drawRectCanvas('pool_terrace');
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
+// ── «Калитка» в заборе (TODO.md, этап 2 п.8) ──
+// Логика как у входа в ограждении: проём фиксированной ширины 1 м. Повторное
+// нажатие калитку убирает. Модель калитки (п.9) появится, когда придёт GLB —
+// пока в этом месте просто разрыв, а в смету уходит gateCount = 1.
+function dFenceGate() {
+  if (S.fenceGate) {
+    S.fenceGate = null;
+  } else {
+    const g = (typeof fenceGateDefault === 'function') ? fenceGateDefault() : null;
+    if (!g) { dToast('Нужен участок забора длиннее 1.4 м — калитке нужно место'); return; }
+    S.fenceGate = g;
+  }
+  if (typeof drawSnapCanvas === 'function') drawSnapCanvas('fence');
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
 // ── «Обозначить вход» в ограждении (TODO.md, этап 2 п.4) ──
 // Ставит разрыв на самом длинном свободном участке периметра; дальше пользователь
 // двигает две точки прямо на плане. Повторное нажатие вход убирает.
@@ -987,6 +1078,9 @@ function dResetSection(secId) {
   if (secId === 'beds')      { S.beds = []; S.activeBed = null; }
   if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
   if (secId === 'facade')    S.wallZones = {};
+  if (secId === 'fence')     S.fenceGate = null;
+  if (secId === 'beds')      S.bedFilters = { h: null, mount: null };
+  if (secId === 'pool_terrace') S.pool = null;
   if (secId === 'railing') { S.railingEntry = null; S.railFilters = { cap: null, postW: null }; }
   if (S.mats && S.mats[secId]) delete S.mats[secId];
   if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
@@ -1245,7 +1339,9 @@ function _applySampleToActive(sample) {
     // Грядки: высота борта — свойство товара (150/200/225/270/300 мм, см. TODO.md),
     // поэтому забираем её из названия и отдаём в 3D.
     if (dActiveItem === 'beds') {
-      const h = _bedHeightFromProduct(sample);
+      // Явно выбранная в фильтре высота (TODO.md, этап 2 п.11) главнее той, что
+      // угадана по названию товара: пользователь задал её сам.
+      const h = S.bedFilters.h ? S.bedFilters.h / 1000 : _bedHeightFromProduct(sample);
       if (h) S.bedH = h;
     }
     if (typeof buildScene3d === 'function') buildScene3d();
@@ -1673,8 +1769,8 @@ function _dRenderRealResults(allProducts) {
   if (!list) return;
   // Цвет — приоритетно из ПОЛЯ color (появилось в API 2026-07-29, имена совпадают
   // с палитрой COLORS.md); затем название; preview_text — fallback (см. _itemColors).
-  const products = _railingFilterProducts(_filterByColors(_filterRealByPrice(allProducts),
-    p => [p.color || '', p.name || '', p.previewText || '']));
+  const products = _bedFilterProducts(_railingFilterProducts(_filterByColors(_filterRealByPrice(allProducts),
+    p => [p.color || '', p.name || '', p.previewText || ''])));
   if (!products.length) {
     list.innerHTML = '<div style="padding:16px;color:#999;font-size:13px;">Нет товаров под выбранные фильтры</div>';
     return;
@@ -2212,7 +2308,8 @@ function _projectObjects() {
     const o = { type: el === 'fence' ? CalculationType.FENCE : CalculationType.RAILING,
                 name: lbl(el), lines, sectionProductId: _elementProductId(el) };
     // Калитки в разметке не учитываются — отдельного инструмента для них нет.
-    if (el === 'fence') { o.gateCount = 0; o.picketProductId = null; }
+    // Калитка в разметке — одна на забор (TODO.md, этап 2 п.8).
+    if (el === 'fence') { o.gateCount = S.fenceGate ? 1 : 0; o.picketProductId = null; }
     objs.push(o);
   }
   if (S.sections.includes('furniture')) {
@@ -2272,14 +2369,40 @@ function buildTerraceCalcRequest(secId) {
   // Отметка настила: у пристроенной террасы и у террасы у бассейна — вровень
   // с фундаментом (та же отметка, что в 3D).
   const terraceHeight = isEmptyLot() ? 350 : Math.round(foundCm * 10);
-  return {
-    payload: {
-      vertices,
-      doorDirection: _mainDoorDirection() || 'N',
-      deckingBoardProductId: productId,
-      terraceHeight,
-    },
+  const payload = {
+    vertices,
+    doorDirection: _mainDoorDirection() || 'N',
+    deckingBoardProductId: productId,
+    terraceHeight,
   };
+  // Бассейн вырезает часть настила — площадь выреза уходит в задание (TODO.md,
+  // этап 2 п.14). Поля в опубликованном контракте нет: шлём как дополнительное,
+  // по образцу terraceHeight. Считаем ровно ту часть, что попала на блоки секции.
+  if (sec === 'pool_terrace' && S.pool && typeof _poolCutAreaM2 === 'function') {
+    const cut = _poolCutAreaM2();
+    if (cut > 0.01) {
+      payload.poolCutoutArea = Math.round(cut * 1e6);      // мм², как и вершины
+      payload.poolShape = S.pool.kind === 'round' ? 'round' : 'rect';
+    }
+  }
+  return { payload };
+}
+
+// Площадь выреза под бассейн (м²) — пересечение бассейна с блоками террасы.
+function _poolCutAreaM2() {
+  if (!S.pool || typeof poolPolygonWorld !== 'function') return 0;
+  const lw = (typeof lastHouseSize === 'function') ? lastHouseSize() : { L: 0, W: 0 };
+  const poly = poolPolygonWorld(lw.L, lw.W);
+  if (!poly) return 0;
+  let area = 0;
+  for (const pp of (typeof _terraceRectsToPolygons === 'function'
+                    ? _terraceRectsToPolygons('pool_terrace') : [])) {
+    const w = canvasToWorld(pp, lw.L, lw.W);
+    const minX = Math.min(...w.map(p => p.x)), maxX = Math.max(...w.map(p => p.x));
+    const minZ = Math.min(...w.map(p => p.z)), maxZ = Math.max(...w.map(p => p.z));
+    area += polyAreaM2(clipPolyToRect(poly, minX, maxX, minZ, maxZ));
+  }
+  return area;
 }
 
 // ── Запрос к бэкенду через Calculator + кэш по телу запроса ──
