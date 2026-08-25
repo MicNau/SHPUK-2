@@ -1942,6 +1942,9 @@ function _fenceSchematicSection(group, x, z, angle, spanW, panelH, panelMat, fra
 // правило продукта — «все части забора кроме панелей тёмно-серые». Раньше было
 // наоборот (список каркасных имён, остальное — полотно), и любая непонятная
 // деталь модели уезжала в текстуру товара.
+// Ширина проёма под калитку в мире (то же значение, что FENCE_GATE_W на плане).
+const FENCE_GATE_W3D = 1.0;
+
 const FENCE_PANEL_RE = /panel|polotno|полотн|board|plank|доск|штакет|ламел|lamel|fill|заполн/i;
 
 // Секция из модели товара: клон, растянутый по длине пролёта. Материалы назначаем
@@ -2015,6 +2018,9 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
   const postSet = new Set();
   const postKey = (x, z) => `${x.toFixed(2)},${z.toFixed(2)}`;
   let panelsPainted = 0;                 // сколько мешей модели опознано как полотно
+  // Калитка (TODO.md, этап 2 п.8) — точка плана, переводим в мир один раз.
+  const gateW = (typeof S !== 'undefined' && S.fenceGate)
+    ? canvasToWorld([S.fenceGate], houseL, houseW)[0] : null;
 
   const segments = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [realPts];
   for (const seg of segments) {
@@ -2027,6 +2033,27 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
       if (segLen < 0.05) continue;
       const ux = dx / segLen, uz = dz / segLen;
       const angle = Math.atan2(ux, uz) - Math.PI / 2;   // локальный +X вдоль пролёта
+      // Калитка: проём фиксированной ширины на пролёте, где она стоит (TODO.md,
+      // этап 2 п.8). Пролёт делится на два куска — до и после проёма; каждый
+      // собирается своими секциями, как обычный пролёт.
+      const parts = _fenceGateSplit(a, ux, uz, segLen, gateW);
+      for (const part of parts) {
+        _fenceRun(a.x + ux * part.t0, a.z + uz * part.t0, ux, uz, part.len, angle);
+      }
+    }
+  }
+  // Модель без опознанного полотна станет целиком тёмно-серой — на стенде это надо
+  // видеть сразу, чтобы дополнить FENCE_PANEL_RE именами из конкретного файла.
+  if (proto && !panelsPainted) {
+    console.warn('[fence] в модели товара не опознано полотно — забор целиком тёмно-серый:', url);
+  }
+  parent.add(fenceGroup);
+
+  // ── Сборка одного участка пролёта (секции + замыкающий столб) ──
+  function _fenceRun(sx, sz, ux, uz, runLen, angle) {
+      const segLen = runLen;
+      const a = { x: sx, z: sz };
+      if (segLen < 0.3) return;
       const nSec = Math.max(1, Math.round(segLen / FENCE_SECTION_W));
       const secW = segLen / nSec;
 
@@ -2049,13 +2076,22 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
           _fenceBoxPost(fenceGroup, ex, ez, angle, panelH, frameMat);
         }
       }
-    }
   }
-  // Модель без опознанного полотна станет целиком тёмно-серой — на стенде это надо
-  // видеть сразу, чтобы дополнить FENCE_PANEL_RE именами из конкретного файла.
-  if (proto && !panelsPainted) {
-    console.warn('[fence] в модели товара не опознано полотно — забор целиком тёмно-серый:', url);
-  }
-  parent.add(fenceGroup);
+}
+
+// Делит пролёт на куски вокруг калитки: [{t0, len}]. Калитка задана точкой плана
+// (S.fenceGate); на пролёт она влияет, только если лежит на нём (в пределах 0.3 м).
+function _fenceGateSplit(a, ux, uz, segLen, gate) {
+  if (!gate) return [{ t0: 0, len: segLen }];
+  const vx = gate.x - a.x, vz = gate.z - a.z;
+  const t = vx * ux + vz * uz;                                  // проекция на ось пролёта
+  const off = Math.hypot(vx - ux * t, vz - uz * t);             // отклонение от оси
+  if (off > 0.30 || t < -0.1 || t > segLen + 0.1) return [{ t0: 0, len: segLen }];
+  const half = FENCE_GATE_W3D / 2;
+  const g0 = Math.max(0, t - half), g1 = Math.min(segLen, t + half);
+  const parts = [];
+  if (g0 > 0.3) parts.push({ t0: 0, len: g0 });
+  if (segLen - g1 > 0.3) parts.push({ t0: g1, len: segLen - g1 });
+  return parts.length ? parts : [];
 }
 

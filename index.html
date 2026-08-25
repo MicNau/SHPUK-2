@@ -201,7 +201,7 @@
           <div class="d-canvas-header">
             <div>
               <div class="d-canvas-title">Дорожки — разметка</div>
-              <div class="d-canvas-hint">Ставьте точки в углах дорожки. Нажмите «ДОБАВИТЬ» для новой линии, «ОТМЕНИТЬ» — чтобы убрать последнюю точку.</div>
+              <div class="d-canvas-hint">Участок дорожки уже намечен перед фасадом. Кликом ставьте новые точки, выбранную точку можно перетащить или удалить кнопкой. «ЕЩЁ ЛИНИЯ» начинает отдельную дорожку.</div>
             </div>
           </div>
           <div class="d-canvas-area" id="cw-paths"><canvas id="cv-paths"></canvas></div>
@@ -217,8 +217,8 @@
               <div class="d-param-unit"><span>60 см</span><span>300 см</span></div>
             </div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addBreak('paths')">Добавить</button>
-              <button class="d-canvas-btn" onclick="undoPt('paths')">Отменить</button>
+              <button class="d-canvas-btn" onclick="addBreak('paths')">Ещё линия</button>
+              <button class="d-canvas-btn" onclick="delLinePoint('paths')">Удалить точку</button>
               <button class="d-canvas-btn" onclick="dResetSection('paths')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('paths')">Дальше →</button>
             </div>
@@ -282,7 +282,7 @@
           <div class="d-canvas-header">
             <div>
               <div class="d-canvas-title">Забор — разметка</div>
-              <div class="d-canvas-hint">Ставьте точки в углах забора. Нажмите «ДОБАВИТЬ» для новой линии, «ОТМЕНИТЬ» — чтобы убрать последнюю точку.</div>
+              <div class="d-canvas-hint">Участок забора уже намечен. Кликом ставьте новые точки, выбранную точку можно перетащить или удалить кнопкой. Ближе 3 м к дому и террасе забор не ставится — зона показана пунктиром. «КАЛИТКА» делает проём 1 м.</div>
             </div>
           </div>
           <div class="d-canvas-area" id="cw-fence"><canvas id="cv-fence"></canvas></div>
@@ -296,8 +296,9 @@
               <span class="bed-h-unit">м</span>
             </div>
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addBreak('fence')">Добавить</button>
-              <button class="d-canvas-btn" onclick="undoPt('fence')">Отменить</button>
+              <button class="d-canvas-btn" onclick="addBreak('fence')">Ещё линия</button>
+              <button class="d-canvas-btn" onclick="delLinePoint('fence')">Удалить точку</button>
+              <button class="d-canvas-btn" onclick="dFenceGate()">Калитка</button>
               <button class="d-canvas-btn" onclick="dResetSection('fence')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('fence')">Дальше →</button>
             </div>
@@ -378,8 +379,8 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=53"></script>
-<script src="canvas.js?v=48"></script>
+<script src="state.js?v=54"></script>
+<script src="canvas.js?v=49"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=85"></script>
 <!-- Каталожный API: домен выбирается по хосту.
@@ -402,10 +403,10 @@
 <!-- 3D viewer: core (сцена/материалы/оркестратор) → builders (конструкции) →
      railing (ограждение/навесы). Общая глобальная область, порядок важен. -->
 <script src="viewer3d-core.js?v=141"></script>
-<script src="viewer3d-builders.js?v=29"></script>
+<script src="viewer3d-builders.js?v=30"></script>
 <script src="viewer3d-railing.js?v=10"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=94"></script>
+<script src="nav-desktop.js?v=95"></script>
 </body>
 </html>

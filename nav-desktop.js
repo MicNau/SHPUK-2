@@ -957,6 +957,22 @@ function _railingFilterProducts(products) {
   return products;
 }
 
+// ── «Калитка» в заборе (TODO.md, этап 2 п.8) ──
+// Логика как у входа в ограждении: проём фиксированной ширины 1 м. Повторное
+// нажатие калитку убирает. Модель калитки (п.9) появится, когда придёт GLB —
+// пока в этом месте просто разрыв, а в смету уходит gateCount = 1.
+function dFenceGate() {
+  if (S.fenceGate) {
+    S.fenceGate = null;
+  } else {
+    const g = (typeof fenceGateDefault === 'function') ? fenceGateDefault() : null;
+    if (!g) { dToast('Нужен участок забора длиннее 1.4 м — калитке нужно место'); return; }
+    S.fenceGate = g;
+  }
+  if (typeof drawSnapCanvas === 'function') drawSnapCanvas('fence');
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
 // ── «Обозначить вход» в ограждении (TODO.md, этап 2 п.4) ──
 // Ставит разрыв на самом длинном свободном участке периметра; дальше пользователь
 // двигает две точки прямо на плане. Повторное нажатие вход убирает.
@@ -987,6 +1003,7 @@ function dResetSection(secId) {
   if (secId === 'beds')      { S.beds = []; S.activeBed = null; }
   if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
   if (secId === 'facade')    S.wallZones = {};
+  if (secId === 'fence')     S.fenceGate = null;
   if (secId === 'railing') { S.railingEntry = null; S.railFilters = { cap: null, postW: null }; }
   if (S.mats && S.mats[secId]) delete S.mats[secId];
   if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
@@ -2212,7 +2229,8 @@ function _projectObjects() {
     const o = { type: el === 'fence' ? CalculationType.FENCE : CalculationType.RAILING,
                 name: lbl(el), lines, sectionProductId: _elementProductId(el) };
     // Калитки в разметке не учитываются — отдельного инструмента для них нет.
-    if (el === 'fence') { o.gateCount = 0; o.picketProductId = null; }
+    // Калитка в разметке — одна на забор (TODO.md, этап 2 п.8).
+    if (el === 'fence') { o.gateCount = S.fenceGate ? 1 : 0; o.picketProductId = null; }
     objs.push(o);
   }
   if (S.sections.includes('furniture')) {
