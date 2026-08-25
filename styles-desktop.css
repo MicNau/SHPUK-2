@@ -4,8 +4,10 @@
    (см. .d-house-card / .d-mat-card ниже). Селектор * имеет нулевую специфичность,
    поэтому любое явное правило — круги 50%, прямые углы карточек — его перекрывает. */
 *, *::before, *::after { border-radius: var(--r); }
-/* Панели и окна — прямоугольные, скругляются только контролы. */
+/* Панели и окна — прямоугольные, скругляются только контролы. У .d-center-view
+   скругление было заметно: она обрезает 3D по overflow, и углы вида срезались. */
 .d-sidebar, .d-panel, .d-3d-container, .d-center-canvas,
+.d-center-view, .d-center-3d, .d-center-3d canvas, .d-3d-container canvas,
 .d-summary-box, .d-3d-loading, #d-toast { border-radius: 0; }
 
 /* Полоса прокрутки: серая линия 2px по центру жёлоба, оранжевый движок 4px. */
@@ -363,7 +365,9 @@ body.d-editor-open .d-3d-hint { display: none; }
 .d-sb-btn {
   width: 100%; height: 48px; background: var(--bg); border: 2px solid var(--btn-border);
   border-radius: var(--r); font-size: 18px; font-weight: 600; cursor: pointer;
-  text-align: left; padding: 0 14px;
+  /* Подпись строго в одну строку (TODO п.5): ширину панели под самую длинную
+     («Ограждения террасы») считает _dSyncSidebarWidth. */
+  text-align: left; padding: 0 14px; white-space: nowrap;
   transition: border-color .2s, box-shadow .2s, background .15s;
   user-select: none;
 }
@@ -590,7 +594,9 @@ body.d-editor-open .d-3d-hint { display: none; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 20px 12px; border-bottom: 1px solid #e8e8e8; flex-shrink: 0;
 }
-.d-panel-title { font-size: 36px; font-weight: 400; color: var(--accent); }
+/* Название раздела — в одну строку (TODO п.5); ширину панели под самое длинное
+   считает _dSyncSidebarWidth (--panel-w). */
+.d-panel-title { font-size: 36px; font-weight: 400; color: var(--accent); white-space: nowrap; }
 .d-panel-close {
   width: 32px; height: 32px; background: none; border: none;
   border-radius: 50%; font-size: 18px; cursor: pointer;

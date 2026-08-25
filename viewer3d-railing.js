@@ -268,10 +268,10 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, segsOv
   // Ставит столб с дедупом по общему реестру (стыки rect-ов): если рядом уже есть
   // столб — не дублируем. Высоких столбов-опор больше нет: навес над террасой убран
   // (TODO.md, этап 1 п.5), все столбы ограждения одной высоты.
-  // Сечение столба — из фильтра раздела (TODO.md, этап 2 п.5). Родное сечение модуля
+  // Сечение столба — свойство ВЫБРАННОГО ТОВАРА (S.railPostW, мм). Фильтр раздела
+  // сюда не вмешивается: он отбирает каталог (TODO п.1). Родное сечение модуля
   // 100 мм, поэтому 125 мм = масштаб 1.25 В ПЛАНЕ (по X и Z), высота не меняется.
-  const postK = (typeof S !== 'undefined' && S.railFilters && S.railFilters.postW)
-    ? S.railFilters.postW / 100 : 1;
+  const postK = (typeof S !== 'undefined' && S.railPostW) ? S.railPostW / 100 : 1;
   function placePostAt(px, pz, ux, uz) {
     if (_railPostReg) {
       for (const e of _railPostReg) {

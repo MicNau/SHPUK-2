@@ -689,21 +689,20 @@ const DECK_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace'];
 // (перила берут материал ограждения). Цвет — тот же, что у полотна условного
 // забора: он читается как «черновик», а не как готовый материал.
 // Дорожки, грядки и терраса у бассейна в список не входят — там прежний вид.
-const SCHEMATIC_UNTIL_PRODUCT = new Set(['terrace', 'steps', 'railing']);
+// Пока товар не выбран — условный (серый) вид, а не дефолтная доска: терраса,
+// ступени, ограждение и терраса у бассейна (TODO пп.3, 4).
+const SCHEMATIC_UNTIL_PRODUCT = new Set(['terrace', 'steps', 'railing', 'pool_terrace']);
 function _schematicDeckMat() {
   const c = (typeof FENCE_SCHEMATIC_COLOR !== 'undefined') ? FENCE_SCHEMATIC_COLOR : 0xb0a89c;
   return new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.05 });
 }
 
-// Откуда элемент берёт материал, пока своего товара у него нет (TODO п.6):
-// ограждение террасы — с самой террасы, чтобы перила не выбивались из настила.
-const MAT_INHERIT_FROM = { railing: 'terrace' };
-
+// Материал элемента: свой выбранный товар, иначе условный серый вид.
+// Наследование материала террасы ограждением (была такая правка) ОТМЕНЕНО:
+// до выбора СВОЕГО товара ограждение серое (TODO п.3) — иначе перила выглядели
+// уже отделанными, хотя товар для них не выбирали.
 function _resolveDeckMat(baseDeck, el) {
-  let em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat[el] : null;
-  if (!em && MAT_INHERIT_FROM[el] && typeof S !== 'undefined' && S.elementMat) {
-    em = S.elementMat[MAT_INHERIT_FROM[el]] || null;   // свой товар всегда главнее
-  }
+  const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat[el] : null;
   if (!em) return SCHEMATIC_UNTIL_PRODUCT.has(el) ? _schematicDeckMat() : baseDeck;
   const m = baseDeck.clone();
   if (em.textures && _applyDeckProductTextures({ deck: m }, em.textures)) return m;

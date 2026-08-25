@@ -83,11 +83,21 @@ function _dSyncSidebarWidth() {
   };
   const titleW = widest(SIDEBAR_TITLES, 36, 400);
   // Строка меню: подпись 18px/700 (активный пункт жирнее) + паддинги кнопки 2×14
-  // + рамки 2×2 + два зазора по 2px + две иконки 48px + паддинг списка 2×8.
+  // + рамки 2×2 + зазор 2px + кнопка «Изменить» + паддинг списка 2×8.
+  // Кнопка «Изменить» — 16px/600 + паддинги 2×16; раньше здесь стояли жёсткие 96px
+  // от двух квадратных иконок, которых уже нет, и самая длинная подпись
+  // («Ограждения террасы») ломалась на две строки (TODO п.5).
   const labelW = widest(D_MENU_ITEMS.map(i => i.lbl), 18, 700);
+  const editW = widest(['Изменить'], 16, 600) + 32;
+  // Правая панель: её заголовок — название раздела тем же кеглем 36px. Самое
+  // длинное («Ограждения террасы») тоже должно вставать в строку (TODO п.5).
+  // Паддинги хедера 20+20, кнопка закрытия 32 и зазор 8.
+  const panelTitleW = widest(D_MENU_ITEMS.map(i => i.lbl), 36, 400);
   probe.remove();
-  const w = Math.ceil(Math.max(titleW + 2 * SIDEBAR_PAD, labelW + 28 + 4 + 4 + 96 + 16));
+  const w = Math.ceil(Math.max(titleW + 2 * SIDEBAR_PAD, labelW + 28 + 4 + 2 + editW + 16));
   document.documentElement.style.setProperty('--sidebar-w', w + 'px');
+  document.documentElement.style.setProperty('--panel-w',
+    Math.ceil(Math.max(364, panelTitleW + 40 + 32 + 8)) + 'px');
 }
 
 // Сразу рендерим сетку при загрузке (step 1 активен по умолчанию)
@@ -1006,48 +1016,83 @@ function _bedFilterProducts(products) {
 }
 
 // ── Фильтры ограждения: крышка столба и его сечение (TODO.md, этап 2 п.5) ──
-// Сечение влияет на 3D (толщина столбов), крышка — только на подбор товара: своего
-// поля у товара нет, поэтому ищем слово в названии/описании. Если под фильтр не
-// подходит НИ ОДИН товар раздела, фильтр не применяется — иначе каталог просто
-// опустел бы на данных, где этих слов нет (см. _railingFilterProducts).
+// Оба — ФИЛЬТРЫ КАТАЛОГА с мультивыбором (TODO п.1), на 3D напрямую не влияют:
+// до выбора товара ограждение серое, после — рисуется по товару (сечение столба
+// берётся из его названия, см. _railPostWFromProduct). Своих полей под крышку и
+// сечение у товара нет, поэтому ищем слова в названии/описании; если под фильтр
+// не подходит НИ ОДИН товар раздела, фильтр не применяется — иначе каталог просто
+// опустел бы на данных, где этих слов нет.
+function _railFilterList(kind) {
+  const v = S.railFilters ? S.railFilters[kind] : null;
+  return Array.isArray(v) ? v : (v == null ? [] : [v]);
+}
+
 function _dRenderRailFilters() {
   const cap = document.getElementById('d-rail-cap-grid');
   if (cap) {
+    const on = _railFilterList('cap');
     cap.innerHTML = RAIL_CAP_TYPES.map(t =>
-      `<button class="d-price-btn ${S.railFilters.cap === t.id ? 'selected' : ''}"
+      `<button class="d-price-btn ${on.includes(t.id) ? 'selected' : ''}"
                onclick="dSetRailFilter('cap', '${t.id}')">
          <span class="d-radio"></span><span class="d-price-txt"><b>${t.lbl}</b></span>
        </button>`).join('');
   }
   const post = document.getElementById('d-rail-post-grid');
   if (post) {
+    const on = _railFilterList('postW');
     post.innerHTML = RAIL_POST_WIDTHS.map(w =>
-      `<button class="d-price-btn ${S.railFilters.postW === w ? 'selected' : ''}"
+      `<button class="d-price-btn ${on.includes(w) ? 'selected' : ''}"
                onclick="dSetRailFilter('postW', ${w})">
          <span class="d-radio"></span><span class="d-price-txt"><b>${w} мм</b></span>
        </button>`).join('');
   }
 }
 
-// Повторный клик по выбранному варианту снимает фильтр.
+// Повторный клик снимает своё значение, остальные выбранные остаются.
 function dSetRailFilter(kind, value) {
-  S.railFilters[kind] = (S.railFilters[kind] === value) ? null : value;
+  const list = _railFilterList(kind);
+  S.railFilters[kind] = list.includes(value)
+    ? list.filter(v => v !== value)
+    : list.concat([value]);
   _dRenderRailFilters();
-  if (kind === 'postW' && typeof onParamChange === 'function') onParamChange();
   dShowResults();
 }
 
-// Отбор товаров ограждения по виду крышки. Пустой результат означает, что в данных
-// нет таких слов — тогда фильтр игнорируем и пишем об этом в консоль.
+// Сечение столба из названия товара (100/125 мм); не распознали — null.
+function _railPostWFromProduct(sample) {
+  if (sample && typeof sample.postWidthMm === 'number') return sample.postWidthMm;
+  const text = [sample && sample.name, sample && sample.previewText].filter(Boolean).join(' ');
+  // Как и у высоты борта грядки: `\b` после «мм» не работает — кириллица в
+  // ASCII-семантике не словесный символ, конец слова проверяем явно.
+  const re = new RegExp(
+    `(?:^|[^\\d])(${RAIL_POST_WIDTHS.join('|')})\\s*(?:мм|mm)(?![а-яёa-z0-9])`, 'i');
+  const m = re.exec(text);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// Отбор товаров ограждения по виду крышки и сечению столба. При мультивыборе
+// товар подходит, если совпало ЛЮБОЕ из выбранных значений. Пустой результат
+// означает, что в данных нет таких слов — тогда фильтр игнорируем и пишем в консоль.
 function _railingFilterProducts(products) {
-  if (dActiveItem !== 'railing' || !S.railFilters.cap) return products;
-  const t = RAIL_CAP_TYPES.find(x => x.id === S.railFilters.cap);
-  if (!t) return products;
-  const hit = products.filter(p => t.re.test((p.name || '') + ' ' + (p.previewText || '')));
+  if (dActiveItem !== 'railing') return products;
+  let out = products;
+  const ws = _railFilterList('postW');
+  if (ws.length) {
+    const hit = out.filter(p => ws.includes(_railPostWFromProduct(p)));
+    if (hit.length) out = hit;
+    else console.info('[railing] по сечению столба ' + ws.join('/') + ' мм товаров не нашлось —',
+                      'показываем все: сечение распознаётся по названию товара');
+  }
+  const on = _railFilterList('cap');
+  if (!on.length) return out;
+  const caps = RAIL_CAP_TYPES.filter(x => on.includes(x.id));
+  if (!caps.length) return out;
+  const hit = out.filter(p => caps.some(t => t.re.test((p.name || '') + ' ' + (p.previewText || ''))));
   if (hit.length) return hit;
-  console.info('[railing] по фильтру «' + t.lbl + '» товаров не нашлось — показываем все:',
+  console.info('[railing] по фильтру «' + caps.map(t => t.lbl).join(', ') +
+               '» товаров не нашлось — показываем все:',
                'у товаров нет поля с видом крышки, отбор идёт по названию');
-  return products;
+  return out;
 }
 
 // ── Короткое сообщение поверх рабочей области ──
@@ -1140,7 +1185,7 @@ function dResetSection(secId) {
   if (secId === 'fence')     S.fenceGate = null;
   if (secId === 'beds')      S.bedFilters = { h: [], mount: [] };
   if (secId === 'pool_terrace') S.pool = null;
-  if (secId === 'railing') { S.railingEntry = null; S.railFilters = { cap: null, postW: null }; }
+  if (secId === 'railing') { S.railingEntry = null; S.railFilters = { cap: [], postW: [] }; S.railPostW = null; }
   if (S.mats && S.mats[secId]) delete S.mats[secId];
   if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
   if (S.estimate && S.estimate[secId]) delete S.estimate[secId];
@@ -1409,6 +1454,9 @@ function _applySampleToActive(sample) {
       const h = _bedHeightFromProduct(sample);
       if (h) S.bedH = h;
     }
+    // Ограждение: сечение столба (100/125 мм) — тоже свойство товара, фильтр
+    // раздела только отбирает каталог (TODO п.1).
+    if (dActiveItem === 'railing') S.railPostW = _railPostWFromProduct(sample);
     if (typeof buildScene3d === 'function') buildScene3d();
   } else if (dActiveItem === 'furniture') {
     // Мебель: товар назначается ТОЧКЕ плана — выбранной, иначе первой свободной
