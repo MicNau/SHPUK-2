@@ -788,6 +788,7 @@ function _dRenderSidebar() {
                   ${isLocked ? 'disabled' : ''}>
             ${item.lbl}
           </button>
+          ${isEditing ? '<div class="d-sb-actions" id="d-sb-actions"></div>' : ''}
           ${isEditing ? '<div class="d-sb-accordion" id="d-sb-accordion"></div>' : ''}
           ${(isActive && !isEditing) ? `
           <div class="d-sb-filters" id="d-sb-filters">
@@ -819,7 +820,6 @@ function _dRenderSidebar() {
             </div>` : ''}
           </div>` : ''}
         </div>
-        ${isEditing ? '<div class="d-sb-actions" id="d-sb-actions"></div>' : ''}
         ${!isEditing && isCfg && item.hasEditor ? `<button class="d-sb-edit ${isLocked ? 'locked' : ''}"
             onclick="dEditItem('${item.id}')" ${isLocked ? 'disabled' : ''}>Изменить</button>` : ''}
       </div>`;
@@ -837,6 +837,15 @@ function _dRenderSidebar() {
   // Кнопка «Дальше» внизу панели живёт только пока открыт редактор.
   const nextSlot = document.getElementById('d-sb-next');
   if (nextSlot) nextSlot.classList.toggle('hidden', !dEditorOpen);
+
+  // «Назад» (TODO пп.8, 9): пока раздел не раскрыт — это выход к параметрам дома,
+  // так и подписываем. В раскрытом разделе кнопку убираем совсем: выход оттуда —
+  // «Дальше» (Готово), а «Назад» рядом с ним читалось как шаг мастера.
+  const backBtn = document.querySelector('.d-sidebar-actions .d-btn-back');
+  if (backBtn) {
+    backBtn.classList.toggle('hidden', dEditorOpen);
+    backBtn.textContent = '← К параметрам дома';
+  }
 
   if (dEditorOpen && dActiveItem) _dMountEditorControls(dActiveItem);
 
@@ -925,48 +934,75 @@ function dDeleteItem(secId) {
 // ── Фильтры грядок: высота борта и крепёж (TODO.md, этап 2 п.11) ──
 // Высота борта применяется сразу к 3D (S.bedH); тип крепежа своего поля у товара
 // не имеет — отбор по названию, как у крышки столба ограждения.
+// Оба фильтра — МУЛЬТИВЫБОР (TODO п.15): в S.bedFilters лежат массивы значений,
+// пустой массив = фильтр не задан. Это фильтры КАТАЛОГА: на 3D они не влияют —
+// до выбора товара грядка обозначается местом, после рисуется по товару.
+function _bedFilterList(kind) {
+  const v = S.bedFilters ? S.bedFilters[kind] : null;
+  return Array.isArray(v) ? v : (v == null ? [] : [v]);
+}
+
 function _dRenderBedFilters() {
   const hg = document.getElementById('d-bed-h-grid');
   if (hg) {
+    const on = _bedFilterList('h');
     hg.innerHTML = BED_HEIGHTS.map(h =>
-      `<button class="d-price-btn ${S.bedFilters.h === h ? 'selected' : ''}"
+      `<button class="d-price-btn ${on.includes(h) ? 'selected' : ''}"
                onclick="dSetBedFilter('h', ${h})">
          <span class="d-radio"></span><span class="d-price-txt"><b>${h} мм</b></span>
        </button>`).join('');
   }
   const mg = document.getElementById('d-bed-mount-grid');
   if (mg) {
+    const on = _bedFilterList('mount');
     mg.innerHTML = BED_MOUNTS.map(m =>
-      `<button class="d-price-btn ${S.bedFilters.mount === m.id ? 'selected' : ''}"
+      `<button class="d-price-btn ${on.includes(m.id) ? 'selected' : ''}"
                onclick="dSetBedFilter('mount', '${m.id}')">
          <span class="d-radio"></span><span class="d-price-txt"><b>${m.lbl}</b></span>
        </button>`).join('');
   }
 }
 
-// Повторный клик снимает фильтр. Высота борта сразу видна в 3D.
+// Повторный клик снимает своё значение, остальные выбранные остаются.
+// Фильтр только ОТБИРАЕТ КАТАЛОГ и на 3D напрямую не влияет: до выбора товара
+// грядка обозначается местом, после — рисуется по товару (высота борта берётся
+// из него, см. _bedHeightFromProduct).
 function dSetBedFilter(kind, value) {
-  S.bedFilters[kind] = (S.bedFilters[kind] === value) ? null : value;
-  if (kind === 'h') {
-    // Снятый фильтр возвращает высоту выбранного товара (или дефолт 0.20 м).
-    const fromProduct = _bedHeightFromProduct(S.elementMat && S.elementMat.beds);
-    S.bedH = S.bedFilters.h ? S.bedFilters.h / 1000 : (fromProduct || 0.20);
-    if (typeof onParamChange === 'function') onParamChange();
-  }
+  const list = _bedFilterList(kind);
+  S.bedFilters[kind] = list.includes(value)
+    ? list.filter(v => v !== value)
+    : list.concat([value]);
   _dRenderBedFilters();
   dShowResults();
 }
 
-// Отбор товаров грядок по типу крепежа (поля у товара нет — ищем в названии).
+// Отбор товаров грядок по фильтрам: высота борта (из названия/поля товара) и тип
+// крепежа (поля у товара нет — ищем в названии). При мультивыборе товар подходит,
+// если совпало ЛЮБОЕ из выбранных значений.
 function _bedFilterProducts(products) {
-  if (dActiveItem !== 'beds' || !S.bedFilters.mount) return products;
-  const m = BED_MOUNTS.find(x => x.id === S.bedFilters.mount);
-  if (!m) return products;
-  const hit = products.filter(p => m.re.test((p.name || '') + ' ' + (p.previewText || '')));
+  if (dActiveItem !== 'beds') return products;
+  let out = products;
+  const hs = _bedFilterList('h');
+  if (hs.length) {
+    const hit = out.filter(p => {
+      const h = _bedHeightFromProduct(p);
+      return h !== null && hs.includes(Math.round(h * 1000));
+    });
+    if (hit.length) out = hit;
+    else console.info('[beds] по высоте борта ' + hs.join('/') + ' мм товаров не нашлось —',
+                      'показываем все: высота распознаётся по названию товара');
+  }
+  const on = _bedFilterList('mount');
+  if (!on.length) return out;
+  const mounts = BED_MOUNTS.filter(x => on.includes(x.id));
+  if (!mounts.length) return out;
+  const hit = out.filter(p => mounts.some(m =>
+    m.re.test((p.name || '') + ' ' + (p.previewText || ''))));
   if (hit.length) return hit;
-  console.info('[beds] по фильтру «' + m.lbl + '» товаров не нашлось — показываем все:',
+  console.info('[beds] по фильтру «' + mounts.map(m => m.lbl).join(', ') +
+               '» товаров не нашлось — показываем все:',
                'у товаров нет поля с типом крепежа, отбор идёт по названию');
-  return products;
+  return out;
 }
 
 // ── Фильтры ограждения: крышка столба и его сечение (TODO.md, этап 2 п.5) ──
@@ -1012,6 +1048,26 @@ function _railingFilterProducts(products) {
   console.info('[railing] по фильтру «' + t.lbl + '» товаров не нашлось — показываем все:',
                'у товаров нет поля с видом крышки, отбор идёт по названию');
   return products;
+}
+
+// ── Короткое сообщение поверх рабочей области ──
+// Редакторы объясняют им отказ: «точка ближе 3 м», «сначала выберите точку» и т.п.
+// Функция вызывалась из canvas.js и отсюда, но НИГДЕ не была определена: часть
+// вызовов молча гасилась проверкой `typeof dToast === 'function'`, а три вызова
+// (бассейн, калитка, вход в ограждении) падали с ReferenceError.
+let _dToastTimer = null;
+function dToast(msg) {
+  let el = document.getElementById('d-toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'd-toast';
+    el.className = 'd-toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_dToastTimer);
+  _dToastTimer = setTimeout(() => el.classList.remove('show'), 2600);
 }
 
 // ── Бассейн на террасе у бассейна (TODO.md, этап 2 п.14) ──
@@ -1064,9 +1120,12 @@ function dRailingEntry() {
   if (typeof onParamChange === 'function') onParamChange();
 }
 
-// ── «Удалить всё» — сброс раздела в нулевое состояние, НЕ выходя из редактора ──
-// (TODO.md, этап 2 п.2). Данные раздела чистятся, редактор переинициализируется —
-// раздел выглядит так же, как при первом заходе.
+// ── «Удалить всё» — раздел возвращается в нулевое состояние ──
+// (этап 2 п.2). Данные чистятся, редактор закрывается, раздел перестаёт быть
+// настроенным: кнопки «Изменить» у него больше нет, следующий клик по разделу
+// открывает редактор заново, как при первом заходе (TODO п.3). Раньше редактор
+// оставался открытым и сразу подставлял стартовую разметку — «удалить всё» на
+// экране выглядело как «переставить заново».
 function dResetSection(secId) {
   const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
   const label = item ? item.lbl : secId;
@@ -1079,17 +1138,24 @@ function dResetSection(secId) {
   if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
   if (secId === 'facade')    S.wallZones = {};
   if (secId === 'fence')     S.fenceGate = null;
-  if (secId === 'beds')      S.bedFilters = { h: null, mount: null };
+  if (secId === 'beds')      S.bedFilters = { h: [], mount: [] };
   if (secId === 'pool_terrace') S.pool = null;
   if (secId === 'railing') { S.railingEntry = null; S.railFilters = { cap: null, postW: null }; }
   if (S.mats && S.mats[secId]) delete S.mats[secId];
   if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
   if (S.estimate && S.estimate[secId]) delete S.estimate[secId];
 
-  // Перезапускаем редактор раздела: он сам вернёт стартовую разметку.
-  const initFn = D_CANVAS_INIT[secId];
-  if (initFn) initFn();
-  if (typeof onParamChange === 'function') onParamChange();
+  // Раздел больше не настроен: закрываем редактор, убираем его из проекта.
+  S.sections = S.sections.filter(s => s !== secId);
+  dConfigured.delete(secId);
+  dEditorOpen = false;
+  _dCloseAllCanvases();
+  if (dActiveItem === secId) dActiveItem = null;
+
+  _dRenderSidebar();
+  _dSetPanelLocked(!dActiveItem);
+  if (dActiveItem) _dRenderPanelContent();
+  if (typeof buildScene3d === 'function') setTimeout(() => init3dCanvas('d-slot-workspace'), 50);
 }
 
 // ── Click on sidebar button ──
@@ -1336,12 +1402,11 @@ function _applySampleToActive(sample) {
                    modelUrl: sample.modelUrl || '' };
     S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures, ...meta }
                               : (sample.color ? { color: sample.color, ...meta } : null);
-    // Грядки: высота борта — свойство товара (150/200/225/270/300 мм, см. TODO.md),
-    // поэтому забираем её из названия и отдаём в 3D.
+    // Грядки: высота борта — свойство ТОВАРА (150/200/225/270/300 мм, см. TODO.md),
+    // забираем её из названия и отдаём в 3D. Фильтр высоты сюда не вмешивается: он
+    // отбирает каталог, а рисуется то, что выбрано (TODO п.15).
     if (dActiveItem === 'beds') {
-      // Явно выбранная в фильтре высота (TODO.md, этап 2 п.11) главнее той, что
-      // угадана по названию товара: пользователь задал её сам.
-      const h = S.bedFilters.h ? S.bedFilters.h / 1000 : _bedHeightFromProduct(sample);
+      const h = _bedHeightFromProduct(sample);
       if (h) S.bedH = h;
     }
     if (typeof buildScene3d === 'function') buildScene3d();
@@ -1903,8 +1968,10 @@ function dToggleMatCard(mid) {
   document.querySelectorAll('.d-mat-card.open').forEach(c => c.classList.remove('open'));
   if (was) return;
   el.classList.add('open');
-  // Раскрытая карточка целиком в поле зрения (TODO.md, этап 1 п.12): у карточки внизу
-  // списка кнопки «Посмотреть»/«Применить» оказывались за краем контейнера.
+  // Раскрытая карточка целиком в поле зрения: у карточки внизу списка кнопки
+  // «Посмотреть»/«Применить» оказывались за краем контейнера. Центровать не нужно
+  // (TODO п.10) — прокручиваем НА МИНИМУМ (`block: 'nearest'`): верхние карточки
+  // остаются на месте, нижняя всплывает ровно настолько, чтобы кнопки были видны.
   // Ждём КОНЦА анимации раскрытия: пока max-height едет, карточка ещё низкая, и
   // прокрутка не доводит список до конца. Таймер — страховка, если transitionend
   // не придёт. Прокрутка мгновенная: smooth-анимация в части окружений не запускается.
@@ -1914,7 +1981,7 @@ function dToggleMatCard(mid) {
     if (scrolled) return;
     scrolled = true;
     if (body) body.removeEventListener('transitionend', toView);
-    el.scrollIntoView({ block: 'center' });
+    el.scrollIntoView({ block: 'nearest' });
   };
   if (body) body.addEventListener('transitionend', toView);
   setTimeout(toView, 450);
@@ -1995,11 +2062,43 @@ function _boardWidthM(name) {
   return 0.14;
 }
 
+// Площадь дорожек с ВЫЧЕТОМ перекрытий (TODO п.7): считается по тем же
+// непересекающимся линиям, что уходят в смету объектами (_pathProjectObjects),
+// поэтому цифра в панели и задание на расчёт всегда сходятся.
+function _pathsAreaM2() {
+  const w = (S.pathWidth || 120) / 100;
+  const lines = _pathCenterLines();
+  if (!lines.length) return 0;
+  const cut = (typeof pathLinesNoOverlap === 'function') ? pathLinesNoOverlap(lines, w / 2) : lines;
+  let L = 0;
+  for (const wp of cut) for (let i = 1; i < wp.length; i++) {
+    L += Math.hypot(wp[i].x - wp[i - 1].x, wp[i].z - wp[i - 1].z);
+  }
+  return L * w;
+}
+
+// Осевые линии дорожек в метрах плана ({x,z} — как ждут геометрические хелперы).
+function _pathCenterLines() {
+  const pts = S.pts.paths || [];
+  const G = _GRIDm();
+  const segs = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [pts.filter(p => !p.break)];
+  const lines = [];
+  for (const seg of segs) {
+    const raw = seg.filter(p => !p.break).map(p => ({ x: p.x * G, z: p.y * G }));
+    const wp = [];
+    for (const p of raw) {
+      if (!wp.length || Math.hypot(p.x - wp[wp.length - 1].x, p.z - wp[wp.length - 1].z) > 0.05) wp.push(p);
+    }
+    if (wp.length >= 2) lines.push(wp);
+  }
+  return lines;
+}
+
 // Метрика элемента: {kind:'deck'|'linear'|'piece', value, text}.
 function _elementMetric(el) {
   if (RECT_SECTIONS[el]) { const a = _rectsAreaM2(secRects(el)); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'steps')   { const G = _GRIDm(); const a = (S.steps.w * G) * (S.steps.h * G); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
-  if (el === 'paths')   { const len = _polyLenM(S.pts.paths); const w = (S.pathWidth || 120) / 100; const a = len * w; return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
+  if (el === 'paths')   { const a = _pathsAreaM2(); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'fence')   { const len = _polyLenM(S.pts.fence); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
   if (el === 'railing') { const len = _polyLenM(S.pts.railing); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
   if (el === 'beds')    { const n = (S.beds || []).length; return n > 0 ? { kind: 'piece', value: n, text: n + ' шт' } : null; }
@@ -2246,22 +2345,17 @@ function _furnitureProjectObject(name) {
 // затем правая обратно — как в примере контракта.
 // Каждая линия разметки (разрывы {break:true}) — отдельный объект дорожки.
 function _pathProjectObjects(name) {
-  const pts = S.pts.paths || [];
   if (typeof _offsetPolyline !== 'function') return [];
-  const G = _GRIDm();
   const halfW = ((S.pathWidth || 120) / 100) / 2;      // м
-  const segs = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [pts.filter(p => !p.break)];
   // Осевые в метрах плана; {x,z} — как ждёт _offsetPolyline (z = y плана).
-  const lines = [];
-  for (const seg of segs) {
-    const raw = seg.filter(p => !p.break).map(p => ({ x: p.x * G, z: p.y * G }));
-    const wp = [];
-    for (const p of raw) if (!wp.length || Math.hypot(p.x - wp[wp.length-1].x, p.z - wp[wp.length-1].z) > 0.05) wp.push(p);
-    if (wp.length >= 2) lines.push(wp);
-  }
+  const lines = _pathCenterLines();
   if (!lines.length) return [];
-  // Примыкания линий подрезаем так же, как в 3D: иначе перекрытия попадут в смету дважды.
-  const trimmed = (typeof _trimPathJunctions === 'function') ? _trimPathJunctions(lines, halfW) : lines;
+  // Перекрытия вычитаем (TODO п.7): примыкания подрезаются, как в 3D, а куски,
+  // накрытые полотном другой дорожки на пересечении, выбрасываются — иначе одна
+  // и та же площадь уходила в смету дважды, от каждой из пересекающихся дорожек.
+  const trimmed = (typeof pathLinesNoOverlap === 'function')
+    ? pathLinesNoOverlap(lines, halfW)
+    : ((typeof _trimPathJunctions === 'function') ? _trimPathJunctions(lines, halfW) : lines);
   const productId = _elementProductId('paths');
   const objs = [];
   trimmed.forEach((wp, i) => {

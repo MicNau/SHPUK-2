@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=35">
+<link rel="stylesheet" href="styles-desktop.css?v=36">
 </head>
 <body>
 
@@ -26,11 +26,12 @@
         <div class="hcp"><div class="ic">🌿</div>Пустой участок, без строений</div>
         <div class="hcl">Участок без дома</div>
       </div>
-    </div>
-    <!-- «Дальше» — только для возврата на первый экран: дом уже выбран, и повторно
-         кликать по карточке (со сбросом настроек) незачем. См. _dSyncSelectNext. -->
-    <div class="d-select-actions" id="d-select-actions">
-      <button class="d-btn d-btn-next" onclick="dGoTo(2)">Дальше →</button>
+      <!-- «Дальше» — только для возврата на первый экран: дом уже выбран, и повторно
+           кликать по карточке (со сбросом настроек) незачем. См. _dSyncSelectNext.
+           Стоит в одном ряду с карточкой «Участок без дома» (TODO п.2). -->
+      <div class="d-select-actions" id="d-select-actions">
+        <button class="d-btn d-btn-next" onclick="dGoTo(2)">Дальше →</button>
+      </div>
     </div>
   </div>
 </div>
@@ -102,7 +103,7 @@
       <!-- Низ панели: «Назад» всегда, «Дальше» — пока открыт редактор (в него
            переезжает кнопка подтверждения из футера редактора, см. _dMountEditorControls). -->
       <div class="d-sidebar-actions">
-        <button class="d-btn d-btn-back" onclick="dBack()">← Назад</button>
+        <button class="d-btn d-btn-back" onclick="dBack()">← К параметрам дома</button>
         <div class="d-sb-next hidden" id="d-sb-next"></div>
       </div>
     </div>
@@ -288,13 +289,14 @@
           </div>
           <div class="d-canvas-area" id="cw-fence"><canvas id="cv-fence"></canvas></div>
           <div class="d-canvas-footer">
-            <div class="bed-h-row">
+            <!-- Подпись в одну строку, кнопки высот — под ней, одинаковой ширины
+                 (TODO п.12). Единицы ушли в подпись и в сами кнопки. -->
+            <div class="bed-h-row bed-h-col">
               <span class="bed-h-lbl">Высота забора:</span>
               <div class="bed-h-seg" id="fence-h-seg">
-                <button class="bed-h-btn active" data-m="1.5" onclick="dSetFenceHeight(1.5)">1.5</button>
-                <button class="bed-h-btn" data-m="1.9" onclick="dSetFenceHeight(1.9)">1.9</button>
+                <button class="bed-h-btn active" data-m="1.5" onclick="dSetFenceHeight(1.5)">1.5 м</button>
+                <button class="bed-h-btn" data-m="1.9" onclick="dSetFenceHeight(1.9)">1.9 м</button>
               </div>
-              <span class="bed-h-unit">м</span>
             </div>
             <div class="d-canvas-actions">
               <button class="d-canvas-btn" onclick="addBreak('fence')">Ещё линия</button>
@@ -380,8 +382,8 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=56"></script>
-<script src="canvas.js?v=52"></script>
+<script src="state.js?v=58"></script>
+<script src="canvas.js?v=53"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=85"></script>
 <!-- Каталожный API: домен выбирается по хосту.
@@ -403,11 +405,11 @@
 <script src="backend_API/Calculator.js?v=2"></script>
 <!-- 3D viewer: core (сцена/материалы/оркестратор) → builders (конструкции) →
      railing (ограждение/навесы). Общая глобальная область, порядок важен. -->
-<script src="viewer3d-core.js?v=142"></script>
-<script src="viewer3d-builders.js?v=33"></script>
+<script src="viewer3d-core.js?v=143"></script>
+<script src="viewer3d-builders.js?v=36"></script>
 <script src="viewer3d-railing.js?v=10"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=97"></script>
+<script src="nav-desktop.js?v=99"></script>
 </body>
 </html>

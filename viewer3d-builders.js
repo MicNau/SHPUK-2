@@ -291,37 +291,28 @@ function polyAreaM2(poly) {
 // это геометрия с задаваемыми размерами (решение продукта 2026-08-24).
 const POOL_WATER_DROP = 0.12;   // вода ниже уровня настила, м
 const POOL_DEPTH = 1.20;        // глубина чаши, м
+// Бассейн — ОДНО простое тело: цилиндр для круглого, бокс для прямоугольного
+// (TODO п.16). Верх тела — на отметке воды. Раньше строились отдельно плоскость
+// воды (ShapeGeometry по полигону) и стенки чаши: плоскость выглядела «съехавшей»
+// — на просвет было видно, что она обрезана настилом не по контуру чаши.
 function buildPool3d(parent, poly, deckTopY) {
   if (!poly || poly.length < 3) return;
-  const yW = deckTopY - POOL_WATER_DROP, yB = deckTopY - POOL_DEPTH;
-  // Вода
-  const water = new THREE.Shape(poly.map(p => new THREE.Vector2(p.x, p.z)));
-  const wg = new THREE.ShapeGeometry(water);
-  wg.rotateX(Math.PI / 2);                     // XY-плоскость → XZ
-  wg.scale(1, 1, -1);
-  wg.translate(0, yW, 0);
-  const wm = new THREE.Mesh(wg, new THREE.MeshStandardMaterial({
-    color: 0x2f7fa8, roughness: 0.18, metalness: 0.0,
+  const xs = poly.map(p => p.x), zs = poly.map(p => p.z);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minZ = Math.min(...zs), maxZ = Math.max(...zs);
+  const w = maxX - minX, d = maxZ - minZ;
+  if (w < 0.2 || d < 0.2) return;
+  const round = (typeof S !== 'undefined' && S.pool && S.pool.kind === 'round');
+  const geo = round
+    ? new THREE.CylinderGeometry(w / 2, w / 2, POOL_DEPTH, POOL_SEGMENTS)
+    : new THREE.BoxGeometry(w, POOL_DEPTH, d);
+  const body = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+    color: 0x2f7fa8, roughness: 0.22, metalness: 0.0,
   }));
-  wm.receiveShadow = true;
-  parent.add(wm);
-  // Стенки чаши
-  const pos = [], idx = [];
-  for (let i = 0; i < poly.length; i++) {
-    const a = poly[i], b = poly[(i + 1) % poly.length];
-    const base = pos.length / 3;
-    pos.push(a.x, deckTopY, a.z, b.x, deckTopY, b.z, b.x, yB, b.z, a.x, yB, a.z);
-    idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setIndex(idx);
-  geo.computeVertexNormals();
-  const walls = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-    color: 0x5a6a72, roughness: 0.6, side: THREE.DoubleSide,
-  }));
-  walls.receiveShadow = true;
-  parent.add(walls);
+  const topY = deckTopY - POOL_WATER_DROP;
+  body.position.set((minX + maxX) / 2, topY - POOL_DEPTH / 2, (minZ + maxZ) / 2);
+  body.castShadow = body.receiveShadow = true;
+  parent.add(body);
 }
 
 // ── ПОЛУСТУПЕНЬ ──────────────────────────────────────────────────────────────
@@ -335,9 +326,51 @@ const NOSING_OUT  = 0.01;    // вылет за кромку настила
 // z-fighting на перекрытии в 160 мм. 1 мм в кадре не читается.
 const NOSING_LIFT = 0.001;
 
+// Точка внутри полигона (мир {x,z}), луч вправо.
+function _pointInPolyXZ(x, z, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.z > z) !== (b.z > z) &&
+        x < (b.x - a.x) * (z - a.z) / (b.z - a.z) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+// Участки ребра (нормированные t), попадающие ВНУТРЬ полигона. Полуступень там
+// не строится: в вырезе под бассейн доска шла поперёк дыры (TODO п.16). pad —
+// запас с каждой стороны, чтобы доска не нависала над водой.
+function _polyCutRanges(ax, az, bx, bz, poly, pad) {
+  if (!poly || poly.length < 3) return [];
+  const dx = bx - ax, dz = bz - az, L = Math.hypot(dx, dz);
+  if (L < 1e-6) return [];
+  const ts = [0, 1];
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length];
+    const ex = q.x - p.x, ez = q.z - p.z;
+    const den = dx * ez - dz * ex;
+    if (Math.abs(den) < 1e-9) continue;
+    const t = ((p.x - ax) * ez - (p.z - az) * ex) / den;
+    const u = ((p.x - ax) * dz - (p.z - az) * dx) / den;
+    if (t > 0 && t < 1 && u >= 0 && u <= 1) ts.push(t);
+  }
+  ts.sort((a, b) => a - b);
+  const g = (pad || 0) / L;
+  const out = [];
+  for (let i = 0; i + 1 < ts.length; i++) {
+    const t0 = ts[i], t1 = ts[i + 1];
+    if (t1 - t0 < 1e-4) continue;
+    const mid = (t0 + t1) / 2;
+    if (!_pointInPolyXZ(ax + dx * mid, az + dz * mid, poly)) continue;
+    out.push([Math.max(0, t0 - g), Math.min(1, t1 + g)]);
+  }
+  return out;
+}
+
 // Строит полуступень по union-контуру блоков секции.
 // worldRects — [{minX,maxX,minZ,maxZ}] в мире, deckTopY — отметка верха настила.
-function buildTerraceNosing(parent, M, worldRects, deckTopY) {
+// holes — вырезы в настиле (полигоны world {x,z}, сейчас бассейн): в них доски нет.
+function buildTerraceNosing(parent, M, worldRects, deckTopY, holes) {
   if (!worldRects || !worldRects.length) return 0;
   if (typeof _terraceUnionLoops !== 'function') return 0;
   const loops = _terraceUnionLoops(worldRects);
@@ -365,8 +398,14 @@ function buildTerraceNosing(parent, M, worldRects, deckTopY) {
     const skipsOf = [];
     for (let i = 0; i < n; i++) {
       const e = seg[i], b = loop[(i + 1) % n];
-      skipsOf.push((e && houseEdges.length)
-        ? _railEdgesSkipRanges(e.a.x, e.a.z, b.x, b.z, 0.30, houseEdges) : []);
+      let sk = (e && houseEdges.length)
+        ? _railEdgesSkipRanges(e.a.x, e.a.z, b.x, b.z, 0.30, houseEdges) : [];
+      // Вырезы (бассейн) — доска обрывается по краю выреза, как и сам настил.
+      if (e && holes) for (const h of holes) {
+        sk = sk.concat(_polyCutRanges(e.a.x, e.a.z, b.x, b.z, h, NOSING_W));
+      }
+      sk.sort((p, q) => p[0] - q[0]);
+      skipsOf.push(sk);
     }
     // Есть ли у ребра доска у его начала (t=0) / конца (t=1)?
     const coveredAt = (idx, atStart) => {
@@ -1928,6 +1967,71 @@ function _trimPathJunctions(lines, halfW) {
   return out;
 }
 
+// Вычесть из набора интервалов [0..1] другой набор.
+function _subtractRanges(keep, cuts) {
+  let out = keep;
+  for (const [c0, c1] of cuts) {
+    const next = [];
+    for (const [k0, k1] of out) {
+      if (c1 <= k0 || c0 >= k1) { next.push([k0, k1]); continue; }   // не пересекаются
+      if (c0 > k0) next.push([k0, Math.min(c0, k1)]);
+      if (c1 < k1) next.push([Math.max(c1, k0), k1]);
+    }
+    out = next.filter(([a, b]) => b - a > 1e-6);
+  }
+  return out;
+}
+
+// Полотно дорожки как замкнутый полигон (левый борт вперёд + правый назад).
+function _pathRibbonPoly(wp, halfW) {
+  const { left, right } = _offsetPolyline(wp, halfW);
+  return [right[0], ...left, ...right.slice(1).reverse()];
+}
+
+// Осевые линии дорожек, разрезанные там, где их накрывает полотно ДРУГОЙ дорожки
+// (TODO п.7). Нужно смете: пересечение попадало в неё дважды — один раз от каждой
+// дорожки. Куски, накрытые более ранней линией, просто выбрасываются: площадь там
+// уже посчитана, а физически это одно и то же покрытие.
+// Ответвления (T-стыки) подрезаются, как и в 3D, тем же _trimPathJunctions.
+function pathLinesNoOverlap(lines, halfW) {
+  if (typeof _offsetPolyline !== 'function') return lines;
+  const trimmed = _trimPathJunctions(lines, halfW);
+  const ribbons = trimmed.map(wp => _pathRibbonPoly(wp, halfW));
+  const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
+  const out = [];
+  trimmed.forEach((wp, i) => {
+    if (i === 0) { out.push(wp); return; }
+    let cur = null, openEnd = false;
+    const flush = () => {
+      if (cur && cur.length >= 2) {
+        let L = 0;
+        for (let k = 1; k < cur.length; k++) L += Math.hypot(cur[k].x - cur[k-1].x, cur[k].z - cur[k-1].z);
+        if (L > 0.05) out.push(cur);
+      }
+      cur = null;
+    };
+    for (let k = 0; k < wp.length - 1; k++) {
+      const a = wp[k], b = wp[k + 1];
+      let keep = [[0, 1]];
+      for (let j = 0; j < i; j++) {
+        keep = _subtractRanges(keep, _polyCutRanges(a.x, a.z, b.x, b.z, ribbons[j], 0));
+      }
+      keep.sort((p, q) => p[0] - q[0]);
+      let first = true;
+      for (const [t0, t1] of keep) {
+        const p0 = lerp(a, b, t0), p1 = lerp(a, b, t1);
+        if (cur && openEnd && first && t0 < 1e-6) cur.push(p1);      // продолжение той же линии
+        else { flush(); cur = [p0, p1]; }
+        first = false;
+        openEnd = (t1 > 1 - 1e-6);
+      }
+      if (!keep.length) { flush(); openEnd = false; }
+    }
+    flush();
+  });
+  return out;
+}
+
 // Дорожки: сеть линий (разделены break). Рендерим посегментными рибонами (митёные углы +
 // доски ⟂ каждому сегменту), а пересечения чиним тримингом концов-ответвлений (T-стыки)
 // на полуширину — конец линии примыкает к краю встречной дорожки без наложения.
@@ -2085,15 +2189,35 @@ function _fenceProtoPosts(proto) {
   const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
   const tol = _fencePostTol(nw);
   proto.updateMatrixWorld(true);
-  const info = { any: false, atStart: false, atEnd: false };
+  const info = { any: false, atStart: false, atEnd: false, startCx: 0, endCx: 0, pitch: 0 };
+  const posts = [], other = [];
+  const centers = [];
   proto.traverse(o => {
     if (!o.isMesh) return;
     const p = _fencePostSpan(o, nw, nh);
-    if (!p) return;
+    if (!p) { other.push(o.name || '(без имени)'); return; }
+    posts.push(`${o.name || '(без имени)'} [${p.minX.toFixed(2)}…${p.maxX.toFixed(2)}]`);
+    centers.push((p.minX + p.maxX) / 2);
     info.any = true;
     if (p.minX <= tol) info.atStart = true;
     if (p.maxX >= nw - tol) info.atEnd = true;
   });
+  // Шаг секции — расстояние между ЦЕНТРАМИ крайних столбов, а не габарит модели.
+  // Габарит включает по полстолба с каждого края: если ставить секции по нему,
+  // столбы соседних секций встают ВПЛОТНУЮ ДРУГ К ДРУГУ (двойной столб на каждом
+  // стыке и на углу), а полотно расходится — баг с рендера 2026-08-25.
+  if (centers.length) {
+    info.startCx = Math.min(...centers);
+    info.endCx = Math.max(...centers);
+    if (info.endCx - info.startCx > 0.2) info.pitch = info.endCx - info.startCx;
+  }
+  // На стенде должно быть видно, как разобрана конкретная модель: если столб слит
+  // с прогонами в один меш, он сюда не попадёт и на свободном конце встанет
+  // простой box-столб (это фолбэк, а не баг разбора).
+  console.info('[fence] столбы в модели:', posts.length ? posts.join(', ') : 'не распознаны',
+               '| начало секции:', info.atStart, '| конец секции:', info.atEnd,
+               '| шаг столбов:', info.pitch ? info.pitch.toFixed(2) + ' м' : 'по габариту модели',
+               '| прочие меши:', other.join(', '));
   proto.userData._posts = info;
   return info;
 }
@@ -2128,6 +2252,8 @@ function _fenceModelPost(proto, group, x, z, angle, sy, frameMat) {
   for (const o of drop) if (o.parent) o.parent.remove(o);
   // Столб начала секции, поставленный в конец пролёта, — это столб начала
   // следующей (несуществующей) секции: ровно то, что нужно на свободном конце.
+  // Сдвиг тот же, что у секции: центр столба — точно в точку конца пролёта.
+  if (info.pitch) for (const c of inst.children) c.position.x -= info.startCx;
   inst.position.set(x, 0, z);
   inst.rotation.y = angle;
   inst.scale.set(1, sy, 1);   // столб по длине не тянем — только по высоте
@@ -2176,13 +2302,42 @@ const FENCE_PANEL_RE = /panel|polotno|полотн|board|plank|доск|штак
 // признака ориентации в карточке товара не нужно. Единственное исключение — меш
 // вообще без UV: тогда текстура товара легла бы одним пикселем, поэтому для него
 // остаётся аварийная box-проекция.
+// Секция ставится ПО ШАГУ СТОЛБОВ: центр стартового столба модели попадает ровно
+// в начало секции, центр её конечного столба — в начало следующей. Конечный столб
+// из клона выбрасывается — его место занимает стартовый столб следующей секции
+// (а на свободном конце — замыкающий столб, см. _fenceModelPost). Иначе на каждом
+// стыке стояло по два столба вплотную, а на углу — четыре.
+// Сами столбы по длине не тянутся: масштаб секции им компенсируется, иначе на
+// коротком пролёте они становились тоньше, на длинном — толще.
 function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, frameMat) {
+  const info = _fenceProtoPosts(proto);
+  const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
+  const tol = _fencePostTol(nw);
+  const pitch = (info.pitch > 0.2) ? info.pitch : nw;
+  const k = spanW / pitch;
+
   const inst = proto.clone(true);
+  inst.updateMatrixWorld(true);
+  // Классифицируем меши, пока клон стоит в нуле и не масштабирован.
+  const drop = [], keepPosts = [];
+  inst.traverse(o => {
+    if (!o.isMesh) return;
+    const p = _fencePostSpan(o, nw, nh);
+    if (!p || !info.pitch) return;
+    const cx = (p.minX + p.maxX) / 2;
+    if (Math.abs(cx - info.endCx) < tol) drop.push(o);
+    else if (Math.abs(cx - info.startCx) < tol) keepPosts.push(o);
+  });
+  for (const o of drop) if (o.parent) o.parent.remove(o);
+  for (const o of keepPosts) o.scale.x /= k;       // столб остаётся своей толщины
+
+  // Сдвиг: центр стартового столба — в нуль секции. Профиль поперёк линии (Z)
+  // не трогаем, по высоте — масштаб от родной высоты модели.
+  if (info.pitch) for (const c of inst.children) c.position.x -= info.startCx;
   inst.position.set(x, 0, z);
   inst.rotation.y = angle;
-  // Масштаб — от РОДНЫХ габаритов модели: секция ровно занимает пролёт, как бы ни
-  // была нарисована модель. Профиль поперёк линии (Z) не трогаем.
-  inst.scale.set(spanW / _fenceNativeW(proto), sy, 1);
+  inst.scale.set(k, sy, 1);
+
   let panels = 0;
   inst.traverse(o => {
     if (!o.isMesh) return;
@@ -2236,6 +2391,7 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
 
   const postSet = new Set();
   const postKey = (x, z) => `${x.toFixed(2)},${z.toFixed(2)}`;
+  const runEnds = [];                    // концы пролётов — столбы там ставятся в конце
   let panelsPainted = 0;                 // сколько мешей модели опознано как полотно
   // Калитка (TODO.md, этап 2 п.8) — точка плана, переводим в мир один раз.
   const gateW = (typeof S !== 'undefined' && S.fenceGate)
@@ -2259,6 +2415,16 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
       for (const part of parts) {
         _fenceRun(a.x + ux * part.t0, a.z + uz * part.t0, ux, uz, part.len, angle);
       }
+    }
+  }
+  // Замыкающие столбы: все пролёты уже разметили свои столбы в postSet, поэтому
+  // на углах и стыках здесь ничего не добавится — только на свободных концах.
+  for (const e of runEnds) {
+    const key = postKey(e.x, e.z);
+    if (postSet.has(key)) continue;
+    postSet.add(key);
+    if (!proto || !_fenceModelPost(proto, fenceGroup, e.x, e.z, e.angle, sy, frameMat)) {
+      _fenceBoxPost(fenceGroup, e.x, e.z, e.angle, panelH, frameMat);
     }
   }
   // Модель без опознанного полотна станет целиком тёмно-серой — на стенде это надо
@@ -2285,19 +2451,11 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
         if (proto) panelsPainted += _fenceModelSection(proto, fenceGroup, x, z, angle, secW, sy, panelMat, frameMat);
         else       _fenceSchematicSection(fenceGroup, x, z, angle, secW, panelH, panelMat, frameMat, withPost);
       }
-      // Замыкающий столб пролёта: у модели столб стоит в НАЧАЛЕ секции, поэтому
-      // свободный конец забора оставался без столба — ставим его отдельно (клоном
-      // каркаса модели, а если каркасных мешей в ней нет — обычным box-столбом).
-      // Если в модели столб есть и в конце секции, последняя секция пролёта уже
-      // закрыта своим столбом — ничего не добавляем.
-      const ex = a.x + ux * segLen, ez = a.z + uz * segLen;
-      if (!postSet.has(postKey(ex, ez))) {
-        postSet.add(postKey(ex, ez));
-        if (proto && _fenceProtoPosts(proto).atEnd) return;
-        if (!proto || !_fenceModelPost(proto, fenceGroup, ex, ez, angle, sy, frameMat)) {
-          _fenceBoxPost(fenceGroup, ex, ez, angle, panelH, frameMat);
-        }
-      }
+      // Конец пролёта: столб здесь нужен, только если в этой точке не начинается
+      // другой пролёт (на углу ломаной его ставит первая секция следующего
+      // пролёта). Решается ПОСЛЕ сборки всех пролётов — на момент сборки этого
+      // следующий ещё не размечен, и на углу вырастал лишний столб.
+      runEnds.push({ x: a.x + ux * segLen, z: a.z + uz * segLen, angle });
   }
 }
 

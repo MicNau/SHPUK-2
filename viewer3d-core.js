@@ -695,8 +695,15 @@ function _schematicDeckMat() {
   return new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.05 });
 }
 
+// Откуда элемент берёт материал, пока своего товара у него нет (TODO п.6):
+// ограждение террасы — с самой террасы, чтобы перила не выбивались из настила.
+const MAT_INHERIT_FROM = { railing: 'terrace' };
+
 function _resolveDeckMat(baseDeck, el) {
-  const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat[el] : null;
+  let em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat[el] : null;
+  if (!em && MAT_INHERIT_FROM[el] && typeof S !== 'undefined' && S.elementMat) {
+    em = S.elementMat[MAT_INHERIT_FROM[el]] || null;   // свой товар всегда главнее
+  }
   if (!em) return SCHEMATIC_UNTIL_PRODUCT.has(el) ? _schematicDeckMat() : baseDeck;
   const m = baseDeck.clone();
   if (em.textures && _applyDeckProductTextures({ deck: m }, em.textures)) return m;
@@ -1199,10 +1206,13 @@ function buildScene3d() {
       try { buildPool3d(houseGroup, _poolPoly, terraceLevel - 0.01); }
       catch (e) { console.error('[buildPool3d]', e); }
     }
+    // Отдельно стоящая — свободен весь контур, кроме выреза под бассейн:
+    // там полуступень обрывается так же, как настил (TODO п.16).
+    try {
+      buildTerraceNosing(houseGroup, M, _rectsWorld(poolRectPolys), terraceLevel - 0.01,
+                         _poolPoly ? [_poolPoly] : null);
+    } catch (e) { console.error('[buildTerraceNosing pool]', e); }
     _poolPoly = null;
-    // Отдельно стоящая — свободен весь контур.
-    try { buildTerraceNosing(houseGroup, M, _rectsWorld(poolRectPolys), terraceLevel - 0.01); }
-    catch (e) { console.error('[buildTerraceNosing pool]', e); }
   }
 
   if (S.sections.includes('paths') && S.pts.paths.filter(p=>!p.break).length >= 2) {
