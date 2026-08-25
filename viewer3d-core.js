@@ -689,12 +689,18 @@ const DECK_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace'];
 // (перила берут материал ограждения). Цвет — тот же, что у полотна условного
 // забора: он читается как «черновик», а не как готовый материал.
 // Дорожки, грядки и терраса у бассейна в список не входят — там прежний вид.
-const SCHEMATIC_UNTIL_PRODUCT = new Set(['terrace', 'steps', 'railing']);
+// Пока товар не выбран — условный (серый) вид, а не дефолтная доска: терраса,
+// ступени, ограждение и терраса у бассейна (TODO пп.3, 4).
+const SCHEMATIC_UNTIL_PRODUCT = new Set(['terrace', 'steps', 'railing', 'pool_terrace']);
 function _schematicDeckMat() {
   const c = (typeof FENCE_SCHEMATIC_COLOR !== 'undefined') ? FENCE_SCHEMATIC_COLOR : 0xb0a89c;
   return new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.05 });
 }
 
+// Материал элемента: свой выбранный товар, иначе условный серый вид.
+// Наследование материала террасы ограждением (была такая правка) ОТМЕНЕНО:
+// до выбора СВОЕГО товара ограждение серое (TODO п.3) — иначе перила выглядели
+// уже отделанными, хотя товар для них не выбирали.
 function _resolveDeckMat(baseDeck, el) {
   const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat[el] : null;
   if (!em) return SCHEMATIC_UNTIL_PRODUCT.has(el) ? _schematicDeckMat() : baseDeck;
@@ -1199,10 +1205,13 @@ function buildScene3d() {
       try { buildPool3d(houseGroup, _poolPoly, terraceLevel - 0.01); }
       catch (e) { console.error('[buildPool3d]', e); }
     }
+    // Отдельно стоящая — свободен весь контур, кроме выреза под бассейн:
+    // там полуступень обрывается так же, как настил (TODO п.16).
+    try {
+      buildTerraceNosing(houseGroup, M, _rectsWorld(poolRectPolys), terraceLevel - 0.01,
+                         _poolPoly ? [_poolPoly] : null);
+    } catch (e) { console.error('[buildTerraceNosing pool]', e); }
     _poolPoly = null;
-    // Отдельно стоящая — свободен весь контур.
-    try { buildTerraceNosing(houseGroup, M, _rectsWorld(poolRectPolys), terraceLevel - 0.01); }
-    catch (e) { console.error('[buildTerraceNosing pool]', e); }
   }
 
   if (S.sections.includes('paths') && S.pts.paths.filter(p=>!p.break).length >= 2) {

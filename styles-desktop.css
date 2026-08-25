@@ -4,8 +4,10 @@
    (см. .d-house-card / .d-mat-card ниже). Селектор * имеет нулевую специфичность,
    поэтому любое явное правило — круги 50%, прямые углы карточек — его перекрывает. */
 *, *::before, *::after { border-radius: var(--r); }
-/* Панели и окна — прямоугольные, скругляются только контролы. */
+/* Панели и окна — прямоугольные, скругляются только контролы. У .d-center-view
+   скругление было заметно: она обрезает 3D по overflow, и углы вида срезались. */
 .d-sidebar, .d-panel, .d-3d-container, .d-center-canvas,
+.d-center-view, .d-center-3d, .d-center-3d canvas, .d-3d-container canvas,
 .d-summary-box, .d-3d-loading, #d-toast { border-radius: 0; }
 
 /* Полоса прокрутки: серая линия 2px по центру жёлоба, оранжевый движок 4px. */
@@ -52,6 +54,9 @@
    вариантом для систем без Segoe UI. Подписи на canvas используют UI_FONT
    из canvas.js — держать оба списка согласованными. */
 body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; min-height:100vh; overflow:hidden; }
+/* Кнопки и поля ввода шрифт от body НЕ наследуют — браузер подставляет им свой
+   системный. Из-за этого надписи на кнопках рисовались не Segoe UI (TODO п.1). */
+button, input, select, textarea { font-family: inherit; }
 
 /* ═══════════════════════════════════════════
    FLOATING "ИТОГ" BUTTON (правый нижний угол; хедер убран)
@@ -156,8 +161,14 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 .d-house-extra { display: flex; gap: 0; flex-shrink: 0; }
 /* Кнопка «Дальше» на экране выбора дома — появляется только когда дом уже выбран
    (пользователь вернулся на первый экран). См. _dSyncSelectNext в nav-desktop.js. */
-.d-select-actions { display: none; flex-shrink: 0; }
+/* Кнопка стандартного размера, у нижнего края карточки «Участок без дома». */
+.d-select-actions { display: none; flex-shrink: 0; align-items: flex-end; margin-left: 24px; }
 .d-select-actions.active { display: flex; }
+.d-select-actions .d-btn {
+  height: 48px; min-width: 180px; padding: 0 24px;
+  border-radius: var(--r); font-size: 18px; cursor: pointer;
+  transition: background .15s, box-shadow .2s;
+}
 .d-house-card-empty {
   position: relative; flex: 0 0 240px; height: 180px; background: var(--bg);
   border-radius: 0; border: 1px solid var(--gray); cursor: pointer; overflow: hidden;
@@ -354,7 +365,9 @@ body.d-editor-open .d-3d-hint { display: none; }
 .d-sb-btn {
   width: 100%; height: 48px; background: var(--bg); border: 2px solid var(--btn-border);
   border-radius: var(--r); font-size: 18px; font-weight: 600; cursor: pointer;
-  text-align: left; padding: 0 14px;
+  /* Подпись строго в одну строку (TODO п.5): ширину панели под самую длинную
+     («Ограждения террасы») считает _dSyncSidebarWidth. */
+  text-align: left; padding: 0 14px; white-space: nowrap;
   transition: border-color .2s, box-shadow .2s, background .15s;
   user-select: none;
 }
@@ -404,12 +417,12 @@ body.d-editor-open .d-3d-hint { display: none; }
 }
 .d-sidebar-divider { height: 1px; background: #e8e8e8; margin: 8px 20px; }
 /* ── Аккордеон редактора в левой панели ──
-   Настройки открытого элемента раскрываются под его кнопкой, кнопки действий
-   встают колонкой справа, кнопка подтверждения — вниз панели рядом с «Назад».
-   Узлы переносятся из футера редактора (_dMountEditorControls). */
-/* Кнопка элемента и его настройки — одна колонка, кнопки действий справа от
-   неё. Раньше аккордеон шёл отдельным блоком под всем рядом и начинался ниже
-   колонки кнопок — настройки уезжали вниз, оставляя пустое место. */
+   Открытый раздел — одна колонка во всю ширину панели: кнопка раздела, под ней
+   кнопки действий, под ними настройки (слайдеры, переключатели). Кнопка
+   подтверждения уходит вниз панели рядом с «Назад». Узлы переносятся из футера
+   редактора (_dMountEditorControls). Раньше кнопки действий стояли колонкой
+   СПРАВА и укорачивали кнопку раздела, а слайдеры зажимались в остаток ширины
+   (TODO пп.4, 5). */
 .d-sb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .d-sb-accordion { padding: 10px 2px 4px; }
 /* Фильтры каталога под кнопкой выбранного раздела (TODO.md, этап 2 п.1).
@@ -425,10 +438,12 @@ body.d-editor-open .d-3d-hint { display: none; }
 .d-sb-accordion .d-param-group:last-child { margin-bottom: 0; }
 .d-sb-accordion .tg:last-child { margin-bottom: 0; }
 .d-sb-accordion:empty { display: none; }
-.d-sb-actions { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
-.d-sb-actions .d-canvas-btn { height: 48px; white-space: nowrap; }
+/* Кнопки действий — во всю ширину панели, столбиком под кнопкой раздела. */
+.d-sb-actions { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; padding-top: 2px; }
+.d-sb-actions .d-canvas-btn { width: 100%; height: 48px; white-space: nowrap; }
 .d-sidebar-actions { display: flex; gap: 12px; padding: 12px 20px; flex-shrink: 0; }
 .d-sidebar-actions .d-btn { flex: 1; height: 48px; font-size: 18px; }
+.d-sidebar-actions .d-btn.hidden { display: none; }
 .d-sb-next { flex: 1; display: flex; }
 .d-sb-next.hidden { display: none; }
 .d-sb-next .d-canvas-btn { flex: 1; height: 48px; font-size: 18px; }
@@ -481,6 +496,17 @@ body.d-editor-open .d-3d-hint { display: none; }
   font-size: 16px; font-weight: 400; color: var(--text);
   line-height: 1.35; max-width: 440px;
 }
+/* Короткое сообщение редактора (dToast): белая непрозрачная плашка, как остальные
+   подсказки, по центру внизу рабочей области. */
+.d-toast {
+  position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%);
+  z-index: 300; padding: 12px 20px; background: var(--bg); color: var(--text);
+  font-size: 16px; line-height: 1.35; max-width: 560px; text-align: center;
+  border-radius: var(--r); box-shadow: 0 2px 12px rgba(0,0,0,.22);
+  opacity: 0; pointer-events: none; transition: opacity .2s;
+}
+.d-toast.show { opacity: 1; }
+
 .d-canvas-actions { display: flex; gap: 8px; }
 /* Кнопки действий редактора — в правый нижний угол (в футере, прижаты вправо). */
 .d-canvas-footer .d-canvas-actions { margin-left: auto; }
@@ -550,6 +576,10 @@ body.d-editor-open .d-3d-hint { display: none; }
   border-right: 1px solid #ccc;
 }
 .bed-h-btn:last-child { border-right: none; }
+/* Вариант «подпись строкой, кнопки под ней во всю ширину» (TODO п.12). */
+.bed-h-col { flex-direction: column; align-items: stretch; gap: 8px; }
+.bed-h-col .bed-h-seg { display: flex; }
+.bed-h-col .bed-h-btn { flex: 1 1 0; height: 40px; padding: 0; }
 .bed-h-btn:hover { background: var(--card-hover, #ddd); }
 .bed-h-btn.active { background: var(--accent); color: #fff; }
 
@@ -564,7 +594,9 @@ body.d-editor-open .d-3d-hint { display: none; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 20px 12px; border-bottom: 1px solid #e8e8e8; flex-shrink: 0;
 }
-.d-panel-title { font-size: 36px; font-weight: 400; color: var(--accent); }
+/* Название раздела — в одну строку (TODO п.5); ширину панели под самое длинное
+   считает _dSyncSidebarWidth (--panel-w). */
+.d-panel-title { font-size: 36px; font-weight: 400; color: var(--accent); white-space: nowrap; }
 .d-panel-close {
   width: 32px; height: 32px; background: none; border: none;
   border-radius: 50%; font-size: 18px; cursor: pointer;
