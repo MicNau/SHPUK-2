@@ -182,10 +182,10 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-styles-desktop.css?v=35   state.js?v=51              canvas.js?v=47
+styles-desktop.css?v=35   state.js?v=53              canvas.js?v=48
 shared/house-builder.js?v=85                          ResourceManager.js?v=6
-viewer3d-core.js?v=140    viewer3d-builders.js?v=27   viewer3d-railing.js?v=8
-viewer3d-entourage.js?v=14                            nav-desktop.js?v=92
+viewer3d-core.js?v=141    viewer3d-builders.js?v=29   viewer3d-railing.js?v=10
+viewer3d-entourage.js?v=14                            nav-desktop.js?v=94
 backend_API/Calculator.js?v=2
 ```
 
@@ -583,7 +583,7 @@ POST /api/v1/calculate_terrace/   calculate_steps/   calculate_fence/
 | Регистрация редактора | пункт `railing` в `D_SIDEBAR_ITEMS` **и** в `D_CANVAS_INIT`, ключ `railing` в `S.pts` (state.js) **и** в `_dResetAllConfigurations` | nav-desktop.js |
 | Каталог | раздел 2331 + тег `fencing` (`GET /api/v1/products/?section_id=2331&tags=fencing`) | `SECTION_TAGS` / `CONSTRUCTION_TO_SECTION.railing`, state.js |
 | Материал | deck-элемент (`DECK_MAT_ELEMENTS`): `S.elementMat.railing` с текстурами товара | `_resolveDeckMat(_baseDeck, 'railing')`, viewer3d-core.js |
-| 3D | секции GLB `mod_railing` по нарисованной ломаной | `buildRailingLine3d`, viewer3d-railing.js |
+| 3D | секции GLB `mod_railing` по АВТОМАТИЧЕСКОЙ разметке (свободный периметр террасы) | `railingAutoPoints` → `buildRailingLine3d`, viewer3d-railing.js |
 | Смета | погонные метры ломаной, как у забора | `_elementMetric('railing')`, nav-desktop.js |
 
 **Высота настила** берётся из общего `terraceLevel` (см. `S.terraceH`) — ограждение стоит на
@@ -858,6 +858,30 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Сделано в итерации v=163 (этап 2 B: авто-ограждение и его фильтры):
+
+- **Ограждение больше не рисуется руками** (п.4). `railingAutoPoints(houseL, houseW)`
+  считает разметку по СВОБОДНОМУ периметру террасы: union-контур блоков → инсет
+  `RAIL_INSET` → `terracePerimeterSegments` (он уже вычитает участки у стен дома и
+  проём под лестницу) → вычитание «входа». Результат кладётся в `S.pts.railing` как
+  ПРОИЗВОДНЫЙ кэш: по нему живут план, смета и залипание ступеней, поэтому эти три
+  потребителя не менялись. Пересчёт — на каждой сборке сцены и при открытии редактора.
+- **«Вход»** — разрыв, заданный двумя точками на периметре (`S.railingEntry = {t0,t1}`
+  в долях длины главной петли). Кнопка ставит его на самый длинный свободный участок
+  шириной 1 м, дальше точки перетаскиваются прямо на плане (`railingEntryDrag`).
+  Параметризация петли (`railingLoopPath`/`railingPointAt`/`railingParamOf`) — общая
+  для 3D и плана, поэтому вырез в сцене и метки на плане не расходятся.
+- **`worldToCanvas`** (viewer3d-builders) — обратное преобразование к `canvasToWorld`;
+  габариты дома берутся из последнего прямого преобразования (`lastHouseSize`).
+  Нужен плану: геометрия ограждения считается в мире, а рисуется в координатах плана.
+- **Фильтры ограждения** (п.5): вид крышки (пластмасса/ДПК/металл) и сечение столба
+  (100/125 мм) — в ряду раздела в левой панели. Сечение масштабирует столбы в плане,
+  и у ограждения террасы, и у ньюэлов лестницы: это один товар. Вид крышки бэкенд
+  атрибутом не отдаёт, поэтому отбор идёт по названию/описанию товара, а если под
+  фильтр не подходит ни один товар — фильтр не применяется (и пишет `console.info`).
+- Cache-bust: `state.js?v=53`, `canvas.js?v=48`, `viewer3d-core.js?v=141`,
+  `viewer3d-builders.js?v=29`, `viewer3d-railing.js?v=10`, `nav-desktop.js?v=94`.
 
 Сделано в итерации v=162 (этап 2, группа A: левая панель):
 

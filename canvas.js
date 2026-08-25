@@ -687,9 +687,11 @@ function drawSnapCanvas(name) {
       ctx.strokeStyle=color; ctx.lineWidth=2.5/cx.scale; ctx.stroke();
     }
 
-    // Точки (все реальные точки с номерами)
+    // Точки (все реальные точки с номерами). У ограждения их не рисуем: разметка
+    // считается автоматически (TODO.md, этап 2 п.4), руками двигать нечего — на
+    // плане остаются только две точки «входа».
     let ptNum = 0;
-    pts.forEach(p=>{
+    if (name !== 'railing') pts.forEach(p=>{
       if (p.break) return;
       ptNum++;
       ctx.beginPath(); ctx.arc(p.x*W,p.y*H,8/cx.scale,0,Math.PI*2);
@@ -710,7 +712,90 @@ function drawSnapCanvas(name) {
     }
   }
 
+  // Точки «входа» в ограждении — две перетаскиваемые метки на периметре
+  // (TODO.md, этап 2 п.4). Разрыв между ними уже вычтен из разметки выше.
+  if (name === 'railing' && typeof railingEntryPointsNorm === 'function') {
+    const e = railingEntryPointsNorm();
+    if (e) {
+      ctx.strokeStyle = DIM_COL; ctx.fillStyle = '#fff';
+      ctx.lineWidth = 2.5 / cx.scale;
+      for (const p of e) {
+        ctx.beginPath();
+        ctx.arc(p.x * W, p.y * W, 7 / cx.scale, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+      }
+      ctx.fillStyle = DIM_COL; ctx.font = planFont(10, cx.scale, 'bold'); ctx.textAlign = 'center';
+      ctx.fillText('вход', (e[0].x + e[1].x) / 2 * W, ((e[0].y + e[1].y) / 2) * W - 12 / cx.scale);
+    }
+  }
+
   ctx.restore();
+}
+
+// ══════════════════════════════════════════════
+// РЕДАКТОР ОГРАЖДЕНИЯ (TODO.md, этап 2 п.4)
+// Точки руками не ставятся: разметка считается по свободному периметру террасы
+// (railingAutoPoints). Здесь можно только двигать две точки «входа».
+// ══════════════════════════════════════════════
+let _railDragIdx = null;
+
+// Пересчитать разметку по текущей террасе (та же функция, что зовёт 3D).
+function _railingSync() {
+  if (typeof railingAutoPoints !== 'function' || typeof lastHouseSize !== 'function') return;
+  const lw = lastHouseSize();
+  S.pts.railing = railingAutoPoints(lw.L, lw.W);
+}
+
+function initRailingCanvas() {
+  const wrap = document.getElementById('cw-railing');
+  const cv = document.getElementById('cv-railing');
+  if (!wrap || !cv) return;
+  CV.railing = mkCvState();
+  fitCanvasToWrap(wrap, cv, CV.railing);
+  _railingSync();
+  drawSnapCanvas('railing');
+
+  if (wrap._railBound) return;
+  wrap._railBound = true;
+  attachPanZoom(wrap, 'railing', () => drawSnapCanvas('railing'));
+
+  const norm = e => {
+    const r = wrap.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const cvEl = document.getElementById('cv-railing');
+    const cxs = CV.railing;
+    const sx = (e.clientX - r.left) * dpr, sy = (e.clientY - r.top) * dpr;
+    const W = planPx(cvEl);
+    return { x: (sx - cxs.ox) / cxs.scale / W, y: (sy - cxs.oy) / cxs.scale / W };
+  };
+
+  wrap.addEventListener('mousedown', e => {
+    if (e.button !== 0 || typeof railingEntryPointsNorm !== 'function') return;
+    const pts = railingEntryPointsNorm();
+    if (!pts) return;
+    const p = norm(e);
+    const hit = 12 / planPx(cv) / CV.railing.scale * (window.devicePixelRatio || 1) + 0.012;
+    let idx = null, best = hit;
+    pts.forEach((q, i) => {
+      const d = Math.hypot(q.x - p.x, q.y - p.y);
+      if (d < best) { best = d; idx = i; }
+    });
+    if (idx !== null) { _railDragIdx = idx; e.preventDefault(); }
+  });
+
+  wrap.addEventListener('mousemove', e => {
+    if (_railDragIdx === null) return;
+    railingEntryDrag(_railDragIdx, norm(e));
+    _railingSync();
+    drawSnapCanvas('railing');
+  });
+
+  const stop = () => {
+    if (_railDragIdx === null) return;
+    _railDragIdx = null;
+    if (typeof onParamChange === 'function') onParamChange();   // пересобрать 3D
+  };
+  wrap.addEventListener('mouseup', stop);
+  wrap.addEventListener('mouseleave', stop);
 }
 
 function undoPt(n) { S.pts[n].pop(); drawSnapCanvas(n); }

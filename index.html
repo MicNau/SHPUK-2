@@ -247,14 +247,13 @@
           <div class="d-canvas-header">
             <div>
               <div class="d-canvas-title">Ограждения террасы — разметка</div>
-              <div class="d-canvas-hint">Ставьте точки в углах ограждения. Нажмите «ДОБАВИТЬ» для новой линии, «ОТМЕНИТЬ» — чтобы убрать последнюю точку.</div>
+              <div class="d-canvas-hint">Ограждение строится по свободному краю террасы автоматически, у лестницы разрывается само. Нажмите «ОБОЗНАЧИТЬ ВХОД», чтобы сделать проём, и перетаскивайте его точки по периметру.</div>
             </div>
           </div>
           <div class="d-canvas-area" id="cw-railing"><canvas id="cv-railing"></canvas></div>
           <div class="d-canvas-footer">
             <div class="d-canvas-actions">
-              <button class="d-canvas-btn" onclick="addBreak('railing')">Добавить</button>
-              <button class="d-canvas-btn" onclick="undoPt('railing')">Отменить</button>
+              <button class="d-canvas-btn" onclick="dRailingEntry()">Обозначить вход</button>
               <button class="d-canvas-btn" onclick="dResetSection('railing')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('railing')">Дальше →</button>
             </div>
@@ -379,8 +378,8 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=51"></script>
-<script src="canvas.js?v=47"></script>
+<script src="state.js?v=53"></script>
+<script src="canvas.js?v=48"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=85"></script>
 <!-- Каталожный API: домен выбирается по хосту.
@@ -402,11 +401,11 @@
 <script src="backend_API/Calculator.js?v=2"></script>
 <!-- 3D viewer: core (сцена/материалы/оркестратор) → builders (конструкции) →
      railing (ограждение/навесы). Общая глобальная область, порядок важен. -->
-<script src="viewer3d-core.js?v=140"></script>
-<script src="viewer3d-builders.js?v=27"></script>
-<script src="viewer3d-railing.js?v=8"></script>
+<script src="viewer3d-core.js?v=141"></script>
+<script src="viewer3d-builders.js?v=29"></script>
+<script src="viewer3d-railing.js?v=10"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=92"></script>
+<script src="nav-desktop.js?v=94"></script>
 </body>
 </html>

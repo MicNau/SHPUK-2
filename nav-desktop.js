@@ -34,7 +34,7 @@ const D_CANVAS_INIT = {
   pool_terrace: () => initRectCanvas('pool_terrace'),
   paths:        () => initPathsCanvas(),
   fence:        () => { initSnapCanvas('fence'); _dSyncFenceHeight(); },
-  railing:      () => initSnapCanvas('railing'),
+  railing:      () => initRailingCanvas(),
   beds:         () => initBedsCanvas(),
   facade:       () => initFacadeCanvas(),
   furniture:    () => initFurnitureCanvas(),
@@ -799,6 +799,15 @@ function _dRenderSidebar() {
               <div class="d-color-title">Цена:</div>
               <div class="d-price-grid" id="d-price-grid"></div>
             </div>
+            ${item.id === 'railing' ? `
+            <div class="d-color-section">
+              <div class="d-color-title">Крышка столба:</div>
+              <div class="d-price-grid" id="d-rail-cap-grid"></div>
+            </div>
+            <div class="d-color-section">
+              <div class="d-color-title">Сечение столба:</div>
+              <div class="d-price-grid" id="d-rail-post-grid"></div>
+            </div>` : ''}
           </div>` : ''}
         </div>
         ${isEditing ? '<div class="d-sb-actions" id="d-sb-actions"></div>' : ''}
@@ -812,6 +821,7 @@ function _dRenderSidebar() {
   if (document.getElementById('d-sb-filters')) {
     _dRenderColorGrid();
     _dRenderPriceGrid();
+    _dRenderRailFilters();
   }
 
   // Кнопка «Дальше» внизу панели живёт только пока открыт редактор.
@@ -902,6 +912,67 @@ function dDeleteItem(secId) {
   }
 }
 
+// ── Фильтры ограждения: крышка столба и его сечение (TODO.md, этап 2 п.5) ──
+// Сечение влияет на 3D (толщина столбов), крышка — только на подбор товара: своего
+// поля у товара нет, поэтому ищем слово в названии/описании. Если под фильтр не
+// подходит НИ ОДИН товар раздела, фильтр не применяется — иначе каталог просто
+// опустел бы на данных, где этих слов нет (см. _railingFilterProducts).
+function _dRenderRailFilters() {
+  const cap = document.getElementById('d-rail-cap-grid');
+  if (cap) {
+    cap.innerHTML = RAIL_CAP_TYPES.map(t =>
+      `<button class="d-price-btn ${S.railFilters.cap === t.id ? 'selected' : ''}"
+               onclick="dSetRailFilter('cap', '${t.id}')">
+         <span class="d-radio"></span><span class="d-price-txt"><b>${t.lbl}</b></span>
+       </button>`).join('');
+  }
+  const post = document.getElementById('d-rail-post-grid');
+  if (post) {
+    post.innerHTML = RAIL_POST_WIDTHS.map(w =>
+      `<button class="d-price-btn ${S.railFilters.postW === w ? 'selected' : ''}"
+               onclick="dSetRailFilter('postW', ${w})">
+         <span class="d-radio"></span><span class="d-price-txt"><b>${w} мм</b></span>
+       </button>`).join('');
+  }
+}
+
+// Повторный клик по выбранному варианту снимает фильтр.
+function dSetRailFilter(kind, value) {
+  S.railFilters[kind] = (S.railFilters[kind] === value) ? null : value;
+  _dRenderRailFilters();
+  if (kind === 'postW' && typeof onParamChange === 'function') onParamChange();
+  dShowResults();
+}
+
+// Отбор товаров ограждения по виду крышки. Пустой результат означает, что в данных
+// нет таких слов — тогда фильтр игнорируем и пишем об этом в консоль.
+function _railingFilterProducts(products) {
+  if (dActiveItem !== 'railing' || !S.railFilters.cap) return products;
+  const t = RAIL_CAP_TYPES.find(x => x.id === S.railFilters.cap);
+  if (!t) return products;
+  const hit = products.filter(p => t.re.test((p.name || '') + ' ' + (p.previewText || '')));
+  if (hit.length) return hit;
+  console.info('[railing] по фильтру «' + t.lbl + '» товаров не нашлось — показываем все:',
+               'у товаров нет поля с видом крышки, отбор идёт по названию');
+  return products;
+}
+
+// ── «Обозначить вход» в ограждении (TODO.md, этап 2 п.4) ──
+// Ставит разрыв на самом длинном свободном участке периметра; дальше пользователь
+// двигает две точки прямо на плане. Повторное нажатие вход убирает.
+function dRailingEntry() {
+  if (S.railingEntry) {
+    S.railingEntry = null;
+  } else {
+    const e = (typeof railingDefaultEntry === 'function') ? railingDefaultEntry() : null;
+    if (!e) { dToast('Сначала разметьте террасу — вход ставится на её периметре'); return; }
+    S.railingEntry = e;
+  }
+  if (typeof _railingSync === 'function') _railingSync();
+  if (typeof drawSnapCanvas === 'function') drawSnapCanvas('railing');
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
 // ── «Удалить всё» — сброс раздела в нулевое состояние, НЕ выходя из редактора ──
 // (TODO.md, этап 2 п.2). Данные раздела чистятся, редактор переинициализируется —
 // раздел выглядит так же, как при первом заходе.
@@ -916,6 +987,7 @@ function dResetSection(secId) {
   if (secId === 'beds')      { S.beds = []; S.activeBed = null; }
   if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
   if (secId === 'facade')    S.wallZones = {};
+  if (secId === 'railing') { S.railingEntry = null; S.railFilters = { cap: null, postW: null }; }
   if (S.mats && S.mats[secId]) delete S.mats[secId];
   if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
   if (S.estimate && S.estimate[secId]) delete S.estimate[secId];
@@ -1601,8 +1673,8 @@ function _dRenderRealResults(allProducts) {
   if (!list) return;
   // Цвет — приоритетно из ПОЛЯ color (появилось в API 2026-07-29, имена совпадают
   // с палитрой COLORS.md); затем название; preview_text — fallback (см. _itemColors).
-  const products = _filterByColors(_filterRealByPrice(allProducts),
-    p => [p.color || '', p.name || '', p.previewText || '']);
+  const products = _railingFilterProducts(_filterByColors(_filterRealByPrice(allProducts),
+    p => [p.color || '', p.name || '', p.previewText || '']));
   if (!products.length) {
     list.innerHTML = '<div style="padding:16px;color:#999;font-size:13px;">Нет товаров под выбранные фильтры</div>';
     return;
