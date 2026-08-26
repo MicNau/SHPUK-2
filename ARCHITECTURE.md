@@ -184,7 +184,7 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 ```
 styles-desktop.css?v=37   state.js?v=59              canvas.js?v=54
 shared/house-builder.js?v=85                          ResourceManager.js?v=6
-viewer3d-core.js?v=144    viewer3d-builders.js?v=37   viewer3d-railing.js?v=11
+viewer3d-core.js?v=145    viewer3d-builders.js?v=37   viewer3d-railing.js?v=11
 viewer3d-entourage.js?v=14                            nav-desktop.js?v=100
 backend_API/Calculator.js?v=2
 ```
@@ -876,6 +876,19 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Сделано в итерации v=171 (два невыполненных пункта прошлой правки):
+
+- **Материал ограждения.** `buildRailingLine3d` принимает ШЕСТЬ параметров, материал — шестой,
+  а вызов в `buildScene3d` передавал семь: лишний `null` занимал слот материала, и материал
+  уезжал в седьмой аргумент, где его никто не читал. Из-за этого ограждение ВСЕГДА рисовалось
+  запасным `PORCH_COLUMN_COLOR` (коричневый) — и до выбора товара, и после. Лишний аргумент
+  убран: теперь до выбора товара ограждение того же условного материала, что и терраса, а
+  после — материала товара.
+- **Скругление 3D-окна.** Радиус задавался ИНЛАЙНОМ на канвасе рендерера
+  (`renderer.domElement.style.cssText`, `border-radius:12px`) — правила из styles-desktop.css
+  его не перебивали. Заменён на 0.
+- Cache-bust: `viewer3d-core.js?v=145`.
 
 Сделано в итерации v=170 (правки после этапа 2):
 
