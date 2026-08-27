@@ -182,10 +182,10 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-styles-desktop.css?v=37   state.js?v=60              canvas.js?v=54
-shared/house-builder.js?v=85                          ResourceManager.js?v=6
+styles-desktop.css?v=37   state.js?v=61              canvas.js?v=54
+shared/house-builder.js?v=85                          ResourceManager.js?v=7
 viewer3d-core.js?v=146    viewer3d-builders.js?v=39   viewer3d-railing.js?v=12
-viewer3d-entourage.js?v=14                            nav-desktop.js?v=102
+viewer3d-entourage.js?v=14                            nav-desktop.js?v=103
 backend_API/Calculator.js?v=2
 ```
 
@@ -876,6 +876,24 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Сделано в итерации v=173 (новый ResourceManager; три значения крепежа грядки):
+
+- **Менеджер ресурсов синхронизирован** с `backend_API/ResourceManager.js` (ревизия 2026-08-26):
+  добавлены `FilterType.BASE_IDS` и `FilterType.PROPERTIES`, `PropertyOp`, `PROPERTY_PATH`,
+  их валидаторы и обработчики, а у товара — `properties`, `variants`, `baseId`, `configId`.
+  Перенос СЛИЯНИЕМ, а не заменой файла: копия бэкендера не знает про наши поля и правки, и
+  замена файла целиком сломала бы каталог. Сохранены `glbFileUrl`/`modelUrl` (по ним берётся
+  GLB товара у забора, мебели и теперь ограждения), `color`, `productVariants`, домен через
+  `RESOURCE_API_DOMAIN` (без него локальный прокси и same-origin отвалились бы) и подсчёт
+  сбоев загрузки текстур.
+- **Обработчики `BASE_IDS` и `PROPERTIES` у бэкендера — заглушки**: значение валидируется, но в
+  запрос ничего не уходит (`(value) => ({})`). Поэтому отбор по характеристикам остаётся
+  клиентским; серверный включим, когда заглушки снимут.
+- **Крепёж грядки — три значения** (`metal`, `plastic_joint`, `plastic_angle`): в `BED_MOUNTS`
+  добавлено поле `prop` с ожидаемым значением характеристики, `_bedMountMatches` сравнивает по
+  нему. Разбор названия остался запасным вариантом для товаров без характеристики.
+- Cache-bust: `ResourceManager.js?v=7`, `state.js?v=61`, `nav-desktop.js?v=103`.
 
 Сделано в итерации v=172 (крышки столбов ограждения; характеристики товара):
 
