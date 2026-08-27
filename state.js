@@ -343,6 +343,35 @@ const S = {
 };
 // (TOTAL и глобальный step удалены — прогресс-бар мобильного wizard'а.)
 
+// ── Характеристики товара (ProductResource.properties) ──────────────────────
+// Имена согласованы с бэкендом 2026-08-26; ими же ходит FilterType.PROPERTIES,
+// когда обновлённый ResourceManager доедет на стенд:
+//   заборы   dimensions.height
+//   ограждения components.post_cap.type ['dpk','metal','plastic']
+//              components.post.dimensions.width
+//   грядки   dimensions.height
+//              components.corner_bracket.type ['metal','plastic']
+const PROP_FENCE_H     = 'dimensions.height';
+const PROP_RAIL_CAP    = 'components.post_cap.type';
+const PROP_RAIL_POST_W = 'components.post.dimensions.width';
+const PROP_BED_H       = 'dimensions.height';
+const PROP_BED_BRACKET = 'components.corner_bracket.type';
+
+// Значение характеристики по пути «a.b.c». Поддерживает и вложенные объекты,
+// и плоские ключи ('components.post_cap.type' одной строкой) — какой из вариантов
+// придёт от бэкенда, на момент написания не проверено на живых данных.
+function productProp(product, path) {
+  const p = product && product.properties;
+  if (!p || !path) return undefined;
+  if (p[path] !== undefined) return p[path];
+  let cur = p;
+  for (const key of path.split('.')) {
+    if (cur === null || typeof cur !== 'object') return undefined;
+    cur = cur[key];
+  }
+  return cur;
+}
+
 // Варианты фильтров ограждения (TODO.md, этап 2 п.5).
 const RAIL_CAP_TYPES = [
   { id: 'plastic', lbl: 'Пластмасса', re: /пластик|пластмасс|plastic|пвх/i },

@@ -247,9 +247,15 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, segsOv
   const segs = segsOverride
     || terracePerimeterSegments(_insetOrthoPolygon(worldOutline, RAIL_INSET), houseL, houseW, []);
 
-  function placeGeo(geo, m4) {
+  // Крышка столба красится по СВОЕМУ правилу (дпк/металл/пластик), остальное —
+  // материалом ограждения. Тип берётся из товара (свойство, имя GLB или название).
+  const capType = (typeof railingCapType === 'function') ? railingCapType() : '';
+  const capMat = (typeof _railCapMaterial === 'function')
+    ? _railCapMaterial(railMat, capType) : railMat;
+
+  function placeGeo(geo, m4, matOv) {
     const g = geo.clone(); g.applyMatrix4(m4);
-    const mesh = new THREE.Mesh(g, railMat);
+    const mesh = new THREE.Mesh(g, matOv || railMat);
     mesh.castShadow = mesh.receiveShadow = true;
     parent.add(mesh); threeState.railingMeshes.push(mesh);
   }
@@ -281,6 +287,8 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, segsOv
     const m = mat(px, pz, ux, uz, 1);
     if (postK !== 1) m.multiply(new THREE.Matrix4().makeScale(postK, 1, postK));
     placeGeo(_railingCache.post, m);
+    // Крышка сидит на столбе — та же матрица (в том числе сечение 100/125 мм).
+    if (_railingCache.cap) placeGeo(_railingCache.cap, m, capMat);
     if (_railPostReg) _railPostReg.push({ x: px, z: pz });
   }
 

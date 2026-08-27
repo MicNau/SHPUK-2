@@ -182,10 +182,10 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-styles-desktop.css?v=37   state.js?v=59              canvas.js?v=54
+styles-desktop.css?v=37   state.js?v=60              canvas.js?v=54
 shared/house-builder.js?v=85                          ResourceManager.js?v=6
-viewer3d-core.js?v=145    viewer3d-builders.js?v=37   viewer3d-railing.js?v=11
-viewer3d-entourage.js?v=14                            nav-desktop.js?v=100
+viewer3d-core.js?v=146    viewer3d-builders.js?v=39   viewer3d-railing.js?v=12
+viewer3d-entourage.js?v=14                            nav-desktop.js?v=102
 backend_API/Calculator.js?v=2
 ```
 
@@ -876,6 +876,32 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Сделано в итерации v=172 (крышки столбов ограждения; характеристики товара):
+
+- **Три модуля ограждения.** Файлы различаются только крышкой столба:
+  `mod_railing_dpk.glb`, `mod_railing_metal.glb`, `mod_railing_plastic.glb` (узлы те же —
+  `post, rails, balu_short, balu_floor` плюс `cap`). Какой строить, решает
+  `railingModelUrl()`: GLB, назначенный товару на бэкенде → файл под вид крышки → базовый
+  `mod_railing.glb` (он без крышки). Модули кэшируются по URL (`_railingCaches`), активный
+  лежит в `_railingCache` — его читает `buildRailing3d`. Если GLB товара не открылся,
+  загрузчик молча падает на базовый модуль, чтобы ограждение не исчезло.
+- **Вид крышки** (`railingCapType`): характеристика каталога `components.post_cap.type` →
+  имя назначенного GLB (`mod_railing_<вид>.glb`) → название товара, и только если в нём
+  вообще говорится о крышке. Последнее условие важно: без него «Ограждение из ДПК …»
+  получало крышку ДПК, хотя ДПК там про материал самого ограждения.
+- **Материал крышки** (`_railCapMaterial`, правило продукта от 2026-08-26):
+  дпк — материал и текстуры ограждения; металл — карт нет вовсе, цвет ограждения,
+  roughness 0.30, metalness 0.50; пластик — остаётся только `normalMap`, цвет ограждения,
+  roughness 0.50 без карты. Крышка ставится той же матрицей, что столб (включая сечение
+  100/125 мм), и на столбе-ньюэле перил лестницы тоже.
+- **Характеристики товара.** Имена согласованы с бэкендом и вынесены константами в
+  `state.js` (`PROP_FENCE_H`, `PROP_RAIL_CAP`, `PROP_RAIL_POST_W`, `PROP_BED_H`,
+  `PROP_BED_BRACKET`); `productProp(product, path)` читает и вложенные объекты, и плоские
+  ключи. Сечение столба, высота борта грядки, вид крышки и тип крепежа теперь берутся из
+  характеристик, а разбор названия остался запасным вариантом.
+- Cache-bust: `state.js?v=60`, `viewer3d-core.js?v=146`, `viewer3d-builders.js?v=39`,
+  `viewer3d-railing.js?v=12`, `nav-desktop.js?v=102`.
 
 Сделано в итерации v=171 (два невыполненных пункта прошлой правки):
 
