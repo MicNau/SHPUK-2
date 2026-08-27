@@ -761,8 +761,59 @@ function buildFurniture3d(parent, M, points, houseL, houseW, surfaceYAt) {
 // Балясины — единичные, центрированы в x=0 (сечение 50×50): baluShort (y 0.145..1.055) и
 // baluFloor (y 0..1.055, узор «2/5/8 от пола»). Перила (rails) тянем масштабом по длине
 // пролёта, балясины — НЕ тянем (иначе плющится сечение): тиражируем нужным числом по шагу ~0.1 м.
-let _railingCache = null;       // { post, rails, baluShort, baluFloor }
-let _railingLoadPromise = null;
+// Модули ограждения различаются ТОЛЬКО крышкой столба — три файла, ключи те же,
+// что id в RAIL_CAP_TYPES. Бэкенд назначает товару свой glb_file_url (эти же
+// модели), поэтому файл товара всегда главнее локального.
+const RAIL_CAP_MODULES = {
+  dpk:     'assets/houses/modules/site/mod_railing_dpk.glb',
+  metal:   'assets/houses/modules/site/mod_railing_metal.glb',
+  plastic: 'assets/houses/modules/site/mod_railing_plastic.glb',
+};
+// Модуль без крышки — для товаров, у которых вид крышки не задан.
+const RAIL_MODULE_FALLBACK = 'assets/houses/modules/site/mod_railing.glb?v=2';
+
+let _railingCaches = {};        // url → { post, rails, baluShort, baluFloor, cap, … }
+let _railingLoads = {};         // url → Promise
+let _railingCache = null;       // активный модуль (его читает buildRailing3d)
+
+// Вид крышки столба у выбранного товара: сначала свойство каталога
+// (components.post_cap.type — согласовано с бэкендом), потом имя назначенного
+// товару GLB, потом слово в названии (RAIL_CAP_TYPES). Пусто — крышки нет.
+function railingCapType() {
+  const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat.railing : null;
+  if (!em) return '';
+  const prop = (typeof productProp === 'function')
+    ? productProp(em, 'components.post_cap.type') : null;
+  if (prop && RAIL_CAP_MODULES[String(prop).toLowerCase()]) return String(prop).toLowerCase();
+  const m = /mod_railing_(dpk|metal|plastic)\b/i.exec(em.modelUrl || '');
+  if (m) return m[1].toLowerCase();
+  return _railCapFromText((em.name || '') + ' ' + (em.previewText || ''));
+}
+
+// Вид крышки из НАЗВАНИЯ — только если в нём вообще говорится о крышке. Без этого
+// условия «Ограждение из ДПК …» получало крышку ДПК, хотя ДПК там про материал
+// самого ограждения, а вид крышки у товара не задан (бэкенд оставил его пустым).
+function _railCapFromText(text) {
+  if (!/крышк|колпач|колпак|cap/i.test(text || '')) return '';
+  if (typeof RAIL_CAP_TYPES === 'undefined') return '';
+  for (const t of RAIL_CAP_TYPES) if (t.re.test(text) && RAIL_CAP_MODULES[t.id]) return t.id;
+  return '';
+}
+
+// Какой модуль строить: GLB товара, иначе модуль под вид крышки, иначе базовый.
+function railingModelUrl() {
+  const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat.railing : null;
+  if (em && em.modelUrl) return em.modelUrl;
+  return RAIL_CAP_MODULES[railingCapType()] || RAIL_MODULE_FALLBACK;
+}
+
+// Сделать модуль активным. Вернёт разобранный модуль или null, если он ещё не
+// загружен (тогда зовущий грузит его через ensureRailingLoaded и пересобирает сцену).
+function railingUseModule(url) {
+  const c = _railingCaches[url || RAIL_MODULE_FALLBACK];
+  if (c) _railingCache = c;
+  return c || null;
+}
 const RAIL_BALU_PITCH = 0.1;    // нативный шаг балясин (центр-центр), м
 const RAIL_BALU_INSET = 0.1;    // отступ крайней балясины от оси столба, м
 const RAIL_BALU_MAX   = 9;      // максимум балясин на секцию (9 = ровный узор «2/5/8 от пола»)
@@ -771,21 +822,23 @@ const RAIL_POST_H     = 1.0;    // высота столба ограждени�
 const RAIL_POST_MERGE = 0.28;   // столбы ближе этого расстояния считаем одним (дедуп на стыках rect-ов)
 let _railPostReg = null;        // общий реестр поставленных столбов [{x,z,tall,mesh}] на проход buildScene3d
 
-function ensureRailingLoaded() {
-  if (_railingCache) return Promise.resolve(_railingCache);
-  if (_railingLoadPromise) return _railingLoadPromise;
-  _railingLoadPromise = new Promise(resolve => {
+function ensureRailingLoaded(url) {
+  url = url || RAIL_MODULE_FALLBACK;
+  if (_railingCaches[url]) return Promise.resolve(_railingCaches[url]);
+  if (_railingLoads[url]) return _railingLoads[url];
+  _railingLoads[url] = new Promise(resolve => {
     if (typeof THREE === 'undefined' || !THREE.GLTFLoader) { resolve(null); return; }
     new THREE.GLTFLoader().load(
-      'assets/houses/modules/site/mod_railing.glb?v=2',
+      url,
       gltf => {
-        const c = { post: null, rails: null, baluShort: null, baluFloor: null };
+        const c = { post: null, rails: null, baluShort: null, baluFloor: null, cap: null };
         gltf.scene.traverse(o => {
           if (!o.isMesh || !o.geometry) return;
           o.updateWorldMatrix(true, false);
           const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld);
           const n = (o.name || '').toLowerCase();
           if (n.includes('post')) c.post = g;
+          else if (n.includes('cap')) c.cap = g;          // крышка столба (в базовом модуле её нет)
           else if (n.includes('balu_floor')) c.baluFloor = g;
           else if (n.includes('balu_short')) c.baluShort = g;
           else if (n.includes('rail')) c.rails = g;
@@ -797,13 +850,40 @@ function ensureRailingLoaded() {
         c.nativeBaluH = topY(c.baluFloor) || c.nativePostH; // верх балясины (= низ поручня)
         c.ky = RAIL_POST_H / c.nativePostH;               // общий масштаб модуля по высоте
         c.baluTopH = c.nativeBaluH * c.ky;                // высота низа поручня над настилом
-        _railingCache = c; resolve(c);
+        console.info('[railing] модуль загружен:', url, '| крышка столба:', c.cap ? 'есть' : 'нет');
+        _railingCaches[url] = c;
+        if (!_railingCache) _railingCache = c;
+        resolve(c);
       },
       undefined,
-      err => { console.warn('[railing] не удалось загрузить GLB:', err); resolve(null); }
+      err => {
+        console.warn('[railing] не удалось загрузить GLB:', url, err);
+        _railingLoads[url] = null;
+        // Модуль товара не открылся — работаем базовым, иначе ограждение пропадёт.
+        if (url !== RAIL_MODULE_FALLBACK) { ensureRailingLoaded(RAIL_MODULE_FALLBACK).then(resolve); return; }
+        resolve(null);
+      }
     );
   });
-  return _railingLoadPromise;
+  return _railingLoads[url];
+}
+
+// Материал крышки столба по её виду (правило продукта от 2026-08-26):
+//   dpk     — материал и текстура как у самого ограждения;
+//   metal   — карт нет вовсе, цвет ограждения, roughness 0.30, metalness 0.50;
+//   plastic — остаётся только карта normal (рельеф тот же), цвет ограждения,
+//             roughness 0.50 без карты.
+const RAIL_CAP_MAPS = ['map', 'roughnessMap', 'metalnessMap', 'aoMap', 'bumpMap',
+                       'displacementMap', 'emissiveMap', 'specularMap', 'alphaMap'];
+function _railCapMaterial(base, capType) {
+  if (capType !== 'metal' && capType !== 'plastic') return base;   // дпк и неизвестное — как ограждение
+  const m = base.clone();
+  m.name = 'mat_railing_cap_' + capType;
+  for (const k of RAIL_CAP_MAPS) if (m[k]) m[k] = null;
+  if (capType === 'metal') { m.normalMap = null; m.roughness = 0.30; m.metalness = 0.50; }
+  else                     { m.roughness = 0.50; m.metalness = 0.0; }
+  m.needsUpdate = true;
+  return m;
 }
 
 // Матрица, отображающая родной базис планки в мировой прямоугольник грядки.
@@ -1350,10 +1430,13 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   // разнице уровней верх→низ), балясины — вертикальные, нативного сечения, по проступям.
   const hasRailing = tgOn('steps-railing');
   if (hasRailing) {
+    // Перила лестницы берут тот же модуль, что и ограждение террасы (один товар).
+    const _stairRailUrl = (typeof railingModelUrl === 'function') ? railingModelUrl() : null;
+    if (typeof railingUseModule === 'function') railingUseModule(_stairRailUrl);
     const RC = _railingCache;
     if (!(RC && RC.rails && RC.post && RC.baluFloor)) {
       // GLB ещё не загружен — подгружаем и перестраиваем сцену (как для перил террасы).
-      ensureRailingLoaded().then(c => { if (c && threeState) buildScene3d(); });
+      ensureRailingLoaded(_stairRailUrl).then(c => { if (c && threeState) buildScene3d(); });
     } else {
       // latOff: перила сдвинуты от краёв ступеней внутрь (на STAIR_RAIL_INSET) — соосны
       // колонне навеса на углу проёма террасы (см. terracePerimeterSegments).
@@ -1377,10 +1460,14 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       // и та же высота низа поручня — перила лестницы стыкуются с террасными.
       const ky = RC.ky || 1;
       const railTopH = RC.baluTopH || (RC.nativeBaluH || 1.055) * ky;
-      const placeGeo = (geo, m4) => {
+      const placeGeo = (geo, m4, matOv) => {
         const g = geo.clone(); g.applyMatrix4(m4);
-        const mm = mesh(g, stairRailMat); stairGroup.add(mm); threeState.railingMeshes.push(mm);
+        const mm = mesh(g, matOv || stairRailMat); stairGroup.add(mm); threeState.railingMeshes.push(mm);
       };
+      // Крышка столба-ньюэла — по тому же правилу, что у ограждения террасы.
+      const stairCapType = (typeof railingCapType === 'function') ? railingCapType() : '';
+      const stairCapMat = (typeof _railCapMaterial === 'function')
+        ? _railCapMaterial(stairRailMat, stairCapType) : stairRailMat;
 
       for (const lateralSign of [-1, +1]) {
         // Концы перил в плане (верх — у кромки террасы, низ — у последней проступи).
@@ -1434,6 +1521,7 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         mPost.setPosition(B.x, B.y, B.z);
         mPost.multiply(new THREE.Matrix4().makeScale(postK, ky, postK));
         placeGeo(RC.post, mPost);
+        if (RC.cap) placeGeo(RC.cap, mPost, stairCapMat);
 
         // ── Балясины по видимым проступям (i=0..n-2): вертикальные, нативное сечение,
         //    высота по уровню (от проступи до поручня) — учитывает разницу уровней ──

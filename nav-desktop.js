@@ -986,9 +986,21 @@ function dSetBedFilter(kind, value) {
   dShowResults();
 }
 
-// Отбор товаров грядок по фильтрам: высота борта (из названия/поля товара) и тип
-// крепежа (поля у товара нет — ищем в названии). При мультивыборе товар подходит,
-// если совпало ЛЮБОЕ из выбранных значений.
+// Материал крепежа грядки по характеристике каталога (components.corner_bracket.type,
+// значения 'metal'/'plastic'). ВНИМАНИЕ: у нас три типа (пластиковый шарнир,
+// пластиковый угол, металлический угол), а характеристика различает только материал —
+// «шарнир» от «угла» по ней не отличить, поэтому пластиковые варианты она отбирает
+// вместе. Нет характеристики — отбор по названию, как раньше.
+function _bedMountMatches(product, mount) {
+  const prop = (typeof productProp === 'function') ? productProp(product, PROP_BED_BRACKET) : undefined;
+  if (typeof prop === 'string' && prop) {
+    return mount.id.startsWith(String(prop).toLowerCase());
+  }
+  return mount.re.test((product.name || '') + ' ' + (product.previewText || ''));
+}
+
+// Отбор товаров грядок по фильтрам: высота борта и тип крепежа. При мультивыборе
+// товар подходит, если совпало ЛЮБОЕ из выбранных значений.
 function _bedFilterProducts(products) {
   if (dActiveItem !== 'beds') return products;
   let out = products;
@@ -1006,8 +1018,7 @@ function _bedFilterProducts(products) {
   if (!on.length) return out;
   const mounts = BED_MOUNTS.filter(x => on.includes(x.id));
   if (!mounts.length) return out;
-  const hit = out.filter(p => mounts.some(m =>
-    m.re.test((p.name || '') + ' ' + (p.previewText || ''))));
+  const hit = out.filter(p => mounts.some(m => _bedMountMatches(p, m)));
   if (hit.length) return hit;
   console.info('[beds] по фильтру «' + mounts.map(m => m.lbl).join(', ') +
                '» товаров не нашлось — показываем все:',
@@ -1058,9 +1069,13 @@ function dSetRailFilter(kind, value) {
   dShowResults();
 }
 
-// Сечение столба из названия товара (100/125 мм); не распознали — null.
+// Сечение столба товара (100/125 мм): сначала характеристика каталога
+// (components.post.dimensions.width), потом название; не распознали — null.
 function _railPostWFromProduct(sample) {
   if (sample && typeof sample.postWidthMm === 'number') return sample.postWidthMm;
+  const prop = (typeof productProp === 'function') ? productProp(sample, PROP_RAIL_POST_W) : undefined;
+  const pv = parseFloat(prop);
+  if (!isNaN(pv) && RAIL_POST_WIDTHS.includes(Math.round(pv))) return Math.round(pv);
   const text = [sample && sample.name, sample && sample.previewText].filter(Boolean).join(' ');
   // Как и у высоты борта грядки: `\b` после «мм» не работает — кириллица в
   // ASCII-семантике не словесный символ, конец слова проверяем явно.
@@ -1087,12 +1102,26 @@ function _railingFilterProducts(products) {
   if (!on.length) return out;
   const caps = RAIL_CAP_TYPES.filter(x => on.includes(x.id));
   if (!caps.length) return out;
-  const hit = out.filter(p => caps.some(t => t.re.test((p.name || '') + ' ' + (p.previewText || ''))));
+  const hit = out.filter(p => caps.some(t => _railCapMatches(p, t)));
   if (hit.length) return hit;
   console.info('[railing] по фильтру «' + caps.map(t => t.lbl).join(', ') +
                '» товаров не нашлось — показываем все:',
-               'у товаров нет поля с видом крышки, отбор идёт по названию');
+               'вид крышки не распознан ни по характеристике, ни по названию');
   return out;
+}
+
+// Вид крышки столба у товара: характеристика каталога (components.post_cap.type),
+// иначе имя назначенного товару GLB (mod_railing_dpk/metal/plastic), иначе слово
+// в названии.
+// Название учитывается, только если в нём вообще говорится о крышке: слово «ДПК»
+// в «Ограждение из ДПК …» относится к материалу ограждения, а не к крышке.
+function _railCapMatches(product, capType) {
+  const prop = (typeof productProp === 'function') ? productProp(product, PROP_RAIL_CAP) : undefined;
+  if (typeof prop === 'string' && prop) return String(prop).toLowerCase() === capType.id;
+  const m = /mod_railing_(dpk|metal|plastic)\b/i.exec(product.modelUrl || '');
+  if (m) return m[1].toLowerCase() === capType.id;
+  const txt = (product.name || '') + ' ' + (product.previewText || '');
+  return /крышк|колпач|колпак|cap/i.test(txt) && capType.re.test(txt);
 }
 
 // ── Короткое сообщение поверх рабочей области ──
@@ -1426,6 +1455,10 @@ const BED_BOARD_HEIGHTS_MM = [150, 200, 225, 270, 300];
 
 function _bedHeightFromProduct(sample) {
   if (sample && typeof sample.bedHeightMm === 'number') return sample.bedHeightMm / 1000;
+  // Характеристика каталога (dimensions.height) главнее разбора названия.
+  const prop = (typeof productProp === 'function') ? productProp(sample, PROP_BED_H) : undefined;
+  const pv = parseFloat(prop);
+  if (!isNaN(pv) && BED_BOARD_HEIGHTS_MM.includes(Math.round(pv))) return Math.round(pv) / 1000;
   const text = [sample && sample.name, sample && sample.previewText].filter(Boolean).join(' ');
   // \b после «мм» не работает: в ASCII-семантике кириллица — не словесный символ,
   // поэтому конец слова проверяем явным «дальше не буква и не цифра».

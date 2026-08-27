@@ -172,8 +172,11 @@ function init3dCanvas(targetSlotId) {
   renderer.outputEncoding      = THREE.sRGBEncoding;
   renderer.physicallyCorrectLights = true;
   targetSlot.appendChild(renderer.domElement);
+  // Углы прямые. Скругление задавалось ЗДЕСЬ, инлайном на канвасе рендерера, и
+  // никакое правило из styles-desktop.css его не перебивало (TODO: «скругления
+  // углов у 3D-окна не нужно»).
   renderer.domElement.style.cssText =
-    'position:absolute;inset:0;width:100%;height:100%;display:block;border-radius:12px;';
+    'position:absolute;inset:0;width:100%;height:100%;display:block;border-radius:0;';
 
   // ── Scene ─────────────────────────────────────
   const scene = new THREE.Scene();
@@ -1303,13 +1306,22 @@ function buildScene3d() {
   }
   const railingPts = (S.pts.railing || []).filter(p => !p.break);
   if (S.sections.includes('railing') && railingPts.length >= 2) {
+    // Модуль выбирается по товару: его GLB, иначе файл под вид крышки столба
+    // (mod_railing_dpk/metal/plastic), иначе базовый модуль без крышки.
+    const _railUrl = (typeof railingModelUrl === 'function') ? railingModelUrl() : null;
+    if (typeof railingUseModule === 'function') railingUseModule(_railUrl);
     if (_railingCache && _railingCache.rails) {
-      // Материал ограждения — свой (товар раздела 2331, тег fencing).
+      // Материал ограждения — свой (товар раздела 2331, тег fencing), а пока товар
+      // не выбран — условный, тот же, что у террасы.
+      // ВНИМАНИЕ: у buildRailingLine3d шесть параметров, материал — ШЕСТОЙ. Здесь
+      // стоял лишний null, материал уезжал в седьмой аргумент и терялся: ограждение
+      // всегда рисовалось запасным коричневым PORCH_COLUMN_COLOR — и до выбора
+      // товара, и после.
       buildRailingLine3d(houseGroup, S.pts.railing, terraceLevel, houseL, houseW,
-                         null, _resolveDeckMat(_baseDeck, 'railing'));
+                         _resolveDeckMat(_baseDeck, 'railing'));
     } else {
       // GLB ограждения ещё не загружен — грузим и перестраиваем сцену (как грядки).
-      ensureRailingLoaded().then(c => { if (c && threeState) buildScene3d(); });
+      ensureRailingLoaded(_railUrl).then(c => { if (c && threeState) buildScene3d(); });
     }
   }
 
