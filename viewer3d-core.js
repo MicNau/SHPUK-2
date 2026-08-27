@@ -1306,6 +1306,10 @@ function buildScene3d() {
   }
   const railingPts = (S.pts.railing || []).filter(p => !p.break);
   if (S.sections.includes('railing') && railingPts.length >= 2) {
+    // Модуль выбирается по товару: его GLB, иначе файл под вид крышки столба
+    // (mod_railing_dpk/metal/plastic), иначе базовый модуль без крышки.
+    const _railUrl = (typeof railingModelUrl === 'function') ? railingModelUrl() : null;
+    if (typeof railingUseModule === 'function') railingUseModule(_railUrl);
     if (_railingCache && _railingCache.rails) {
       // Материал ограждения — свой (товар раздела 2331, тег fencing), а пока товар
       // не выбран — условный, тот же, что у террасы.
@@ -1317,7 +1321,7 @@ function buildScene3d() {
                          _resolveDeckMat(_baseDeck, 'railing'));
     } else {
       // GLB ограждения ещё не загружен — грузим и перестраиваем сцену (как грядки).
-      ensureRailingLoaded().then(c => { if (c && threeState) buildScene3d(); });
+      ensureRailingLoaded(_railUrl).then(c => { if (c && threeState) buildScene3d(); });
     }
   }
 
