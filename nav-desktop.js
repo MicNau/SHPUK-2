@@ -986,16 +986,12 @@ function dSetBedFilter(kind, value) {
   dShowResults();
 }
 
-// Материал крепежа грядки по характеристике каталога (components.corner_bracket.type,
-// значения 'metal'/'plastic'). ВНИМАНИЕ: у нас три типа (пластиковый шарнир,
-// пластиковый угол, металлический угол), а характеристика различает только материал —
-// «шарнир» от «угла» по ней не отличить, поэтому пластиковые варианты она отбирает
-// вместе. Нет характеристики — отбор по названию, как раньше.
+// Крепёж грядки по характеристике каталога components.corner_bracket.type
+// ('metal' | 'plastic_joint' | 'plastic_angle' — три значения с 2026-08-27, шарнир
+// и угол различимы). Нет характеристики — отбор по названию, как раньше.
 function _bedMountMatches(product, mount) {
   const prop = (typeof productProp === 'function') ? productProp(product, PROP_BED_BRACKET) : undefined;
-  if (typeof prop === 'string' && prop) {
-    return mount.id.startsWith(String(prop).toLowerCase());
-  }
+  if (typeof prop === 'string' && prop) return String(prop).toLowerCase() === mount.prop;
   return mount.re.test((product.name || '') + ' ' + (product.previewText || ''));
 }
 

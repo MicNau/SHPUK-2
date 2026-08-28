@@ -4,9 +4,11 @@ const FilterType =  Object.freeze({
     SECTION_NAME: "SECTION_NAME",
     SECTION_CODE: "SECTION_CODE",
     PRODUCT_IDS: 'PRODUCT_IDS',
+    BASE_IDS: 'BASE_IDS',            // выборка по корневым товарам (все их конфигурации)
     PRICE_MAX: 'PRICE_MAX',
     PRICE_MIN: 'PRICE_MIN',
     TAGS: 'TAGS',
+    PROPERTIES: 'PROPERTIES',        // отбор по характеристикам товара
     SORT: 'SORT',
     SORT_ORDER: 'SORT_ORDER',
     LIMIT: 'LIMIT',
@@ -24,6 +26,21 @@ const SORT_ORDER = Object.freeze({
     ASC: "ASC",
     DESC: "DESC"
 });
+
+// Операции предикатов FilterType.PROPERTIES (backend_API/ResourceManager.js, 2026-08-26).
+const PropertyOp = Object.freeze({
+    EQ: 'eq',
+    NE: 'ne',
+    LT: 'lt',
+    LTE: 'lte',
+    GT: 'gt',
+    GTE: 'gte',
+    IN: 'in',
+});
+
+const PROPERTY_PATH = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)*$/;
+
+const isScalar = (value) => ['string', 'number', 'boolean'].includes(typeof value);
 
 class Filter {
     constructor(type, value) {
@@ -51,6 +68,7 @@ const Presets = {
         new Filter(FilterType.SECTION_CODE, 'terrasnaya-doska-iz-mpk')
     ],
     universalnaya_doska_dpk: () => [
+        new Filter(FilterType.TAGS, ['terrasnaya_doska']),
         new Filter(FilterType.SECTION_CODE, 'doska-dpk-universalnaya')
     ],
     steps_dpk: () => [
@@ -98,6 +116,14 @@ class ProductResource {
         this.detailPicture = data.detail_picture;
         
         this.prices = data.prices || [];
+
+        // Характеристики товара и его конфигурации (API 2026-08-26). Имена путей
+        // согласованы с бэкендом и лежат константами PROP_* в state.js.
+        this.properties = data.properties || {};
+        this.variants = data.variants || {};
+        this.baseId = data.base_id ?? data.id;
+        this.configId = data.config_id ?? null;
+
         this.textureUrls= data.texture_urls || {
             "textures_dpc_diffusion": "",
             "textures_dpc_normal": "",
@@ -129,7 +155,11 @@ class ProductResource {
         this.previewPicture = productData.preview_picture || this.previewPicture;         
         this.detailPicture = productData.detail_picture || this.detailPicture;
         this.prices = productData.prices || this.prices;
-        
+        this.properties = productData.properties || this.properties;
+        this.variants = productData.variants || this.variants;
+        this.baseId = productData.base_id ?? this.baseId;
+        this.configId = productData.config_id ?? this.configId;
+
         if (productData.texture_urls) {
             for (let key of Object.keys(this.textureUrls)) {
                 const newUrl = productData.texture_urls[key];
@@ -206,9 +236,15 @@ class ResourceManager {
             return section ? { section_id: section.bitrix_id } : {};
         },
         [FilterType.PRODUCT_IDS]: (value) => ({'ids': value.join(',')}),
+        // BASE_IDS и PROPERTIES у бэкендера пока ЗАГЛУШКИ: значение проверяется
+        // валидатором, но в запрос ничего не уходит (backend_API/ResourceManager.js,
+        // ревизия 2026-08-26). До снятия заглушек фронт отбирает по характеристикам
+        // сам — см. _railingFilterProducts / _bedFilterProducts в nav-desktop.js.
+        [FilterType.BASE_IDS]: (value) => ({}),
         [FilterType.PRICE_MAX]: (value) => ({'price_max': value}),
         [FilterType.PRICE_MIN]: (value) => ({'price_min': value}),
         [FilterType.TAGS]: (value) => ({'tags': value.join(',') }),
+        [FilterType.PROPERTIES]: (value) => ({}),
         [FilterType.SORT]: (value) => ({'sort': value}),
         [FilterType.SORT_ORDER]: (value) => ({'sort_order': value}),
         [FilterType.LIMIT]: (value) => ({'limit': value}),
@@ -240,6 +276,14 @@ class ResourceManager {
                 throw new Error('All PRODUCT_IDS must be positive integers');
             }
         },
+        [FilterType.BASE_IDS]: (value) => {
+            if (!Array.isArray(value) || value.length === 0) {
+                throw new Error('BASE_IDS must be a non-empty array');
+            }
+            if (!value.every(v => Number.isInteger(v) && v > 0)) {
+                throw new Error('All BASE_IDS must be positive integers');
+            }
+        },
         [FilterType.PRICE_MIN]: (value) => {
             if (typeof value !== 'number' || value < 0) {
                 throw new Error('PRICE_MIN must be a non-negative number');
@@ -256,6 +300,34 @@ class ResourceManager {
             }
             if (!value.every(v => typeof v === 'string' && v.trim() !== '')) {
                 throw new Error('All TAGS must be non-empty strings');
+            }
+        },
+        [FilterType.PROPERTIES]: (value) => {
+            if (!Array.isArray(value) || value.length === 0) {
+                throw new Error('PROPERTIES must be a non-empty array of predicates');
+            }
+            const operations = Object.values(PropertyOp);
+            for (const predicate of value) {
+                if (!predicate || typeof predicate !== 'object') {
+                    throw new Error('Each PROPERTIES predicate must be an object');
+                }
+                if (typeof predicate.property !== 'string' || !PROPERTY_PATH.test(predicate.property)) {
+                    throw new Error(`PROPERTIES path must look like "dimensions.height", got: ${predicate.property}`);
+                }
+                if (!operations.includes(predicate.op)) {
+                    throw new Error(`PROPERTIES op must be one of: ${operations.join(', ')}, got: ${predicate.op}`);
+                }
+                if (predicate.op === PropertyOp.IN) {
+                    if (!Array.isArray(predicate.value) || predicate.value.length === 0) {
+                        throw new Error(`PROPERTIES op "${PropertyOp.IN}" needs a non-empty array value`);
+                    }
+                    if (!predicate.value.every(isScalar)) {
+                        throw new Error(`PROPERTIES op "${PropertyOp.IN}" accepts only scalar values`);
+                    }
+                }
+                else if (!isScalar(predicate.value)) {
+                    throw new Error(`PROPERTIES value for "${predicate.property}" must be a scalar`);
+                }
             }
         },
         [FilterType.SORT]: (value) => {
