@@ -868,20 +868,45 @@ function ensureRailingLoaded(url) {
   return _railingLoads[url];
 }
 
-// Материал крышки столба по её виду (правило продукта от 2026-08-26):
+// Материал крышки столба по её виду (правило продукта, уточнено 2026-08-28):
 //   dpk     — материал и текстура как у самого ограждения;
-//   metal   — карт нет вовсе, цвет ограждения, roughness 0.30, metalness 0.50;
-//   plastic — остаётся только карта normal (рельеф тот же), цвет ограждения,
-//             roughness 0.50 без карты.
+//   metal   — карт нет вовсе, цвет из карточки товара, roughness 0.30, metalness 0.30;
+//   plastic — остаётся ТОЛЬКО карта normal (рельеф тот же), цвет из карточки товара,
+//             roughness 0.50 без карты, metalness 0.
+// Цвет обязательно свой: у товара с PBR-текстурами материал ограждения белый
+// (color=0xffffff, чтобы не красить текстуру), и крышка без карт вышла бы белой.
 const RAIL_CAP_MAPS = ['map', 'roughnessMap', 'metalnessMap', 'aoMap', 'bumpMap',
                        'displacementMap', 'emissiveMap', 'specularMap', 'alphaMap'];
+const RAIL_CAP_FALLBACK_COLOR = 0x8c8c8c;   // «Серый» палитры — когда цвет не распознан
+
+// Цвет выбранного товара ограждения: поле color каталога, иначе имя цвета в
+// названии, иначе в описании (тот же порядок, что у фильтра цвета в каталоге).
+function _railProductColorHex() {
+  const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat.railing : null;
+  if (!em) return null;
+  if (typeof _detectColorNames !== 'function' || typeof CATALOG_COLOR_HEX === 'undefined') return null;
+  for (const text of [em.color, em.name, em.previewText]) {
+    if (!text) continue;
+    for (const name of _detectColorNames(text)) {
+      if (CATALOG_COLOR_HEX[name]) return CATALOG_COLOR_HEX[name];
+    }
+  }
+  return null;
+}
+
 function _railCapMaterial(base, capType) {
   if (capType !== 'metal' && capType !== 'plastic') return base;   // дпк и неизвестное — как ограждение
   const m = base.clone();
   m.name = 'mat_railing_cap_' + capType;
+  const hasMaps = !!(base.map || base.normalMap || base.roughnessMap);
   for (const k of RAIL_CAP_MAPS) if (m[k]) m[k] = null;
-  if (capType === 'metal') { m.normalMap = null; m.roughness = 0.30; m.metalness = 0.50; }
+  if (capType === 'metal') { m.normalMap = null; m.roughness = 0.30; m.metalness = 0.30; }
   else                     { m.roughness = 0.50; m.metalness = 0.0; }
+  const hex = _railProductColorHex();
+  if (hex) m.color.set(hex);
+  // Цвет не распознан, а материал ограждения был белой «подложкой под текстуру» —
+  // ставим нейтральный серый, иначе крышка светилась бы белым.
+  else if (hasMaps) m.color.set(RAIL_CAP_FALLBACK_COLOR);
   m.needsUpdate = true;
   return m;
 }
@@ -1432,11 +1457,17 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   if (hasRailing) {
     // Перила лестницы берут тот же модуль, что и ограждение террасы (один товар).
     const _stairRailUrl = (typeof railingModelUrl === 'function') ? railingModelUrl() : null;
-    if (typeof railingUseModule === 'function') railingUseModule(_stairRailUrl);
+    const _stairRailMod = (typeof railingUseModule === 'function') ? railingUseModule(_stairRailUrl) : null;
+    // Как и у ограждения террасы: модуля товара может не быть в кэше, тогда активным
+    // остаётся прежний. Грузим нужный и пересобираем сцену, когда он появится.
+    if (!_stairRailMod && _stairRailUrl && typeof ensureRailingLoaded === 'function') {
+      ensureRailingLoaded(_stairRailUrl).then(() => {
+        if (threeState && railingUseModule(_stairRailUrl)) buildScene3d();
+      });
+    }
     const RC = _railingCache;
     if (!(RC && RC.rails && RC.post && RC.baluFloor)) {
-      // GLB ещё не загружен — подгружаем и перестраиваем сцену (как для перил террасы).
-      ensureRailingLoaded(_stairRailUrl).then(c => { if (c && threeState) buildScene3d(); });
+      // Модуля пока нет — перила лестницы построятся при пересборке после загрузки.
     } else {
       // latOff: перила сдвинуты от краёв ступеней внутрь (на STAIR_RAIL_INSET) — соосны
       // колонне навеса на углу проёма террасы (см. terracePerimeterSegments).
@@ -1460,9 +1491,13 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       // и та же высота низа поручня — перила лестницы стыкуются с террасными.
       const ky = RC.ky || 1;
       const railTopH = RC.baluTopH || (RC.nativeBaluH || 1.055) * ky;
-      const placeGeo = (geo, m4, matOv) => {
+      // uvDir — ось «досок»: столбы-ньюэлы, крышки и балясины вертикальны, перила
+      // идут по скату. Проекция та же, что у ограждения террасы (_applyAxisUV).
+      const placeGeo = (geo, m4, matOv, uvDir) => {
         const g = geo.clone(); g.applyMatrix4(m4);
-        const mm = mesh(g, matOv || stairRailMat); stairGroup.add(mm); threeState.railingMeshes.push(mm);
+        const mm = mesh(g, matOv || stairRailMat);
+        if (uvDir && typeof _applyAxisUV === 'function') _applyAxisUV(mm, uvDir);
+        stairGroup.add(mm); threeState.railingMeshes.push(mm);
       };
       // Крышка столба-ньюэла — по тому же правилу, что у ограждения террасы.
       const stairCapType = (typeof railingCapType === 'function') ? railingCapType() : '';
@@ -1511,7 +1546,7 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         const mRail = new THREE.Matrix4().makeBasis(xAxis, up, zAxis);
         mRail.setPosition(A.x, A.y, A.z);
         mRail.multiply(new THREE.Matrix4().makeScale(L, ky, 1));       // длина ската × высота модуля
-        placeGeo(RC.rails, mRail);
+        placeGeo(RC.rails, mRail, null, xAxis);                        // доски — по скату
 
         // ── Нижний столб-ньюэл (post), вертикальный, стоит НА ЗЕМЛЕ (B продлён до Y=0) ──
         // Сечение — как у столбов ограждения террасы: это один товар, поэтому
@@ -1520,8 +1555,8 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         const mPost = new THREE.Matrix4().makeBasis(headX, up, crossH);
         mPost.setPosition(B.x, B.y, B.z);
         mPost.multiply(new THREE.Matrix4().makeScale(postK, ky, postK));
-        placeGeo(RC.post, mPost);
-        if (RC.cap) placeGeo(RC.cap, mPost, stairCapMat);
+        placeGeo(RC.post, mPost, null, up);
+        if (RC.cap) placeGeo(RC.cap, mPost, stairCapMat, up);
 
         // ── Балясины по видимым проступям (i=0..n-2): вертикальные, нативное сечение,
         //    высота по уровню (от проступи до поручня) — учитывает разницу уровней ──
@@ -1537,7 +1572,7 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
           const mBal = new THREE.Matrix4().makeBasis(headX, up, crossH);
           mBal.setPosition(bx, surfY, bz);
           mBal.multiply(new THREE.Matrix4().makeScale(1, baluH / 1.055, 1)); // тянем ТОЛЬКО по высоте
-          placeGeo(RC.baluFloor, mBal);
+          placeGeo(RC.baluFloor, mBal, null, up);
         }
       }
     }
