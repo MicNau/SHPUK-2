@@ -1760,6 +1760,8 @@ function dSelectPrice(tid) {
 let _rm = null;                 // singleton ResourceManager
 const _catalogCache = {};       // bitrix_id -> ProductResource[] | null
 const _catalogLoading = {};     // bitrix_id -> bool
+const _catalogFails = {};       // bitrix_id -> сколько раз запрос раздела не удался
+const CATALOG_MAX_TRIES = 2;    // после стольких неудач раздел считаем недоступным
 
 function _getRM() {
   if (!_rm && typeof ResourceManager !== 'undefined') {
@@ -1778,11 +1780,13 @@ function _activeSectionId() {
 
 // Загружает товары раздела (section_id) один раз и кэширует.
 //   [] — раздел реально пуст (fallback на заглушки, не перезапрашиваем);
-//   null — ошибка/недоступно (перезапросим при следующем показе);
+//   null — ошибка/недоступно (перезапросим, но не больше CATALOG_MAX_TRIES раз);
 //   undefined — ещё не грузили.
 async function _ensureCatalogSection(sectionId) {
   if (Array.isArray(_catalogCache[sectionId])) return _catalogCache[sectionId];
   if (_catalogLoading[sectionId]) return undefined;
+  // Раздел уже отвечал ошибкой (например, 400 на section_id) — больше не долбим сервер.
+  if ((_catalogFails[sectionId] || 0) >= CATALOG_MAX_TRIES) return null;
   const rm = _getRM();
   if (!rm || typeof Filter === 'undefined') return null;
   _catalogLoading[sectionId] = true;
@@ -1816,9 +1820,12 @@ async function _ensureCatalogSection(sectionId) {
     console.info('[catalog] раздел', sectionId, tag ? `(тег «${tag}»)` : '(без тега)',
                  '→', products === null ? 'ошибка запроса' : products.length + ' товар(ов)');
     _catalogCache[sectionId] = products;
+    if (products === null) _catalogFails[sectionId] = (_catalogFails[sectionId] || 0) + 1;
+    else                   _catalogFails[sectionId] = 0;
   } catch (e) {
     console.warn('[catalog] section load failed', sectionId, e);
     _catalogCache[sectionId] = null;
+    _catalogFails[sectionId] = (_catalogFails[sectionId] || 0) + 1;
   }
   _catalogLoading[sectionId] = false;
   return _catalogCache[sectionId];
@@ -1894,6 +1901,10 @@ function dShowResults() {
     else               _dRenderStubResults();   // раздел реально пуст → заглушки
     return;
   }
+  // Раздел отвечал ошибкой CATALOG_MAX_TRIES раз (например, 400 на section_id) —
+  // показываем заглушки, а не вечную «Загрузку»: иначе dShowResults и
+  // _ensureCatalogSection зацикливались, перезапрашивая недоступный раздел.
+  if ((_catalogFails[secId] || 0) >= CATALOG_MAX_TRIES) { _dRenderStubResults(); return; }
   // undefined (не грузили) или null (прошлая попытка не удалась) → грузим.
   _dRenderCatalogLoading();
   if (!_catalogLoading[secId]) {

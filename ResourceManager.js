@@ -236,15 +236,16 @@ class ResourceManager {
             return section ? { section_id: section.bitrix_id } : {};
         },
         [FilterType.PRODUCT_IDS]: (value) => ({'ids': value.join(',')}),
-        // BASE_IDS и PROPERTIES у бэкендера пока ЗАГЛУШКИ: значение проверяется
-        // валидатором, но в запрос ничего не уходит (backend_API/ResourceManager.js,
-        // ревизия 2026-08-26). До снятия заглушек фронт отбирает по характеристикам
-        // сам — см. _railingFilterProducts / _bedFilterProducts в nav-desktop.js.
-        [FilterType.BASE_IDS]: (value) => ({}),
+        // BASE_IDS и PROPERTIES сервер принимает с 2026-08-28 (заглушки сняты):
+        // base_ids — id через запятую, properties — JSON-массив предикатов
+        // (backend_API/catalog_api.md). Клиентский отбор по характеристикам
+        // (_railingFilterProducts / _bedFilterProducts в nav-desktop.js) оставлен:
+        // он работает и по уже отфильтрованной выдаче.
+        [FilterType.BASE_IDS]: (value) => ({'base_ids': value.join(',')}),
         [FilterType.PRICE_MAX]: (value) => ({'price_max': value}),
         [FilterType.PRICE_MIN]: (value) => ({'price_min': value}),
         [FilterType.TAGS]: (value) => ({'tags': value.join(',') }),
-        [FilterType.PROPERTIES]: (value) => ({}),
+        [FilterType.PROPERTIES]: (value) => ({'properties': JSON.stringify(value)}),
         [FilterType.SORT]: (value) => ({'sort': value}),
         [FilterType.SORT_ORDER]: (value) => ({'sort_order': value}),
         [FilterType.LIMIT]: (value) => ({'limit': value}),
