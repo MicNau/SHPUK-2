@@ -410,6 +410,77 @@ function _planDistToSeg(p, a, b) {
   return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t));
 }
 
+// ── Стартовая разметка не должна ложиться поверх уже размеченного (TODO п.2) ──
+// Занятые прямоугольники плана (нормированные координаты): дом, террасы, ступени,
+// грядки, мебель и полоса дорожек. Свой раздел из списка исключаем — иначе объект
+// «мешал бы сам себе».
+// Терраса/крыльцо ПРИСТРАИВАЕТСЯ к дому — для неё дом не препятствие, иначе
+// стартовый блок выталкивало бы за угол фасада.
+const _ATTACHED_TO_HOUSE = new Set(['terrace']);
+
+function _occupiedRectsNorm(exceptSec) {
+  const out = [];
+  const add = (x, y, w, h) => { if (w > 0 && h > 0) out.push({ x, y, w, h }); };
+  if ((typeof isEmptyLot !== 'function' || !isEmptyLot()) && !_ATTACHED_TO_HOUSE.has(exceptSec)) {
+    const hp = getHousePolygonNorm();
+    if (hp && hp.bboxNorm) add(hp.bboxNorm.nx, hp.bboxNorm.ny, hp.bboxNorm.nw, hp.bboxNorm.nh);
+  }
+  for (const sec of ['terrace', 'pool_terrace']) {
+    if (sec === exceptSec) continue;
+    for (const r of (typeof secRects === 'function' ? secRects(sec) : [])) {
+      if (r) add(r.x, r.y, r.w, r.h);
+    }
+  }
+  if (exceptSec !== 'steps' && S.sections.includes('steps') && S.steps) {
+    add(S.steps.x, S.steps.y, S.steps.w, S.steps.h);
+  }
+  if (exceptSec !== 'beds') for (const b of (S.beds || [])) add(b.x, b.y, b.w, b.h);
+  if (exceptSec !== 'furniture') {
+    const s = 1.0 / GRID;                       // место под предмет мебели — метр
+    for (const f of (S.furniture || [])) add(f.x - s / 2, f.y - s / 2, s, s);
+  }
+  if (exceptSec !== 'paths') {
+    const w = ((S.pathWidth || 120) / 100) / GRID;
+    for (const seg of splitAtBreaks(S.pts.paths || [])) {
+      for (let i = 0; i < seg.length - 1; i++) {
+        const a = seg[i], b = seg[i + 1];
+        add(Math.min(a.x, b.x) - w / 2, Math.min(a.y, b.y) - w / 2,
+            Math.abs(b.x - a.x) + w, Math.abs(b.y - a.y) + w);
+      }
+    }
+  }
+  return out;
+}
+
+function _rectsOverlap(a, b, gap) {
+  gap = gap || 0;
+  return a.x < b.x + b.w + gap && a.x + a.w + gap > b.x
+      && a.y < b.y + b.h + gap && a.y + a.h + gap > b.y;
+}
+
+// Ближайшее свободное место для прямоугольника: пробуем исходное, затем смещения
+// шагом 0.5 м в обе стороны по указанным осям. Не нашли — возвращаем исходное
+// (лучше положить внахлёст, чем никуда).
+function _placeFree(rect, exceptSec, axes) {
+  const occupied = _occupiedRectsNorm(exceptSec);
+  const gap = 0.2 / GRID;                        // 20 см зазора между объектами
+  const free = r => !occupied.some(o => _rectsOverlap(r, o, gap));
+  if (free(rect)) return rect;
+  const step = 0.5 / GRID;
+  for (let k = 1; k <= 40; k++) {
+    for (const ax of (axes || 'xy')) {
+      for (const sign of [1, -1]) {
+        const c = { ...rect };
+        if (ax === 'x') c.x = rect.x + sign * k * step;
+        else            c.y = rect.y + sign * k * step;
+        if (c.x < 0 || c.y < 0 || c.x + c.w > 1 || c.y + c.h > 1) continue;
+        if (free(c)) return c;
+      }
+    }
+  }
+  return rect;
+}
+
 // Стартовый участок 3 м перед фасадом. У забора он отодвинут на FENCE_MIN_CLEAR
 // от дома и террасы (иначе первая же линия нарушала бы правило).
 function _defaultLine(name) {
@@ -424,6 +495,15 @@ function _defaultLine(name) {
     }
   }
   const cx = b.nx + b.nw / 2, half = LINE_START_LEN / 2 / GRID;
+  // Дорожка не должна лечь на террасу, ступени, грядки и прочее уже размеченное
+  // (TODO п.2): отодвигаем полосу от дома, пока место не освободится. У забора
+  // своё правило 3 м, его не трогаем.
+  if (name === 'paths') {
+    const w = ((S.pathWidth || 120) / 100) / GRID;
+    const spot = _placeFree({ x: cx - half, y: y - w / 2, w: 2 * half, h: w }, 'paths', 'yx');
+    const yc = spot.y + w / 2;
+    return [{ x: spot.x, y: yc }, { x: spot.x + 2 * half, y: yc }];
+  }
   return [{ x: cx - half, y }, { x: cx + half, y }];
 }
 
@@ -1256,7 +1336,13 @@ function addFurniturePoint() {
   const a = (S.activeFurniture !== null) ? S.furniture[S.activeFurniture] : null;
   const nx = a ? Math.min(1, a.x + 1.5 / GRID) : 0.5;
   const ny = a ? a.y : 0.5;
-  S.furniture.push({ x: snapNorm(nx), y: snapNorm(ny), rot: a ? (a.rot || 0) : 0, product: null });
+  // Не поверх дома, террасы, дорожки и прочего размеченного (TODO п.2): под предмет
+  // резервируем метр, ищем ближайшее свободное место.
+  const s = 1.0 / GRID;
+  const spot = _placeFree({ x: snapNorm(nx) - s / 2, y: snapNorm(ny) - s / 2, w: s, h: s },
+                          'furniture', 'xy');
+  S.furniture.push({ x: snapNorm(spot.x + s / 2), y: snapNorm(spot.y + s / 2),
+                     rot: a ? (a.rot || 0) : 0, product: null });
   S.activeFurniture = S.furniture.length - 1;
   drawFurnitureCanvas();
   _dSyncFurniturePanel();
@@ -2039,21 +2125,26 @@ function _defaultRect(secId) {
   const clamp = (v, size) => Math.max(0, Math.min(1 - size, v));
 
   if (secId === 'pool_terrace') {
-    return b
+    const r = b
       ? { x: snapNorm(clamp(b.nx - w0 - gap, w0)), y: snapNorm(clamp(b.ny, h0)), w: w0, h: h0 }
       : { x: snapNorm(0.12), y: snapNorm(0.25), w: w0, h: h0 };
+    // Не поверх уже размеченного (TODO п.2) — она стоит отдельно, двигаем по обеим осям.
+    return _placeFree(r, 'pool_terrace', 'xy');
   }
   // terrace — у нижнего края дома, по центру фасада. Кромку у стены НЕ снапим на
   // сетку: стена на 0.5 м обычно не попадает, и снап отрывал террасу от дома на
-  // несколько сантиметров (TODO п.2). Вдоль стены (по X) снап остаётся.
+  // несколько сантиметров. Вдоль стены (по X) снап остаётся, по ней же и двигаем,
+  // если центр фасада уже занят дорожкой или грядкой (TODO п.2).
   if (b) {
-    return {
+    const r = {
       x: snapNorm(b.nx + b.nw / 2 - 2 / GRID),
       y: b.ny + b.nh,
       w: w0, h: snapNorm(2 / GRID),
     };
+    return _placeFree(r, 'terrace', 'x');
   }
-  return { x: snapNorm(0.4), y: snapNorm(0.5), w: w0, h: snapNorm(2 / GRID) };
+  return _placeFree({ x: snapNorm(0.4), y: snapNorm(0.5), w: w0, h: snapNorm(2 / GRID) },
+                    'terrace', 'xy');
 }
 
 // Добавляет новый rect рядом с активным (или в центре, если нет активного).
@@ -2478,7 +2569,9 @@ function _defaultBed() {
     x = snapNorm(0.4); y = snapNorm(0.6);
   }
   const c = _clampBedPos(x, y, d.w, d.h);
-  return { x: c.x, y: c.y, w: d.w, h: d.h };
+  // Первая грядка не должна встать поверх террасы, дорожки или мебели (TODO п.2).
+  const spot = _placeFree({ x: c.x, y: c.y, w: d.w, h: d.h }, 'beds', 'xy');
+  return { x: spot.x, y: spot.y, w: d.w, h: d.h };
 }
 
 function initBedsCanvas() {
@@ -2518,7 +2611,9 @@ function addBed() {
   } else {
     nx = snapNorm(0.4); ny = snapNorm(0.55);
   }
-  const c = _clampBedPos(nx, ny, d.w, d.h);
+  const c0 = _clampBedPos(nx, ny, d.w, d.h);
+  // Первая грядка не должна встать на террасу или дорожку (TODO п.2).
+  const c = _placeFree({ x: c0.x, y: c0.y, w: d.w, h: d.h }, 'beds', 'xy');
   S.beds.push({ x: c.x, y: c.y, w: d.w, h: d.h });
   S.activeBed = S.beds.length - 1;
   drawBedsCanvas();

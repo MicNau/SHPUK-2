@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=37">
+<link rel="stylesheet" href="styles-desktop.css?v=38">
 </head>
 <body>
 
@@ -83,9 +83,9 @@
 
     <!-- Center: 3D viewer -->
     <div class="d-params-center">
-      <div class="d-3d-container" id="d-slot-params">
-        <div class="d-3d-hint">Левая кнопка — вращение<br>Правая кнопка — перемещение<br>Колесико — масштаб</div>
-      </div>
+      <!-- Подсказка по управлению видом показывается всплывающим окном один раз
+           при первом запуске (dShow3dHint), постоянной плашки в углу больше нет. -->
+      <div class="d-3d-container" id="d-slot-params"></div>
     </div>
   </div>
 </div>
@@ -111,9 +111,7 @@
     <!-- CENTER: 3D + canvas overlay -->
     <div class="d-center">
       <div class="d-center-view">
-        <div class="d-center-3d" id="d-slot-workspace">
-          <div class="d-3d-hint">Левая кнопка — вращение<br>Правая кнопка — перемещение<br>Колесико — масштаб</div>
-        </div>
+        <div class="d-center-3d" id="d-slot-workspace"></div>
 
         <!-- Canvas editors (one at a time). Кнопки действий — в футере, в правом нижнем углу. -->
         <div class="d-center-canvas" id="d-canvas-terrace">
@@ -383,7 +381,7 @@
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
 <script src="state.js?v=61"></script>
-<script src="canvas.js?v=54"></script>
+<script src="canvas.js?v=55"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=85"></script>
 <!-- Каталожный API: домен выбирается по хосту.
@@ -410,6 +408,6 @@
 <script src="viewer3d-railing.js?v=12"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=103"></script>
+<script src="nav-desktop.js?v=104"></script>
 </body>
 </html>
