@@ -2431,7 +2431,10 @@ const FENCE_PANEL_RE = /panel|polotno|полотн|board|plank|доск|штак
 // стыке стояло по два столба вплотную, а на углу — четыре.
 // Сами столбы по длине не тянутся: масштаб секции им компенсируется, иначе на
 // коротком пролёте они становились тоньше, на длинном — толще.
-function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, frameMat) {
+// isGate — секция калитки (узкая, 1 м): у неё из ПОВТОРЯЮЩИХСЯ вертикальных элементов
+// полотна (штакетины, ламели) остаётся один — средний. Требование продукта 2026-08-28:
+// калитка выглядит как секция забора шириной 1 м, а не как просвет.
+function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, frameMat, isGate) {
   const info = _fenceProtoPosts(proto);
   const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
   const tol = _fencePostTol(nw);
@@ -2448,7 +2451,9 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
   // 2026-08-28). Заодно ушёл общий масштаб inst по X — он же скашивал повёрнутые узлы.
   const inst = new THREE.Group();
   proto.updateMatrixWorld(true);
-  let panels = 0;
+  // Сначала собираем детали секции, потом строим: в режиме калитки нужно ЗНАТЬ все
+  // вертикальные элементы полотна, чтобы оставить из них один.
+  const parts = [];
   proto.traverse(o => {
     if (!o.isMesh || !o.geometry) return;
     const p = _fencePostSpan(o, nw, nh);
@@ -2458,24 +2463,49 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
       // секции (на свободном конце — замыкающий, см. _fenceModelPost).
       if (Math.abs(cx - info.endCx) < tol) return;
     }
-    const g = o.geometry.clone();
-    g.applyMatrix4(o.matrixWorld);
+    const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
+    const bb = new THREE.Box3().setFromObject(o);
+    const len = bb.max.x - bb.min.x, hgt = bb.max.y - bb.min.y;
+    parts.push({ o, isPost: !!p, isPanel: FENCE_PANEL_RE.test(nm),
+                 cx: (bb.min.x + bb.max.x) / 2, len, hgt });
+  });
+  if (isGate) {
+    // Вертикальный элемент полотна: узкий по длине секции и заметно выше, чем шире.
+    const verts = parts.filter(s => s.isPanel && !s.isPost
+                                    && s.len < pitch * 0.5 && s.hgt > s.len * 1.5);
+    if (verts.length > 1) {
+      // Оставляем средний по X — он приходится на середину створки.
+      verts.sort((a, b) => a.cx - b.cx);
+      const keep = verts[Math.floor(verts.length / 2)];
+      for (const s of verts) if (s !== keep) s.drop = true;
+      keep.center = true;                    // и ставим его ровно по центру калитки
+    }
+  }
+  let panels = 0;
+  for (const s of parts) {
+    if (s.drop) continue;
+    const g = s.o.geometry.clone();
+    g.applyMatrix4(s.o.matrixWorld);
     // Позиция детали внутри секции — пропорционально (k), собственная длина — только
     // у деталей во всю секцию (полотно, прогоны): им она меняется РОВНО на разницу
     // длины секции, тогда зазоры до столбов остаются как в модели. Столбы и мелочь
     // вроде штакетин сохраняют родной размер и просто раздвигаются.
-    _fenceFitX(g, shift, k, p ? 0 : dx, pitch);
-    const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
-    const isPanel = FENCE_PANEL_RE.test(nm);
-    const mesh = new THREE.Mesh(g, isPanel ? panelMat : frameMat);
-    mesh.name = o.name;
+    _fenceFitX(g, shift, k, s.isPost ? 0 : dx, pitch);
+    if (s.center) {                          // единственная штакетина калитки — по центру
+      g.computeBoundingBox();
+      const bb = g.boundingBox;
+      g.translate(spanW / 2 - (bb.min.x + bb.max.x) / 2, 0, 0);
+      g.computeBoundingSphere();
+    }
+    const mesh = new THREE.Mesh(g, s.isPanel ? panelMat : frameMat);
+    mesh.name = s.o.name;
     mesh.castShadow = mesh.receiveShadow = true;
     inst.add(mesh);
-    if (!isPanel) return;                // не полотно — товаром не красится и в примерку не идёт
+    if (!s.isPanel) continue;            // не полотно — товаром не красится и в примерку не идёт
     if (panelMat.map && !g.attributes.uv) _applyFenceUV(mesh, false);
     threeState.fenceMeshes.push(mesh);
     panels++;
-  });
+  }
   inst.position.set(x, 0, z);
   inst.rotation.y = angle;
   inst.scale.set(1, sy, 1);            // по длине уже подогнано, тянем только высоту
@@ -2568,7 +2598,9 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
       // собирается своими секциями, как обычный пролёт.
       const parts = _fenceGateSplit(a, ux, uz, segLen, gateW);
       for (const part of parts) {
-        _fenceRun(a.x + ux * part.t0, a.z + uz * part.t0, ux, uz, part.len, angle);
+        const px = a.x + ux * part.t0, pz = a.z + uz * part.t0;
+        if (part.gate) _fenceGateLeaf(px, pz, ux, uz, part.len, angle);
+        else           _fenceRun(px, pz, ux, uz, part.len, angle);
       }
     }
   }
@@ -2612,10 +2644,28 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
       // следующий ещё не размечен, и на углу вырастал лишний столб.
       runEnds.push({ x: a.x + ux * segLen, z: a.z + uz * segLen, angle });
   }
+
+  // ── Створка калитки: ОДНА секция во всю ширину проёма ──
+  // Просвета быть не должно (требование продукта 2026-08-28): калитка выглядит как
+  // секция забора шириной FENCE_GATE_W3D. От обычной секции отличается тем, что из
+  // повторяющихся вертикальных элементов полотна остаётся один.
+  function _fenceGateLeaf(sx, sz, ux, uz, len, angle) {
+    if (len < 0.2) return;
+    const key = postKey(sx, sz);
+    const withPost = !postSet.has(key);
+    postSet.add(key);
+    if (proto) panelsPainted += _fenceModelSection(proto, fenceGroup, sx, sz, angle, len, sy,
+                                                   panelMat, frameMat, true);
+    else       _fenceSchematicSection(fenceGroup, sx, sz, angle, len, panelH,
+                                      panelMat, frameMat, withPost);
+    runEnds.push({ x: sx + ux * len, z: sz + uz * len, angle });
+  }
 }
 
-// Делит пролёт на куски вокруг калитки: [{t0, len}]. Калитка задана точкой плана
+// Делит пролёт на куски вокруг калитки: [{t0, len, gate?}]. Калитка задана точкой плана
 // (S.fenceGate); на пролёт она влияет, только если лежит на нём (в пределах 0.3 м).
+// Кусок с gate:true — сама створка: её строит _fenceGateLeaf одной секцией, просвета
+// на месте калитки не остаётся.
 function _fenceGateSplit(a, ux, uz, segLen, gate) {
   if (!gate) return [{ t0: 0, len: segLen }];
   const vx = gate.x - a.x, vz = gate.z - a.z;
@@ -2626,7 +2676,8 @@ function _fenceGateSplit(a, ux, uz, segLen, gate) {
   const g0 = Math.max(0, t - half), g1 = Math.min(segLen, t + half);
   const parts = [];
   if (g0 > 0.3) parts.push({ t0: 0, len: g0 });
+  if (g1 - g0 > 0.2) parts.push({ t0: g0, len: g1 - g0, gate: true });
   if (segLen - g1 > 0.3) parts.push({ t0: g1, len: segLen - g1 });
-  return parts.length ? parts : [];
+  return parts.length ? parts : [{ t0: 0, len: segLen }];
 }
 
