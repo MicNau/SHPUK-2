@@ -1811,6 +1811,10 @@ async function _ensureCatalogSection(sectionId) {
         products = alt;
       }
     }
+    // На стенде должно быть видно, что именно приехало по разделу: пустой раздел
+    // и ошибка запроса выглядят в интерфейсе одинаково («товаров нет»).
+    console.info('[catalog] раздел', sectionId, tag ? `(тег «${tag}»)` : '(без тега)',
+                 '→', products === null ? 'ошибка запроса' : products.length + ' товар(ов)');
     _catalogCache[sectionId] = products;
   } catch (e) {
     console.warn('[catalog] section load failed', sectionId, e);

@@ -2406,17 +2406,36 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
   const inst = proto.clone(true);
   inst.updateMatrixWorld(true);
   // Классифицируем меши, пока клон стоит в нуле и не масштабирован.
-  const drop = [], keepPosts = [];
+  const drop = [], keepPosts = [], spans = [];
   inst.traverse(o => {
     if (!o.isMesh) return;
     const p = _fencePostSpan(o, nw, nh);
-    if (!p || !info.pitch) return;
-    const cx = (p.minX + p.maxX) / 2;
-    if (Math.abs(cx - info.endCx) < tol) drop.push(o);
-    else if (Math.abs(cx - info.startCx) < tol) keepPosts.push(o);
+    if (p && info.pitch) {
+      const cx = (p.minX + p.maxX) / 2;
+      if (Math.abs(cx - info.endCx) < tol) { drop.push(o); return; }
+      if (Math.abs(cx - info.startCx) < tol) { keepPosts.push(o); return; }
+    }
+    // Не столб — полотно, прогоны, крепёж: запоминаем родную длину по X.
+    const bb = new THREE.Box3().setFromObject(o);
+    if (isFinite(bb.min.x) && isFinite(bb.max.x)) spans.push({ o, len: bb.max.x - bb.min.x });
   });
   for (const o of drop) if (o.parent) o.parent.remove(o);
   for (const o of keepPosts) o.scale.x /= k;       // столб остаётся своей толщины
+
+  // Полотно и прогоны НЕ масштабируются пропорционально: они укорачиваются
+  // (или удлиняются) ровно на столько, на сколько изменилась секция, — так зазор
+  // до столбов остаётся таким же, как в модели. Раньше здесь работал общий
+  // масштаб k, и на пролёте с шагом меньше родного (14.4 м → 7 секций по 2.06 при
+  // родных 2.5) полотно ужималось до 1.89 м: промежуток между полотнами
+  // становился 0.17 м при столбе 0.10, и у каждого столба, особенно на углу,
+  // зияла щель (баг с рендера 2026-08-28).
+  const dx = spanW - pitch;
+  for (const s of spans) {
+    if (s.len < 0.05) continue;                    // мелкая деталь — тянуть нечего
+    const target = s.len + dx;
+    if (target <= 0.02) continue;                  // не влезает — оставляем как есть
+    s.o.scale.x *= target / (s.len * k);
+  }
 
   // Сдвиг: центр стартового столба — в нуль секции. Профиль поперёк линии (Z)
   // не трогаем, по высоте — масштаб от родной высоты модели.
