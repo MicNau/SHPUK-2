@@ -868,20 +868,45 @@ function ensureRailingLoaded(url) {
   return _railingLoads[url];
 }
 
-// Материал крышки столба по её виду (правило продукта от 2026-08-26):
+// Материал крышки столба по её виду (правило продукта, уточнено 2026-08-28):
 //   dpk     — материал и текстура как у самого ограждения;
-//   metal   — карт нет вовсе, цвет ограждения, roughness 0.30, metalness 0.50;
-//   plastic — остаётся только карта normal (рельеф тот же), цвет ограждения,
-//             roughness 0.50 без карты.
+//   metal   — карт нет вовсе, цвет из карточки товара, roughness 0.30, metalness 0.30;
+//   plastic — остаётся ТОЛЬКО карта normal (рельеф тот же), цвет из карточки товара,
+//             roughness 0.50 без карты, metalness 0.
+// Цвет обязательно свой: у товара с PBR-текстурами материал ограждения белый
+// (color=0xffffff, чтобы не красить текстуру), и крышка без карт вышла бы белой.
 const RAIL_CAP_MAPS = ['map', 'roughnessMap', 'metalnessMap', 'aoMap', 'bumpMap',
                        'displacementMap', 'emissiveMap', 'specularMap', 'alphaMap'];
+const RAIL_CAP_FALLBACK_COLOR = 0x8c8c8c;   // «Серый» палитры — когда цвет не распознан
+
+// Цвет выбранного товара ограждения: поле color каталога, иначе имя цвета в
+// названии, иначе в описании (тот же порядок, что у фильтра цвета в каталоге).
+function _railProductColorHex() {
+  const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat.railing : null;
+  if (!em) return null;
+  if (typeof _detectColorNames !== 'function' || typeof CATALOG_COLOR_HEX === 'undefined') return null;
+  for (const text of [em.color, em.name, em.previewText]) {
+    if (!text) continue;
+    for (const name of _detectColorNames(text)) {
+      if (CATALOG_COLOR_HEX[name]) return CATALOG_COLOR_HEX[name];
+    }
+  }
+  return null;
+}
+
 function _railCapMaterial(base, capType) {
   if (capType !== 'metal' && capType !== 'plastic') return base;   // дпк и неизвестное — как ограждение
   const m = base.clone();
   m.name = 'mat_railing_cap_' + capType;
+  const hasMaps = !!(base.map || base.normalMap || base.roughnessMap);
   for (const k of RAIL_CAP_MAPS) if (m[k]) m[k] = null;
-  if (capType === 'metal') { m.normalMap = null; m.roughness = 0.30; m.metalness = 0.50; }
+  if (capType === 'metal') { m.normalMap = null; m.roughness = 0.30; m.metalness = 0.30; }
   else                     { m.roughness = 0.50; m.metalness = 0.0; }
+  const hex = _railProductColorHex();
+  if (hex) m.color.set(hex);
+  // Цвет не распознан, а материал ограждения был белой «подложкой под текстуру» —
+  // ставим нейтральный серый, иначе крышка светилась бы белым.
+  else if (hasMaps) m.color.set(RAIL_CAP_FALLBACK_COLOR);
   m.needsUpdate = true;
   return m;
 }
@@ -1432,11 +1457,17 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   if (hasRailing) {
     // Перила лестницы берут тот же модуль, что и ограждение террасы (один товар).
     const _stairRailUrl = (typeof railingModelUrl === 'function') ? railingModelUrl() : null;
-    if (typeof railingUseModule === 'function') railingUseModule(_stairRailUrl);
+    const _stairRailMod = (typeof railingUseModule === 'function') ? railingUseModule(_stairRailUrl) : null;
+    // Как и у ограждения террасы: модуля товара может не быть в кэше, тогда активным
+    // остаётся прежний. Грузим нужный и пересобираем сцену, когда он появится.
+    if (!_stairRailMod && _stairRailUrl && typeof ensureRailingLoaded === 'function') {
+      ensureRailingLoaded(_stairRailUrl).then(() => {
+        if (threeState && railingUseModule(_stairRailUrl)) buildScene3d();
+      });
+    }
     const RC = _railingCache;
     if (!(RC && RC.rails && RC.post && RC.baluFloor)) {
-      // GLB ещё не загружен — подгружаем и перестраиваем сцену (как для перил террасы).
-      ensureRailingLoaded(_stairRailUrl).then(c => { if (c && threeState) buildScene3d(); });
+      // Модуля пока нет — перила лестницы построятся при пересборке после загрузки.
     } else {
       // latOff: перила сдвинуты от краёв ступеней внутрь (на STAIR_RAIL_INSET) — соосны
       // колонне навеса на углу проёма террасы (см. terracePerimeterSegments).
@@ -1460,9 +1491,13 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       // и та же высота низа поручня — перила лестницы стыкуются с террасными.
       const ky = RC.ky || 1;
       const railTopH = RC.baluTopH || (RC.nativeBaluH || 1.055) * ky;
-      const placeGeo = (geo, m4, matOv) => {
+      // uvDir — ось «досок»: столбы-ньюэлы, крышки и балясины вертикальны, перила
+      // идут по скату. Проекция та же, что у ограждения террасы (_applyAxisUV).
+      const placeGeo = (geo, m4, matOv, uvDir) => {
         const g = geo.clone(); g.applyMatrix4(m4);
-        const mm = mesh(g, matOv || stairRailMat); stairGroup.add(mm); threeState.railingMeshes.push(mm);
+        const mm = mesh(g, matOv || stairRailMat);
+        if (uvDir && typeof _applyAxisUV === 'function') _applyAxisUV(mm, uvDir);
+        stairGroup.add(mm); threeState.railingMeshes.push(mm);
       };
       // Крышка столба-ньюэла — по тому же правилу, что у ограждения террасы.
       const stairCapType = (typeof railingCapType === 'function') ? railingCapType() : '';
@@ -1511,7 +1546,7 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         const mRail = new THREE.Matrix4().makeBasis(xAxis, up, zAxis);
         mRail.setPosition(A.x, A.y, A.z);
         mRail.multiply(new THREE.Matrix4().makeScale(L, ky, 1));       // длина ската × высота модуля
-        placeGeo(RC.rails, mRail);
+        placeGeo(RC.rails, mRail, null, xAxis);                        // доски — по скату
 
         // ── Нижний столб-ньюэл (post), вертикальный, стоит НА ЗЕМЛЕ (B продлён до Y=0) ──
         // Сечение — как у столбов ограждения террасы: это один товар, поэтому
@@ -1520,8 +1555,8 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         const mPost = new THREE.Matrix4().makeBasis(headX, up, crossH);
         mPost.setPosition(B.x, B.y, B.z);
         mPost.multiply(new THREE.Matrix4().makeScale(postK, ky, postK));
-        placeGeo(RC.post, mPost);
-        if (RC.cap) placeGeo(RC.cap, mPost, stairCapMat);
+        placeGeo(RC.post, mPost, null, up);
+        if (RC.cap) placeGeo(RC.cap, mPost, stairCapMat, up);
 
         // ── Балясины по видимым проступям (i=0..n-2): вертикальные, нативное сечение,
         //    высота по уровню (от проступи до поручня) — учитывает разницу уровней ──
@@ -1537,7 +1572,7 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
           const mBal = new THREE.Matrix4().makeBasis(headX, up, crossH);
           mBal.setPosition(bx, surfY, bz);
           mBal.multiply(new THREE.Matrix4().makeScale(1, baluH / 1.055, 1)); // тянем ТОЛЬКО по высоте
-          placeGeo(RC.baluFloor, mBal);
+          placeGeo(RC.baluFloor, mBal, null, up);
         }
       }
     }
@@ -2401,63 +2436,77 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
   const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
   const tol = _fencePostTol(nw);
   const pitch = (info.pitch > 0.2) ? info.pitch : nw;
-  const k = spanW / pitch;
+  const dx = spanW - pitch;                  // насколько секция длиннее/короче родной
+  const k = spanW / pitch;                   // им двигаются ПОЗИЦИИ деталей внутри секции
+  const shift = info.pitch ? info.startCx : 0;
 
-  const inst = proto.clone(true);
-  inst.updateMatrixWorld(true);
-  // Классифицируем меши, пока клон стоит в нуле и не масштабирован.
-  const drop = [], keepPosts = [], spans = [];
-  inst.traverse(o => {
-    if (!o.isMesh) return;
+  // Геометрия каждого меша ЗАПЕКАЕТСЯ в систему прототипа (o.matrixWorld), после чего
+  // все детали лежат в общих осях секции: +X вдоль пролёта. Так и делаются подгонка
+  // длины, и сдвиг. Раньше длина менялась через o.scale.x, а он действует по ЛОКАЛЬНОЙ
+  // оси меша: в модели с повёрнутыми узлами полотно тянулось поперёк линии и вылезало
+  // за раму скошенным, а вложенные меши масштабировались дважды (баг с рендера
+  // 2026-08-28). Заодно ушёл общий масштаб inst по X — он же скашивал повёрнутые узлы.
+  const inst = new THREE.Group();
+  proto.updateMatrixWorld(true);
+  let panels = 0;
+  proto.traverse(o => {
+    if (!o.isMesh || !o.geometry) return;
     const p = _fencePostSpan(o, nw, nh);
     if (p && info.pitch) {
       const cx = (p.minX + p.maxX) / 2;
-      if (Math.abs(cx - info.endCx) < tol) { drop.push(o); return; }
-      if (Math.abs(cx - info.startCx) < tol) { keepPosts.push(o); return; }
+      // Конечный столб выбрасываем: его место занимает стартовый столб следующей
+      // секции (на свободном конце — замыкающий, см. _fenceModelPost).
+      if (Math.abs(cx - info.endCx) < tol) return;
     }
-    // Не столб — полотно, прогоны, крепёж: запоминаем родную длину по X.
-    const bb = new THREE.Box3().setFromObject(o);
-    if (isFinite(bb.min.x) && isFinite(bb.max.x)) spans.push({ o, len: bb.max.x - bb.min.x });
-  });
-  for (const o of drop) if (o.parent) o.parent.remove(o);
-  for (const o of keepPosts) o.scale.x /= k;       // столб остаётся своей толщины
-
-  // Полотно и прогоны НЕ масштабируются пропорционально: они укорачиваются
-  // (или удлиняются) ровно на столько, на сколько изменилась секция, — так зазор
-  // до столбов остаётся таким же, как в модели. Раньше здесь работал общий
-  // масштаб k, и на пролёте с шагом меньше родного (14.4 м → 7 секций по 2.06 при
-  // родных 2.5) полотно ужималось до 1.89 м: промежуток между полотнами
-  // становился 0.17 м при столбе 0.10, и у каждого столба, особенно на углу,
-  // зияла щель (баг с рендера 2026-08-28).
-  const dx = spanW - pitch;
-  for (const s of spans) {
-    if (s.len < 0.05) continue;                    // мелкая деталь — тянуть нечего
-    const target = s.len + dx;
-    if (target <= 0.02) continue;                  // не влезает — оставляем как есть
-    s.o.scale.x *= target / (s.len * k);
-  }
-
-  // Сдвиг: центр стартового столба — в нуль секции. Профиль поперёк линии (Z)
-  // не трогаем, по высоте — масштаб от родной высоты модели.
-  if (info.pitch) for (const c of inst.children) c.position.x -= info.startCx;
-  inst.position.set(x, 0, z);
-  inst.rotation.y = angle;
-  inst.scale.set(k, sy, 1);
-
-  let panels = 0;
-  inst.traverse(o => {
-    if (!o.isMesh) return;
+    const g = o.geometry.clone();
+    g.applyMatrix4(o.matrixWorld);
+    // Позиция детали внутри секции — пропорционально (k), собственная длина — только
+    // у деталей во всю секцию (полотно, прогоны): им она меняется РОВНО на разницу
+    // длины секции, тогда зазоры до столбов остаются как в модели. Столбы и мелочь
+    // вроде штакетин сохраняют родной размер и просто раздвигаются.
+    _fenceFitX(g, shift, k, p ? 0 : dx, pitch);
     const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
     const isPanel = FENCE_PANEL_RE.test(nm);
-    o.material = isPanel ? panelMat : frameMat;
-    o.castShadow = o.receiveShadow = true;
+    const mesh = new THREE.Mesh(g, isPanel ? panelMat : frameMat);
+    mesh.name = o.name;
+    mesh.castShadow = mesh.receiveShadow = true;
+    inst.add(mesh);
     if (!isPanel) return;                // не полотно — товаром не красится и в примерку не идёт
-    if (panelMat.map && o.geometry && !o.geometry.attributes.uv) _applyFenceUV(o, false);
-    threeState.fenceMeshes.push(o);
+    if (panelMat.map && !g.attributes.uv) _applyFenceUV(mesh, false);
+    threeState.fenceMeshes.push(mesh);
     panels++;
   });
+  inst.position.set(x, 0, z);
+  inst.rotation.y = angle;
+  inst.scale.set(1, sy, 1);            // по длине уже подогнано, тянем только высоту
   group.add(inst);
   return panels;
+}
+
+// Ставит деталь в секцию по оси X: начало секции (x0) переезжает в нуль, ЦЕНТР детали
+// сдвигается пропорционально k, а собственная длина меняется на dx — но только если
+// деталь тянется хотя бы на половину секции (полотно, прогоны). Короткие детали
+// (штакетины, ламели, крепёж) сохраняют родной размер и просто раздвигаются:
+// растягивать их на dx нельзя — на пролёте с шагом меньше родного планка шириной
+// 0.10 м ужималась до 0.02 м.
+// Пропорциональный сдвиг центра и подгонка длины согласованы: у детали во всю секцию
+// центр (≈pitch/2) уезжает в spanW/2, то есть ровно туда, где он оказывается при
+// удлинении на dx с неподвижным левым краем — зазоры до столбов сохраняются с обеих
+// сторон.
+function _fenceFitX(geo, x0, k, dx, pitch) {
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  if (!bb) return;
+  const len = bb.max.x - bb.min.x;
+  const cx = (bb.min.x + bb.max.x) / 2;
+  const ncx = (cx - x0) * k;
+  const stretch = dx && len > 0.05 && len > pitch * 0.5;
+  const s = stretch ? Math.max(0.02, len + dx) / len : 1;
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) pos.setX(i, ncx + (pos.getX(i) - cx) * s);
+  pos.needsUpdate = true;
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
 }
 
 // Забор по ломаной: пролёты делятся на секции РАВНОЙ ширины (округление длины на
