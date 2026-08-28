@@ -413,6 +413,8 @@ function _dInitParamsView() {
     const slot = document.getElementById('d-slot-params');
     if (slot && slot.offsetWidth > 0) init3dCanvas('d-slot-params');
     else setTimeout(() => init3dCanvas('d-slot-params'), 100);
+    // Первый экран с 3D — здесь же показываем, как этим видом управлять (TODO п.1).
+    dShow3dHint();
   }, 80);
 }
 
@@ -780,6 +782,18 @@ function _dMountEditorControls(secId) {
   _dSyncAllRangeFills();
 }
 
+// Раздел, который нельзя открыть, пока не сделано что-то другое. Возвращает
+// причину (она же подсказка на кнопке) или '' — ограничений нет.
+// Ограждение строится по периметру террасы (railingAutoPoints): без террасы строить
+// нечего, раздел был бы пустым (TODO п.4).
+function _dSectionBlockedBy(secId) {
+  if (secId !== 'railing') return '';
+  const hasTerrace = (typeof secRects === 'function')
+    && secRects('terrace').some(r => r && r.w > 0 && r.h > 0)
+    && S.sections.includes('terrace');
+  return hasTerrace ? '' : 'Сначала разметьте террасу — ограждение идёт по её периметру';
+}
+
 function _dRenderSidebar() {
   const list = document.getElementById('d-sidebar-list');
   // Вернуть перенесённые узлы до перерисовки — innerHTML их бы уничтожил.
@@ -787,14 +801,20 @@ function _dRenderSidebar() {
   list.innerHTML = D_MENU_ITEMS.map(item => {
     const isActive = dActiveItem === item.id;
     const isCfg = dConfigured.has(item.id);
-    const isLocked = dEditorOpen && dActiveItem !== item.id;
+    // Раздел без выполненного условия (ограждение без террасы) не открывается.
+    const needs = _dSectionBlockedBy(item.id);
+    const isLocked = (dEditorOpen && dActiveItem !== item.id) || !!needs;
     const isEditing = dEditorOpen && isActive;
+    // Пока какой-то раздел раскрыт, остальные приглушаем — так открытый заметнее
+    // (TODO п.3). От `locked` отличается тем, что кнопка остаётся кликабельной.
+    const isDimmed = !!dActiveItem && !isActive && !isLocked;
     return `
       <div class="d-sb-row">
         <div class="d-sb-main">
-          <button class="d-sb-btn ${isActive ? 'active' : ''} ${isCfg ? 'configured' : ''} ${isLocked ? 'locked' : ''}"
+          <button class="d-sb-btn ${isActive ? 'active' : ''} ${isCfg ? 'configured' : ''} ${isLocked ? 'locked' : ''} ${isDimmed ? 'dimmed' : ''}"
                   data-id="${item.id}"
                   onclick="dClickItem('${item.id}')"
+                  ${needs ? `title="${needs}"` : ''}
                   ${isLocked ? 'disabled' : ''}>
             ${item.lbl}
           </button>
@@ -959,7 +979,7 @@ function _dRenderBedFilters() {
     hg.innerHTML = BED_HEIGHTS.map(h =>
       `<button class="d-price-btn ${on.includes(h) ? 'selected' : ''}"
                onclick="dSetBedFilter('h', ${h})">
-         <span class="d-radio"></span><span class="d-price-txt"><b>${h} мм</b></span>
+         <span class="d-radio"></span><span class="d-price-txt">${h} мм</span>
        </button>`).join('');
   }
   const mg = document.getElementById('d-bed-mount-grid');
@@ -968,7 +988,7 @@ function _dRenderBedFilters() {
     mg.innerHTML = BED_MOUNTS.map(m =>
       `<button class="d-price-btn ${on.includes(m.id) ? 'selected' : ''}"
                onclick="dSetBedFilter('mount', '${m.id}')">
-         <span class="d-radio"></span><span class="d-price-txt"><b>${m.lbl}</b></span>
+         <span class="d-radio"></span><span class="d-price-txt">${m.lbl}</span>
        </button>`).join('');
   }
 }
@@ -1041,7 +1061,7 @@ function _dRenderRailFilters() {
     cap.innerHTML = RAIL_CAP_TYPES.map(t =>
       `<button class="d-price-btn ${on.includes(t.id) ? 'selected' : ''}"
                onclick="dSetRailFilter('cap', '${t.id}')">
-         <span class="d-radio"></span><span class="d-price-txt"><b>${t.lbl}</b></span>
+         <span class="d-radio"></span><span class="d-price-txt">${t.lbl}</span>
        </button>`).join('');
   }
   const post = document.getElementById('d-rail-post-grid');
@@ -1050,7 +1070,7 @@ function _dRenderRailFilters() {
     post.innerHTML = RAIL_POST_WIDTHS.map(w =>
       `<button class="d-price-btn ${on.includes(w) ? 'selected' : ''}"
                onclick="dSetRailFilter('postW', ${w})">
-         <span class="d-radio"></span><span class="d-price-txt"><b>${w} мм</b></span>
+         <span class="d-radio"></span><span class="d-price-txt">${w} мм</span>
        </button>`).join('');
   }
 }
@@ -1234,6 +1254,9 @@ function dClickItem(secId) {
 
   const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
   if (!item) return;
+  // Раздел с невыполненным условием (ограждение без террасы) не открываем.
+  const blocked = _dSectionBlockedBy(secId);
+  if (blocked) { dToast(blocked); return; }
 
   // If has editor and NOT yet configured → open editor
   if (item.hasEditor && !dConfigured.has(secId)) {
@@ -1304,6 +1327,26 @@ function _dShowEditorHint(secId) {
 function dHideEditorHint() {
   const ov = document.getElementById('d-hint-overlay');
   if (ov) ov.classList.remove('active');
+}
+
+// ── Подсказка по управлению 3D — всплывающим окном при ПЕРВОМ запуске ──
+// Раньше висела постоянной плашкой в углу вида; теперь показывается один раз тем
+// же окном, что и инструкции редакторов, и больше не занимает угол (TODO п.1).
+const HINT_3D_TEXT = 'Левая кнопка мыши — вращение.\n'
+                   + 'Правая кнопка — перемещение.\n'
+                   + 'Колесико — масштаб.';
+let _d3dHintShown = false;
+
+function dShow3dHint() {
+  if (_d3dHintShown) return;
+  const ov = document.getElementById('d-hint-overlay');
+  const body = document.getElementById('d-hint-text');
+  const title = document.getElementById('d-hint-title');
+  if (!ov || !body) return;
+  _d3dHintShown = true;
+  if (title) title.textContent = 'Управление видом';
+  body.textContent = HINT_3D_TEXT;
+  ov.classList.add('active');
 }
 
 function _dOpenEditor(secId) {
@@ -1768,6 +1811,10 @@ async function _ensureCatalogSection(sectionId) {
         products = alt;
       }
     }
+    // На стенде должно быть видно, что именно приехало по разделу: пустой раздел
+    // и ошибка запроса выглядят в интерфейсе одинаково («товаров нет»).
+    console.info('[catalog] раздел', sectionId, tag ? `(тег «${tag}»)` : '(без тега)',
+                 '→', products === null ? 'ошибка запроса' : products.length + ' товар(ов)');
     _catalogCache[sectionId] = products;
   } catch (e) {
     console.warn('[catalog] section load failed', sectionId, e);
