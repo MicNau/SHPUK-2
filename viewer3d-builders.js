@@ -2436,63 +2436,77 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
   const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
   const tol = _fencePostTol(nw);
   const pitch = (info.pitch > 0.2) ? info.pitch : nw;
-  const k = spanW / pitch;
+  const dx = spanW - pitch;                  // насколько секция длиннее/короче родной
+  const k = spanW / pitch;                   // им двигаются ПОЗИЦИИ деталей внутри секции
+  const shift = info.pitch ? info.startCx : 0;
 
-  const inst = proto.clone(true);
-  inst.updateMatrixWorld(true);
-  // Классифицируем меши, пока клон стоит в нуле и не масштабирован.
-  const drop = [], keepPosts = [], spans = [];
-  inst.traverse(o => {
-    if (!o.isMesh) return;
+  // Геометрия каждого меша ЗАПЕКАЕТСЯ в систему прототипа (o.matrixWorld), после чего
+  // все детали лежат в общих осях секции: +X вдоль пролёта. Так и делаются подгонка
+  // длины, и сдвиг. Раньше длина менялась через o.scale.x, а он действует по ЛОКАЛЬНОЙ
+  // оси меша: в модели с повёрнутыми узлами полотно тянулось поперёк линии и вылезало
+  // за раму скошенным, а вложенные меши масштабировались дважды (баг с рендера
+  // 2026-08-28). Заодно ушёл общий масштаб inst по X — он же скашивал повёрнутые узлы.
+  const inst = new THREE.Group();
+  proto.updateMatrixWorld(true);
+  let panels = 0;
+  proto.traverse(o => {
+    if (!o.isMesh || !o.geometry) return;
     const p = _fencePostSpan(o, nw, nh);
     if (p && info.pitch) {
       const cx = (p.minX + p.maxX) / 2;
-      if (Math.abs(cx - info.endCx) < tol) { drop.push(o); return; }
-      if (Math.abs(cx - info.startCx) < tol) { keepPosts.push(o); return; }
+      // Конечный столб выбрасываем: его место занимает стартовый столб следующей
+      // секции (на свободном конце — замыкающий, см. _fenceModelPost).
+      if (Math.abs(cx - info.endCx) < tol) return;
     }
-    // Не столб — полотно, прогоны, крепёж: запоминаем родную длину по X.
-    const bb = new THREE.Box3().setFromObject(o);
-    if (isFinite(bb.min.x) && isFinite(bb.max.x)) spans.push({ o, len: bb.max.x - bb.min.x });
-  });
-  for (const o of drop) if (o.parent) o.parent.remove(o);
-  for (const o of keepPosts) o.scale.x /= k;       // столб остаётся своей толщины
-
-  // Полотно и прогоны НЕ масштабируются пропорционально: они укорачиваются
-  // (или удлиняются) ровно на столько, на сколько изменилась секция, — так зазор
-  // до столбов остаётся таким же, как в модели. Раньше здесь работал общий
-  // масштаб k, и на пролёте с шагом меньше родного (14.4 м → 7 секций по 2.06 при
-  // родных 2.5) полотно ужималось до 1.89 м: промежуток между полотнами
-  // становился 0.17 м при столбе 0.10, и у каждого столба, особенно на углу,
-  // зияла щель (баг с рендера 2026-08-28).
-  const dx = spanW - pitch;
-  for (const s of spans) {
-    if (s.len < 0.05) continue;                    // мелкая деталь — тянуть нечего
-    const target = s.len + dx;
-    if (target <= 0.02) continue;                  // не влезает — оставляем как есть
-    s.o.scale.x *= target / (s.len * k);
-  }
-
-  // Сдвиг: центр стартового столба — в нуль секции. Профиль поперёк линии (Z)
-  // не трогаем, по высоте — масштаб от родной высоты модели.
-  if (info.pitch) for (const c of inst.children) c.position.x -= info.startCx;
-  inst.position.set(x, 0, z);
-  inst.rotation.y = angle;
-  inst.scale.set(k, sy, 1);
-
-  let panels = 0;
-  inst.traverse(o => {
-    if (!o.isMesh) return;
+    const g = o.geometry.clone();
+    g.applyMatrix4(o.matrixWorld);
+    // Позиция детали внутри секции — пропорционально (k), собственная длина — только
+    // у деталей во всю секцию (полотно, прогоны): им она меняется РОВНО на разницу
+    // длины секции, тогда зазоры до столбов остаются как в модели. Столбы и мелочь
+    // вроде штакетин сохраняют родной размер и просто раздвигаются.
+    _fenceFitX(g, shift, k, p ? 0 : dx, pitch);
     const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
     const isPanel = FENCE_PANEL_RE.test(nm);
-    o.material = isPanel ? panelMat : frameMat;
-    o.castShadow = o.receiveShadow = true;
+    const mesh = new THREE.Mesh(g, isPanel ? panelMat : frameMat);
+    mesh.name = o.name;
+    mesh.castShadow = mesh.receiveShadow = true;
+    inst.add(mesh);
     if (!isPanel) return;                // не полотно — товаром не красится и в примерку не идёт
-    if (panelMat.map && o.geometry && !o.geometry.attributes.uv) _applyFenceUV(o, false);
-    threeState.fenceMeshes.push(o);
+    if (panelMat.map && !g.attributes.uv) _applyFenceUV(mesh, false);
+    threeState.fenceMeshes.push(mesh);
     panels++;
   });
+  inst.position.set(x, 0, z);
+  inst.rotation.y = angle;
+  inst.scale.set(1, sy, 1);            // по длине уже подогнано, тянем только высоту
   group.add(inst);
   return panels;
+}
+
+// Ставит деталь в секцию по оси X: начало секции (x0) переезжает в нуль, ЦЕНТР детали
+// сдвигается пропорционально k, а собственная длина меняется на dx — но только если
+// деталь тянется хотя бы на половину секции (полотно, прогоны). Короткие детали
+// (штакетины, ламели, крепёж) сохраняют родной размер и просто раздвигаются:
+// растягивать их на dx нельзя — на пролёте с шагом меньше родного планка шириной
+// 0.10 м ужималась до 0.02 м.
+// Пропорциональный сдвиг центра и подгонка длины согласованы: у детали во всю секцию
+// центр (≈pitch/2) уезжает в spanW/2, то есть ровно туда, где он оказывается при
+// удлинении на dx с неподвижным левым краем — зазоры до столбов сохраняются с обеих
+// сторон.
+function _fenceFitX(geo, x0, k, dx, pitch) {
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  if (!bb) return;
+  const len = bb.max.x - bb.min.x;
+  const cx = (bb.min.x + bb.max.x) / 2;
+  const ncx = (cx - x0) * k;
+  const stretch = dx && len > 0.05 && len > pitch * 0.5;
+  const s = stretch ? Math.max(0.02, len + dx) / len : 1;
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) pos.setX(i, ncx + (pos.getX(i) - cx) * s);
+  pos.needsUpdate = true;
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
 }
 
 // Забор по ломаной: пролёты делятся на секции РАВНОЙ ширины (округление длины на
