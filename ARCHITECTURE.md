@@ -182,7 +182,7 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-styles-desktop.css?v=38   state.js?v=62              canvas.js?v=55
+styles-desktop.css?v=38   state.js?v=63              canvas.js?v=55
 shared/house-builder.js?v=85                          ResourceManager.js?v=8
 viewer3d-core.js?v=147    viewer3d-builders.js?v=42   viewer3d-railing.js?v=13
 viewer3d-entourage.js?v=14                            nav-desktop.js?v=106
@@ -899,7 +899,10 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   2.0 м), толщина полотна 0.03 м не поехала. Реальная `mod_fence_panel_wood.glb`
   (штакетник): планка стабильно 0.10 м на всех пролётах. Калитка: проём 0.9–1.0 м,
   со столбами по краям.
-- Cache-bust: `viewer3d-builders.js?v=42`.
+- **Раздел грядок 2357** получил тег `garden_beds` в `SECTION_TAGS`: без тега запрос уходил
+  как `?section_id=2357&limit=50`, и сервер отвечал 400 Bad Request — раздел не грузился
+  вовсе. Теперь запрос тот же, что у остальных разделов: `section_id` + `tags`.
+- Cache-bust: `viewer3d-builders.js?v=42`, `state.js?v=63`.
 
 Сделано в итерации v=175 (текстуры ограждения: ориентация досок и материалы крышек):
 
