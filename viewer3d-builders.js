@@ -2298,9 +2298,13 @@ function _fencePostSpan(o, nativeW, nativeH) {
   if (FENCE_PANEL_RE.test(nm)) return null;
   const bb = new THREE.Box3().setFromObject(o);
   if (!isFinite(bb.min.x) || !isFinite(bb.max.x)) return null;
-  const w = bb.max.x - bb.min.x, h = bb.max.y - bb.min.y;
+  const w = bb.max.x - bb.min.x, h = bb.max.y - bb.min.y, d = bb.max.z - bb.min.z;
   if (w > nativeW * 0.5) return null;                      // деталь во всю секцию — не столб
   if (!FENCE_POST_RE.test(nm) && (w > Math.max(0.35, nativeW * 0.25) || h < nativeH * 0.5)) return null;
+  // Сечение столба в плане близко к квадрату, а вертикальная ламель полотна тонкая
+  // поперёк линии. Без этой проверки штакетина с непонятным именем шла в столбы: шаг
+  // секций считался по ламелям, секции разъезжались, а полотно красилось как каркас.
+  if (!FENCE_POST_RE.test(nm) && d < w * 0.5) return null;
   return { minX: bb.min.x, maxX: bb.max.x };
 }
 
@@ -2491,6 +2495,16 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
     // длины секции, тогда зазоры до столбов остаются как в модели. Столбы и мелочь
     // вроде штакетин сохраняют родной размер и просто раздвигаются.
     _fenceFitX(g, shift, k, s.isPost ? 0 : dx, pitch);
+    // Деталь не должна вылезать за границы секции. В модели полотно и прогоны часто
+    // ШИРЕ шага столбов (нарисованы с нахлёстом на столбы): внутри пролёта нахлёст
+    // соседних секций не виден, а на конце забора и на углу полотно торчало наружу
+    // (баг с рендера 2026-08-30). Столбы не вписываем: стартовый стоит по центру нуля
+    // и половиной сечения законно уходит в минус.
+    if (!s.isPost && _fenceClampX(g, 0, spanW) && proto && !proto.userData._clampLogged) {
+      proto.userData._clampLogged = true;
+      console.info('[fence] детали модели шире шага столбов — вписываю в секцию,',
+                   'иначе полотно торчит за концом забора и за углом');
+    }
     if (s.center) {                          // единственная штакетина калитки — по центру
       g.computeBoundingBox();
       const bb = g.boundingBox;
@@ -2511,6 +2525,27 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
   inst.scale.set(1, sy, 1);            // по длине уже подогнано, тянем только высоту
   group.add(inst);
   return panels;
+}
+
+// Вписывает геометрию в диапазон [x0, x1] по X, сжимая её при выходе за границы.
+// Возвращает true, если что-то пришлось поджать. Крайние точки внутри диапазона
+// остаются на месте — деталь просто перестаёт торчать наружу.
+function _fenceClampX(geo, x0, x1) {
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  if (!bb) return false;
+  const a = bb.min.x, b = bb.max.x, len = b - a;
+  if (len < 1e-6) return false;
+  if (a >= x0 - 1e-4 && b <= x1 + 1e-4) return false;      // и так внутри секции
+  const na = Math.max(a, x0), nb = Math.min(b, x1);
+  if (nb - na < 0.01) return false;                        // вырождается — оставляем как есть
+  const s = (nb - na) / len;
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) pos.setX(i, na + (pos.getX(i) - a) * s);
+  pos.needsUpdate = true;
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+  return true;
 }
 
 // Какие меши модели считать ПОЛОТНОМ (их красит товар, всё прочее — тёмно-серое).
