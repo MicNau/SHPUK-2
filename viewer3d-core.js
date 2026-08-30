@@ -1176,8 +1176,14 @@ function buildScene3d() {
         const Sx0 = Tt.minX, Sx1 = Tt.maxX, Sz0 = W.minZ, Sz1 = W.maxZ;   // угловая ячейка (x-полоса T × z-полоса W)
         // Крылья должны соприкасаться по обеим осям (связный угол; работает и для
         // перекрытия, и для встык, и для обёртки вокруг выпуклого угла дома).
-        if (Math.min(W.maxX, Tt.maxX) < Math.max(W.minX, Tt.minX) - E) continue;
-        if (Math.min(W.maxZ, Tt.maxZ) < Math.max(W.minZ, Tt.minZ) - E) continue;
+        const ovX = Math.min(W.maxX, Tt.maxX) - Math.max(W.minX, Tt.minX);
+        const ovZ = Math.min(W.maxZ, Tt.maxZ) - Math.max(W.minZ, Tt.minZ);
+        if (ovX < -E || ovZ < -E) continue;
+        // Блоки, соприкасающиеся ТОЛЬКО углом (перекрытие нулевое по обеим осям), —
+        // не угол составной террасы, а две разные террасы, поставленные по диагонали.
+        // Раньше между ними достраивалась угловая ячейка, и пустой сектор заполнялся
+        // настилом (баг с рендера 2026-08-30).
+        if (ovX <= E && ovZ <= E) continue;
         const exRight = W.maxX > Sx1 + E, exLeft = W.minX < Sx0 - E;
         if (exRight === exLeft) continue;               // W торчит ровно с одной стороны (угол, не T/+)
         const exUp = Tt.maxZ > Sz1 + E, exDown = Tt.minZ < Sz0 - E;
