@@ -1189,15 +1189,18 @@ function dFenceGate() {
 }
 
 // ── «Обозначить вход» в ограждении (TODO.md, этап 2 п.4) ──
-// Ставит разрыв на самом длинном свободном участке периметра; дальше пользователь
-// двигает две точки прямо на плане. Повторное нажатие вход убирает.
+// Ставит разрыв на самом длинном свободном участке периметра — ПО ОДНОМУ НА КАЖДУЮ
+// независимую террасу (правка 2026-08-30): у отдельно стоящих террас свои контуры,
+// и одного общего входа им мало. Дальше пользователь двигает точки прямо на плане.
+// Повторное нажатие входы убирает.
 function dRailingEntry() {
-  if (S.railingEntry) {
-    S.railingEntry = null;
+  const has = Array.isArray(S.railingEntries) && S.railingEntries.some(e => e);
+  if (has) {
+    S.railingEntries = [];
   } else {
-    const e = (typeof railingDefaultEntry === 'function') ? railingDefaultEntry() : null;
-    if (!e) { dToast('Сначала разметьте террасу — вход ставится на её периметре'); return; }
-    S.railingEntry = e;
+    const list = (typeof railingDefaultEntries === 'function') ? railingDefaultEntries() : [];
+    if (!list.some(e => e)) { dToast('Сначала разметьте террасу — вход ставится на её периметре'); return; }
+    S.railingEntries = list;
   }
   if (typeof _railingSync === 'function') _railingSync();
   if (typeof drawSnapCanvas === 'function') drawSnapCanvas('railing');
@@ -1224,7 +1227,7 @@ function dResetSection(secId) {
   if (secId === 'fence')     S.fenceGate = null;
   if (secId === 'beds')      S.bedFilters = { h: [], mount: [] };
   if (secId === 'pool_terrace') S.pool = null;
-  if (secId === 'railing') { S.railingEntry = null; S.railFilters = { cap: [], postW: [] }; S.railPostW = null; }
+  if (secId === 'railing') { S.railingEntries = []; S.railFilters = { cap: [], postW: [] }; S.railPostW = null; }
   if (S.mats && S.mats[secId]) delete S.mats[secId];
   if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
   if (S.estimate && S.estimate[secId]) delete S.estimate[secId];

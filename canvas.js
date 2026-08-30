@@ -1095,18 +1095,19 @@ function drawSnapCanvas(name) {
 
   // Точки «входа» в ограждении — две перетаскиваемые метки на периметре
   // (TODO.md, этап 2 п.4). Разрыв между ними уже вычтен из разметки выше.
+  // Входов столько, сколько независимых контуров террас: у каждой свой разрыв
+  // (правка 2026-08-30) — railingEntryPointsNorm возвращает список пар точек.
   if (name === 'railing' && typeof railingEntryPointsNorm === 'function') {
-    const e = railingEntryPointsNorm();
-    if (e) {
+    for (const e of (railingEntryPointsNorm() || [])) {
       ctx.strokeStyle = DIM_COL; ctx.fillStyle = '#fff';
       ctx.lineWidth = 2.5 / cx.scale;
-      for (const p of e) {
+      for (const p of [e.a, e.b]) {
         ctx.beginPath();
         ctx.arc(p.x * W, p.y * W, 7 / cx.scale, 0, Math.PI * 2);
         ctx.fill(); ctx.stroke();
       }
       ctx.fillStyle = DIM_COL; ctx.font = planFont(10, cx.scale, 'bold'); ctx.textAlign = 'center';
-      ctx.fillText('вход', (e[0].x + e[1].x) / 2 * W, ((e[0].y + e[1].y) / 2) * W - 12 / cx.scale);
+      ctx.fillText('вход', (e.a.x + e.b.x) / 2 * W, ((e.a.y + e.b.y) / 2) * W - 12 / cx.scale);
     }
   }
 
@@ -1151,27 +1152,31 @@ function initRailingCanvas() {
 
   wrap.addEventListener('mousedown', e => {
     if (e.button !== 0 || typeof railingEntryPointsNorm !== 'function') return;
-    const pts = railingEntryPointsNorm();
-    if (!pts) return;
+    const entries = railingEntryPointsNorm() || [];
+    if (!entries.length) return;
     const p = norm(e);
     const hit = 12 / planPx(cv) / CV.railing.scale * (window.devicePixelRatio || 1) + 0.012;
-    let idx = null, best = hit;
-    pts.forEach((q, i) => {
-      const d = Math.hypot(q.x - p.x, q.y - p.y);
-      if (d < best) { best = d; idx = i; }
-    });
-    if (idx !== null) { _railDragIdx = idx; e.preventDefault(); }
+    let best = hit;
+    _railDragIdx = null;
+    // Ищем ближайшую точку среди ВСЕХ входов: тащить можно любой из них.
+    for (const en of entries) {
+      [en.a, en.b].forEach((q, i) => {
+        const d = Math.hypot(q.x - p.x, q.y - p.y);
+        if (d < best) { best = d; _railDragIdx = { li: en.li, idx: i }; }
+      });
+    }
+    if (_railDragIdx) e.preventDefault();
   });
 
   wrap.addEventListener('mousemove', e => {
-    if (_railDragIdx === null) return;
-    railingEntryDrag(_railDragIdx, norm(e));
+    if (!_railDragIdx) return;
+    railingEntryDrag(_railDragIdx.li, _railDragIdx.idx, norm(e));
     _railingSync();
     drawSnapCanvas('railing');
   });
 
   const stop = () => {
-    if (_railDragIdx === null) return;
+    if (!_railDragIdx) return;
     _railDragIdx = null;
     if (typeof onParamChange === 'function') onParamChange();   // пересобрать 3D
   };
@@ -2417,6 +2422,28 @@ function attachRectEvents(wrap, secId) {
   }, { passive: false });
 }
 
+// Группы СОПРИКАСАЮЩИХСЯ прямоугольников: каждая группа — одна независимая
+// конструкция (терраса). Касание по грани считается соединением, зазор — нет.
+function _rectGroups(rects) {
+  const n = rects.length;
+  const parent = rects.map((_, i) => i);
+  const find = i => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const eps = 1e-6;
+  const touch = (a, b) =>
+    a.x <= b.x + b.w + eps && b.x <= a.x + a.w + eps &&
+    a.y <= b.y + b.h + eps && b.y <= a.y + a.h + eps;
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    if (touch(rects[i], rects[j])) parent[find(i)] = find(j);
+  }
+  const by = new Map();
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    if (!by.has(r)) by.set(r, []);
+    by.get(r).push(rects[i]);
+  }
+  return [...by.values()];
+}
+
 function drawRectCanvas(secId) {
   const cfg = RECT_SECTIONS[secId]; if (!cfg) return;
   const cvEl = document.getElementById('cv-' + secId); if (!cvEl) return;
@@ -2466,18 +2493,24 @@ function drawRectCanvas(secId) {
   // Размеры каждого прямоугольника
   for (const r of rects) drawRectDims(ctx, cx, W, r.x, r.y, r.w, r.h);
 
-  // Подпись общая
-  if (rects.length) {
-    let bx0=Infinity, by0=Infinity, bx1=-Infinity, by1=-Infinity;
-    for (const r of rects) {
+  // Подпись и площадь — НА КАЖДУЮ независимую террасу (правка 2026-08-30): блоки,
+  // которые не соприкасаются, это отдельные конструкции, и раньше одна общая
+  // подпись висела в пустоте между ними.
+  for (const grp of _rectGroups(rects)) {
+    let bx0=Infinity, by0=Infinity, bx1=-Infinity, by1=-Infinity, area=0;
+    for (const r of grp) {
       if (r.x < bx0) bx0 = r.x; if (r.y < by0) by0 = r.y;
       if (r.x + r.w > bx1) bx1 = r.x + r.w;
       if (r.y + r.h > by1) by1 = r.y + r.h;
+      area += (r.w * GRID) * (r.h * GRID);
     }
     ctx.fillStyle = COL_INACTIVE;
     ctx.font = planFont(11, cx.scale, 'bold');
     ctx.textAlign = 'center';
-    ctx.fillText(cfg.label, (bx0+bx1)/2*W, (by0+by1)/2*H);
+    const mx = (bx0+bx1)/2*W, my = (by0+by1)/2*H;
+    ctx.fillText(cfg.label, mx, my);
+    ctx.font = planFont(10, cx.scale);
+    ctx.fillText(area.toFixed(1) + ' м²', mx, my + 13 / cx.scale);
   }
 
   // Handles только у активного rect
