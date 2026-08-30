@@ -146,13 +146,15 @@
           <div class="d-canvas-header">
             <div>
               <div class="d-canvas-title">Ступени — размещение</div>
-              <div class="d-canvas-hint">Меняйте ширину лестницы за углы. Разворачивается к террасе автоматически. Количество ступеней вычисляется от высоты.</div>
+              <div class="d-canvas-hint">Меняйте ширину лестницы за углы. Разворачивается к террасе автоматически. Количество ступеней вычисляется от высоты. Лестниц может быть несколько: «ЕЩЁ ОДНА» добавляет, клик выбирает, «УДАЛИТЬ ВЫБРАННУЮ» убирает.</div>
             </div>
           </div>
           <div class="d-canvas-area" id="cw-steps"><canvas id="cv-steps"></canvas></div>
           <div class="d-canvas-footer">
             <div class="tg on" onclick="ttg(this)" data-id="steps-railing"><span class="tg-txt">Перила лестницы</span><div class="tg-ind"></div></div>
             <div class="d-canvas-actions">
+              <button class="d-canvas-btn" onclick="addSteps()">Ещё одна</button>
+              <button class="d-canvas-btn" onclick="delActiveSteps()">Удалить выбранную</button>
               <button class="d-canvas-btn" onclick="dResetSection('steps')">Удалить всё</button>
               <button class="d-canvas-btn confirm" onclick="dConfirmCanvas('steps')">Дальше →</button>
             </div>
@@ -376,8 +378,8 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=65"></script>
-<script src="canvas.js?v=56"></script>
+<script src="state.js?v=66"></script>
+<script src="canvas.js?v=57"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=85"></script>
 <!-- Каталожный API: домен выбирается по хосту.
@@ -399,11 +401,11 @@
 <script src="backend_API/Calculator.js?v=2"></script>
 <!-- 3D viewer: core (сцена/материалы/оркестратор) → builders (конструкции) →
      railing (ограждение/навесы). Общая глобальная область, порядок важен. -->
-<script src="viewer3d-core.js?v=148"></script>
+<script src="viewer3d-core.js?v=149"></script>
 <script src="viewer3d-builders.js?v=46"></script>
-<script src="viewer3d-railing.js?v=14"></script>
+<script src="viewer3d-railing.js?v=15"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=109"></script>
+<script src="nav-desktop.js?v=110"></script>
 </body>
 </html>

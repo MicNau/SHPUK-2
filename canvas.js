@@ -431,8 +431,10 @@ function _occupiedRectsNorm(exceptSec) {
       if (r) add(r.x, r.y, r.w, r.h);
     }
   }
-  if (exceptSec !== 'steps' && S.sections.includes('steps') && S.steps) {
-    add(S.steps.x, S.steps.y, S.steps.w, S.steps.h);
+  if (exceptSec !== 'steps' && S.sections.includes('steps')) {
+    for (const st of (typeof stepsAll === 'function' ? stepsAll() : [S.steps])) {
+      if (st) add(st.x, st.y, st.w, st.h);
+    }
   }
   if (exceptSec !== 'beds') for (const b of (S.beds || [])) add(b.x, b.y, b.w, b.h);
   if (exceptSec !== 'furniture') {
@@ -807,17 +809,19 @@ function drawPreviousLayers(ctx, W, H, cx, excludeName) {
     railing:      { fill:'none',                stroke:'rgba(122,75,35,.5)', label:'Ограждение' },
   };
 
-  // Ступени — один rect (фон, если редактируем другую секцию)
-  if (excludeName !== 'steps' && S.sections.includes('steps') && S.steps) {
-    const s = S.steps;
-    const rx = s.x * W, ry = s.y * H, rw = s.w * W, rh = s.h * H;
-    ctx.fillStyle = 'rgba(220,140,0,.14)';
-    ctx.fillRect(rx, ry, rw, rh);
-    ctx.strokeStyle = 'rgba(204,102,0,.5)'; ctx.lineWidth = 2/sc;
-    ctx.setLineDash([4/sc, 2/sc]); ctx.strokeRect(rx, ry, rw, rh); ctx.setLineDash([]);
-    ctx.fillStyle = 'rgba(204,102,0,.6)';
-    ctx.font = planFont(10, sc); ctx.textAlign = 'center';
-    ctx.fillText('Ступени', rx+rw/2, ry+rh/2+4/sc);
+  // Ступени — фоном все лестницы, если редактируем другую секцию
+  if (excludeName !== 'steps' && S.sections.includes('steps')) {
+    for (const st of (typeof stepsAll === 'function' ? stepsAll() : [S.steps])) {
+      if (!st) continue;
+      const rx = st.x * W, ry = st.y * H, rw = st.w * W, rh = st.h * H;
+      ctx.fillStyle = 'rgba(220,140,0,.14)';
+      ctx.fillRect(rx, ry, rw, rh);
+      ctx.strokeStyle = 'rgba(204,102,0,.5)'; ctx.lineWidth = 2/sc;
+      ctx.setLineDash([4/sc, 2/sc]); ctx.strokeRect(rx, ry, rw, rh); ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(204,102,0,.6)';
+      ctx.font = planFont(10, sc); ctx.textAlign = 'center';
+      ctx.fillText('Ступени', rx+rw/2, ry+rh/2+4/sc);
+    }
   }
 
   // Прямоугольные секции (терраса/крыльцо, терраса у бассейна, причал) — фоном,
@@ -1768,12 +1772,83 @@ function _stepsSnapToRailPost(kind) {
   }
 }
 
+// «Ещё одна» / «Удалить выбранную» для лестниц (правка 2026-08-30). Новая лестница
+// ставится на свободное место рядом с дефолтным, как стартовые объекты остальных
+// секций (_placeFree), и сразу становится выбранной.
+function addSteps() {
+  if (!Array.isArray(S.stepsList)) S.stepsList = [];
+  const base = S.steps ? { ...S.steps } : { ...DEFAULT_STEPS_RECT };
+  S.stepsList.push({ x: base.x, y: base.y, w: base.w, h: base.h });
+  S.activeSteps = S.stepsList.length - 1;
+  // Нормализация прижимает лестницу к ближайшей опоре (террасе или дому), поэтому
+  // сначала ставим её на место, а потом РАЗВОДИМ вдоль этой же опоры: иначе новая
+  // ложится ровно поверх старой.
+  if (typeof _stepsNormalize === 'function') _stepsNormalize();
+  _stepsSpreadActive();
+  drawStepsCanvas();
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
+// Сдвигает ВЫБРАННУЮ лестницу вдоль её опоры, пока она перекрывает другую лестницу.
+// Двигаем по длинной стороне (спуск идёт поперёк неё), шагом в четверть метра;
+// сначала в одну сторону, потом в другую.
+function _stepsSpreadActive() {
+  const list = stepsAll();
+  const i = S.activeSteps | 0;
+  const cur = list[i];
+  if (!cur || list.length < 2) return;
+  const alongX = cur.w >= cur.h;
+  const step = 0.25 / GRID;
+  const hits = r => list.some((o, k) => k !== i &&
+    r.x < o.x + o.w - 1e-6 && o.x < r.x + r.w - 1e-6 &&
+    r.y < o.y + o.h - 1e-6 && o.y < r.y + r.h - 1e-6);
+  if (!hits(cur)) return;
+  for (let n = 1; n <= 60; n++) {
+    for (const sign of [1, -1]) {
+      const d = sign * n * step;
+      const t = { ...cur };
+      if (alongX) t.x = cur.x + d; else t.y = cur.y + d;
+      if (t.x < 0 || t.y < 0 || t.x + t.w > 1 || t.y + t.h > 1) continue;
+      if (!hits(t)) { cur.x = t.x; cur.y = t.y; return; }
+    }
+  }
+}
+
+function delActiveSteps() {
+  if (!Array.isArray(S.stepsList) || S.stepsList.length <= 1) {
+    if (typeof dToast === 'function') dToast('Последнюю лестницу удалить нельзя — уберите весь раздел');
+    return;
+  }
+  S.stepsList.splice(Math.max(0, Math.min(S.stepsList.length - 1, S.activeSteps | 0)), 1);
+  S.activeSteps = Math.max(0, S.stepsList.length - 1);
+  drawStepsCanvas();
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
 function getStepsRectPx(W) {
   const s = S.steps;
+  if (!s) return { x: 0, y: 0, w: 0, h: 0 };
   return { x: s.x * W, y: s.y * W, w: s.w * W, h: s.h * W };
 }
 
+// Клик по НЕвыбранной лестнице делает её выбранной (как у прямоугольных секций).
+// Возвращает true, если выбор поменялся.
+function pickStepsAt(wx, wy, W) {
+  const stairs = (typeof stepsAll === 'function') ? stepsAll() : [];
+  for (let i = stairs.length - 1; i >= 0; i--) {
+    const st = stairs[i];
+    if (wx >= st.x * W && wx <= (st.x + st.w) * W &&
+        wy >= st.y * W && wy <= (st.y + st.h) * W) {
+      if (i === S.activeSteps) return false;
+      S.activeSteps = i;
+      return true;
+    }
+  }
+  return false;
+}
+
 function hitStepsHandle(wx, wy, W) {
+  if (!S.steps) return null;
   const { x, y, w, h } = getStepsRectPx(W);
   // Радиус зоны попадания угла = визуальный радиус кружка в мировых координатах
   // (HANDLE_R / scale) — иначе при зуме-аут клик промахивается мимо угла.
@@ -1833,6 +1908,7 @@ function attachStepsEvents(wrap) {
     if (e.touches.length === 1 && !pinchActive) {
       const t = e.touches[0];
       const {x,y,W} = getWorld(t.clientX, t.clientY);
+      if (!hitStepsHandle(x,y,W) && pickStepsAt(x,y,W)) drawStepsCanvas();
       const hit = hitStepsHandle(x,y,W);
       if (hit) {
         stepsDrag = hit;
@@ -1875,6 +1951,9 @@ function attachStepsEvents(wrap) {
   wrap.addEventListener('mousedown', e => {
     if (e.button !== 0 || !stepsActive()) return;   // ЛКМ — инструмент, ПКМ — pan
     const {x,y,W} = getWorld(e.clientX, e.clientY);
+    // Клик мимо выбранной лестницы, но по другой — сначала переключаем выбор,
+    // и уже её тащим (лестниц может быть несколько, правка 2026-08-30).
+    if (!hitStepsHandle(x,y,W) && pickStepsAt(x,y,W)) drawStepsCanvas();
     const hit = hitStepsHandle(x,y,W);
     if (hit) {
       stepsDrag = hit;
@@ -1934,37 +2013,49 @@ function drawStepsCanvas() {
     ctx.strokeStyle = 'rgba(122,75,35,.75)'; ctx.lineWidth = 1.5 / cx.scale; ctx.stroke();
   }
 
-  // Ступени (текущая секция)
-  const { x, y, w, h } = getStepsRectPx(W);
-  ctx.fillStyle = 'rgba(220,140,0,.22)';
-  ctx.fillRect(x, y, w, h);
-  drawRectDims(ctx, cx, W, x / W, y / W, w / W, h / W);
-  // Полоски-ступеньки для визуальной подсказки направления (по короткой стороне).
-  const longAxisX = w >= h;
-  const nStripes = 5;
-  ctx.strokeStyle = 'rgba(180,90,0,.55)';
-  ctx.lineWidth = 1.5/cx.scale;
-  for (let i = 1; i < nStripes; i++) {
-    ctx.beginPath();
-    if (longAxisX) {
-      const sy = y + h * i / nStripes;
-      ctx.moveTo(x, sy); ctx.lineTo(x+w, sy);
-    } else {
-      const sx = x + w * i / nStripes;
-      ctx.moveTo(sx, y); ctx.lineTo(sx, y+h);
+  // Все лестницы: выбранная — сплошным контуром и с ручками, остальные — пунктиром
+  // (правка 2026-08-30: лестниц может быть несколько, клик выбирает нужную).
+  const stairs = (typeof stepsAll === 'function') ? stepsAll() : (S.steps ? [S.steps] : []);
+  const actIdx = Math.max(0, Math.min(stairs.length - 1, S.activeSteps | 0));
+  for (let si = 0; si < stairs.length; si++) {
+    const st = stairs[si];
+    const isAct = (si === actIdx);
+    const x = st.x * W, y = st.y * W, w = st.w * W, h = st.h * W;
+    ctx.fillStyle = isAct ? 'rgba(220,140,0,.22)' : 'rgba(220,140,0,.10)';
+    ctx.fillRect(x, y, w, h);
+    if (isAct) drawRectDims(ctx, cx, W, st.x, st.y, st.w, st.h);
+    // Полоски-ступеньки для визуальной подсказки направления (по короткой стороне).
+    const longAxisX = w >= h;
+    const nStripes = 5;
+    ctx.strokeStyle = isAct ? 'rgba(180,90,0,.55)' : 'rgba(180,90,0,.3)';
+    ctx.lineWidth = 1.5/cx.scale;
+    for (let i = 1; i < nStripes; i++) {
+      ctx.beginPath();
+      if (longAxisX) {
+        const sy = y + h * i / nStripes;
+        ctx.moveTo(x, sy); ctx.lineTo(x+w, sy);
+      } else {
+        const sx = x + w * i / nStripes;
+        ctx.moveTo(sx, y); ctx.lineTo(sx, y+h);
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
-  }
-  ctx.strokeStyle = '#cc6600'; ctx.lineWidth = 2.5/cx.scale; ctx.strokeRect(x, y, w, h);
-  ctx.fillStyle = '#cc6600'; ctx.font = planFont(11, cx.scale, 'bold'); ctx.textAlign = 'center';
-  ctx.fillText('Ступени', x+w/2, y+h/2+4/cx.scale);
+    ctx.strokeStyle = isAct ? '#cc6600' : 'rgba(204,102,0,.6)';
+    ctx.lineWidth = (isAct ? 2.5 : 1.8)/cx.scale;
+    if (!isAct) ctx.setLineDash([6/cx.scale, 3/cx.scale]);
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+    ctx.fillStyle = isAct ? '#cc6600' : 'rgba(204,102,0,.7)';
+    ctx.font = planFont(11, cx.scale, 'bold'); ctx.textAlign = 'center';
+    ctx.fillText('Ступени', x+w/2, y+h/2+4/cx.scale);
 
-  // Handles
-  for (const [hpx, hpy] of [[x,y], [x+w,y], [x,y+h], [x+w,y+h]]) {
-    ctx.beginPath();
-    ctx.arc(hpx, hpy, HANDLE_R/cx.scale, 0, Math.PI*2);
-    ctx.fillStyle = '#fff'; ctx.fill();
-    ctx.strokeStyle = '#cc6600'; ctx.lineWidth = 2/cx.scale; ctx.stroke();
+    if (!isAct) continue;
+    for (const [hpx, hpy] of [[x,y], [x+w,y], [x,y+h], [x+w,y+h]]) {
+      ctx.beginPath();
+      ctx.arc(hpx, hpy, HANDLE_R/cx.scale, 0, Math.PI*2);
+      ctx.fillStyle = '#fff'; ctx.fill();
+      ctx.strokeStyle = '#cc6600'; ctx.lineWidth = 2/cx.scale; ctx.stroke();
+    }
   }
   ctx.restore();
 }

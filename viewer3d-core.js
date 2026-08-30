@@ -1284,8 +1284,11 @@ function buildScene3d() {
     // Зашивка (щёки) и подступенки — материал ТЕРРАСЫ, как её боковины.
     M.terraceSide = _resolveDeckMat(_baseDeck, 'terrace');
     try {
+      // Лестниц может быть несколько (правка 2026-08-30) — строим каждую.
       // Подкладку строит сам buildSteps3d по реальному footprint лестницы.
-      buildSteps3d(houseGroup, M, S.steps, terraceLevel, houseL, houseW);
+      for (const st of (typeof stepsAll === 'function' ? stepsAll() : [S.steps])) {
+        if (st) buildSteps3d(houseGroup, M, st, terraceLevel, houseL, houseW);
+      }
     } catch (e) { console.error('[buildSteps3d]', e); }
     // M.railing сам к мешам не привязан (перила лестницы берут его клон) — клон-заготовку
     // освобождаем сразу, иначе на каждой пересборке остаётся висячий материал.

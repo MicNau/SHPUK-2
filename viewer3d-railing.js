@@ -78,12 +78,15 @@ function _railHouseEdges(){
 // Рёбра rect ступеней (мир).
 function _railStepsEdges(houseL, houseW){
   const edges=[];
-  if (S.sections.includes('steps') && S.steps) {
+  if (!S.sections.includes('steps')) return edges;
+  // Проём в ограждении нужен под КАЖДУЮ лестницу (правка 2026-08-30).
+  for (const st of (typeof stepsAll === 'function' ? stepsAll() : [S.steps])) {
+    if (!st) continue;
     const sc = canvasToWorld([
-      { x: S.steps.x,             y: S.steps.y },
-      { x: S.steps.x + S.steps.w, y: S.steps.y },
-      { x: S.steps.x + S.steps.w, y: S.steps.y + S.steps.h },
-      { x: S.steps.x,             y: S.steps.y + S.steps.h },
+      { x: st.x,        y: st.y },
+      { x: st.x + st.w, y: st.y },
+      { x: st.x + st.w, y: st.y + st.h },
+      { x: st.x,        y: st.y + st.h },
     ], houseL, houseW);
     for (let i = 0; i < 4; i++) { const a = sc[i], b = sc[(i+1)%4]; edges.push([a.x, a.z, b.x, b.z]); }
   }

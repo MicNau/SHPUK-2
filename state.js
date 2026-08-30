@@ -272,7 +272,11 @@ const S = {
   activePoolRect: null,
   // Ступени: один rect (положение + ширина = от пользователя; глубина в 3D
   // пересчитывается автоматически из количества подступенков).
-  steps: { ...DEFAULT_STEPS_RECT },
+  // Лестниц может быть несколько (правка 2026-08-30): список + индекс выбранной.
+  // Свойство S.steps (объявлено ниже) отдаёт ВЫБРАННУЮ лестницу — редактор, снап,
+  // 3D и смета работают с ней, а обход всех лестниц идёт по stepsList / stepsAll().
+  stepsList: [{ ...DEFAULT_STEPS_RECT }],
+  activeSteps: 0,
   // Грядки: массив прямоугольников фиксированного размера 3×1 м. Ориентация
   // ортогональная — длинная сторона (3 м) вдоль X (w>h) или вдоль Y (w<h).
   // Размер не меняется (только перемещение + поворот на 90°). Координаты 0..1.
@@ -351,6 +355,28 @@ const S = {
   wallMat: 'white',
   frameMat: 'brown'
 };
+
+// S.steps — ВЫБРАННАЯ лестница из S.stepsList. Свойство, а не поле: весь прежний код
+// (редактор, снап, 3D, смета) продолжает работать с одной лестницей, а поддержка
+// нескольких сводится к обходу stepsList.
+Object.defineProperty(S, 'steps', {
+  configurable: true,
+  enumerable: true,
+  get() {
+    const list = S.stepsList;
+    if (!Array.isArray(list) || !list.length) return null;
+    return list[Math.max(0, Math.min(list.length - 1, S.activeSteps | 0))];
+  },
+  set(v) {
+    if (!Array.isArray(S.stepsList)) S.stepsList = [];
+    if (v == null) { S.stepsList = []; S.activeSteps = 0; return; }
+    if (!S.stepsList.length) { S.stepsList = [v]; S.activeSteps = 0; return; }
+    S.stepsList[Math.max(0, Math.min(S.stepsList.length - 1, S.activeSteps | 0))] = v;
+  },
+});
+
+// Все лестницы проекта (пустой массив, если раздел не размечен).
+function stepsAll() { return Array.isArray(S.stepsList) ? S.stepsList : []; }
 // (TOTAL и глобальный step удалены — прогресс-бар мобильного wizard'а.)
 
 // ── Характеристики товара (ProductResource.properties) ──────────────────────

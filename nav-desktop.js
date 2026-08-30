@@ -312,7 +312,7 @@ function _dResetAllConfigurations() {
     secRects(secId).length = 0;
     setSecActiveIdx(secId, null);
   }
-  S.steps = { ...DEFAULT_STEPS_RECT };
+  S.stepsList = [{ ...DEFAULT_STEPS_RECT }]; S.activeSteps = 0;
   S.beds = [];
   S.activeBed = null;
   S.bedH = 0.20;
@@ -929,7 +929,7 @@ function dDeleteItem(secId) {
   // Чистим данные позиции
   if (S.pts && S.pts[secId]) S.pts[secId] = [];
   if (RECT_SECTIONS[secId]) { secRects(secId).length = 0; setSecActiveIdx(secId, null); }
-  if (secId === 'steps')   { S.steps = { ...DEFAULT_STEPS_RECT }; }
+  if (secId === 'steps')   { S.stepsList = [{ ...DEFAULT_STEPS_RECT }]; S.activeSteps = 0; }
   if (secId === 'beds')    { S.beds = []; S.activeBed = null; }
   if (secId === 'facade')  { S.wallZones = {}; }
   if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
@@ -1220,7 +1220,7 @@ function dResetSection(secId) {
 
   if (S.pts && S.pts[secId]) S.pts[secId] = [];
   if (RECT_SECTIONS[secId]) { secRects(secId).length = 0; setSecActiveIdx(secId, null); }
-  if (secId === 'steps')     S.steps = { ...DEFAULT_STEPS_RECT };
+  if (secId === 'steps')     S.stepsList = [{ ...DEFAULT_STEPS_RECT }]; S.activeSteps = 0;
   if (secId === 'beds')      { S.beds = []; S.activeBed = null; }
   if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
   if (secId === 'facade')    S.wallZones = {};
@@ -2272,7 +2272,12 @@ function _pathCenterLines() {
 // Метрика элемента: {kind:'deck'|'linear'|'piece', value, text}.
 function _elementMetric(el) {
   if (RECT_SECTIONS[el]) { const a = _rectsAreaM2(secRects(el)); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
-  if (el === 'steps')   { const G = _GRIDm(); const a = (S.steps.w * G) * (S.steps.h * G); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
+  if (el === 'steps')   {
+    const G = _GRIDm();
+    const list = (typeof stepsAll === 'function') ? stepsAll() : (S.steps ? [S.steps] : []);
+    const a = list.reduce((sum, st) => sum + (st.w * G) * (st.h * G), 0);
+    return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null;
+  }
   if (el === 'paths')   { const a = _pathsAreaM2(); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'fence')   { const len = _polyLenM(S.pts.fence); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
   if (el === 'railing') { const len = _polyLenM(S.pts.railing); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
@@ -2475,8 +2480,8 @@ function _vertexOnTerrace(pt, tol) {
 }
 
 // Ступени — прямоугольник на плане; высота подъёма = высота настила террасы.
-function _stepsProjectObject(name) {
-  const s = S.steps;
+function _stepsProjectObject(name, stair) {
+  const s = stair || S.steps;
   if (!s || !(s.w > 0) || !(s.h > 0)) return null;
   const tol = 0.15 / _GRIDm();          // 15 см в долях поля, как у примыкания к дому
   const corners = [
@@ -2564,8 +2569,14 @@ function _projectObjects() {
     if (req.payload) objs.push({ type: CalculationType.TERRACE, name: lbl(secId), ...req.payload });
   }
   if (S.sections.includes('steps')) {
-    const o = _stepsProjectObject(lbl('steps'));
-    if (o) objs.push(o);
+    // Лестниц может быть несколько — каждая идёт в расчёт отдельным объектом
+    // (правка 2026-08-30). Номер в имени появляется, только когда их больше одной.
+    const stairs = (typeof stepsAll === 'function') ? stepsAll() : (S.steps ? [S.steps] : []);
+    stairs.forEach((st, i) => {
+      const nm = stairs.length > 1 ? `${lbl('steps')} №${i + 1}` : lbl('steps');
+      const o = _stepsProjectObject(nm, st);
+      if (o) objs.push(o);
+    });
   }
   if (S.sections.includes('paths')) {
     for (const o of _pathProjectObjects(lbl('paths'))) objs.push(o);
