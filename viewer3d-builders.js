@@ -2451,6 +2451,7 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
   // 2026-08-28). Заодно ушёл общий масштаб inst по X — он же скашивал повёрнутые узлы.
   const inst = new THREE.Group();
   proto.updateMatrixWorld(true);
+  const panelSet = _fenceProtoPanels(proto);
   // Сначала собираем детали секции, потом строим: в режиме калитки нужно ЗНАТЬ все
   // вертикальные элементы полотна, чтобы оставить из них один.
   const parts = [];
@@ -2463,10 +2464,9 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
       // секции (на свободном конце — замыкающий, см. _fenceModelPost).
       if (Math.abs(cx - info.endCx) < tol) return;
     }
-    const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
     const bb = new THREE.Box3().setFromObject(o);
     const len = bb.max.x - bb.min.x, hgt = bb.max.y - bb.min.y;
-    parts.push({ o, isPost: !!p, isPanel: FENCE_PANEL_RE.test(nm),
+    parts.push({ o, isPost: !!p, isPanel: panelSet.has(o),
                  cx: (bb.min.x + bb.max.x) / 2, len, hgt });
   });
   if (isGate) {
@@ -2502,7 +2502,7 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
     mesh.castShadow = mesh.receiveShadow = true;
     inst.add(mesh);
     if (!s.isPanel) continue;            // не полотно — товаром не красится и в примерку не идёт
-    if (panelMat.map && !g.attributes.uv) _applyFenceUV(mesh, false);
+    _applyFencePanelUV(mesh, proto);
     threeState.fenceMeshes.push(mesh);
     panels++;
   }
@@ -2511,6 +2511,89 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
   inst.scale.set(1, sy, 1);            // по длине уже подогнано, тянем только высоту
   group.add(inst);
   return panels;
+}
+
+// Какие меши модели считать ПОЛОТНОМ (их красит товар, всё прочее — тёмно-серое).
+// Сначала по именам (FENCE_PANEL_RE), а если ни одно имя не подошло — ПО ГЕОМЕТРИИ:
+// полотно — самые крупные по площади фасада детали, не являющиеся столбами. Без этого
+// запаса модель товара с непривычными именами красилась целиком тёмно-серым, и после
+// выбора товара забор становился чёрным (баг с рендера 2026-08-28).
+// Считается один раз на модель и кэшируется в userData.
+function _fenceProtoPanels(proto) {
+  if (proto.userData._panels) return proto.userData._panels;
+  const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
+  const byName = new Set(), cand = [];
+  proto.updateMatrixWorld(true);
+  proto.traverse(o => {
+    if (!o.isMesh) return;
+    const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
+    if (FENCE_PANEL_RE.test(nm)) { byName.add(o); return; }
+    if (_fencePostSpan(o, nw, nh)) return;              // столб — точно не полотно
+    const bb = new THREE.Box3().setFromObject(o);
+    cand.push({ o, area: (bb.max.x - bb.min.x) * (bb.max.y - bb.min.y) });
+  });
+  let set = byName;
+  if (!byName.size && cand.length) {
+    const max = Math.max(...cand.map(c => c.area));
+    set = new Set(cand.filter(c => c.area >= max * 0.4).map(c => c.o));
+    console.info('[fence] полотно по именам не опознано, взято по площади:',
+                 [...set].map(o => o.name || '(без имени)').join(', '),
+                 '| остальное красится тёмно-серым');
+  }
+  proto.userData._panels = set;
+  return set;
+}
+
+// ── Развёртка полотна забора ──
+// UV из GLB БОЛЬШЕ НЕ ИСПОЛЬЗУЮТСЯ напрямую: у моделей товара развёртка полотна сделана
+// наискось, и доски текстуры шли под углом к раме (баг с рендера 2026-08-28: рама и
+// контур полотна ровные, а полосы наклонены). Прежнее решение «развёртку делает GLB»
+// (2026-08-23) на практике не выполняется.
+// Что делаем: ОРИЕНТАЦИЮ досок берём из модели (по тому, вдоль чего растёт u в её
+// развёртке) — так вертикальный и горизонтальный заборы по-прежнему различаются только
+// файлом, — а саму развёртку кладём заново, ровной осевой проекцией (_applyAxisUV,
+// шаг DECK_TILE, тот же, что у настила и ограждения).
+// Наклон развёртки модели печатается один раз на модель: на стенде должно быть видно,
+// насколько кривой была родная UV.
+function _fenceUVVerticalInGeo(geo) {
+  const uv = geo.attributes.uv, pos = geo.attributes.position;
+  if (!uv || !pos || pos.count < 3) return null;
+  // Регрессия u ~ a·x + b·y + c по нормальным уравнениям 3×3 (метод Крамера).
+  let sxx = 0, sxy = 0, syy = 0, sx = 0, sy = 0, n = 0, sux = 0, suy = 0, su = 0;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), u = uv.getX(i);
+    sxx += x * x; sxy += x * y; syy += y * y; sx += x; sy += y; n++;
+    sux += u * x; suy += u * y; su += u;
+  }
+  const det = sxx * (syy * n - sy * sy) - sxy * (sxy * n - sy * sx) + sx * (sxy * sy - syy * sx);
+  if (Math.abs(det) < 1e-12) return null;
+  const a = (sux * (syy * n - sy * sy) - sxy * (suy * n - sy * su) + sx * (suy * sy - syy * su)) / det;
+  const b = (sxx * (suy * n - sy * su) - sux * (sxy * n - sy * sx) + sx * (sxy * su - suy * sx)) / det;
+  if (Math.abs(a) < 1e-9 && Math.abs(b) < 1e-9) return null;
+  return { vertical: Math.abs(b) > Math.abs(a),
+           tiltDeg: Math.atan2(Math.min(Math.abs(a), Math.abs(b)),
+                               Math.max(Math.abs(a), Math.abs(b))) * 180 / Math.PI };
+}
+
+function _applyFencePanelUV(mesh, proto) {
+  if (typeof _applyAxisUV !== 'function') { _applyFenceUV(mesh, false); return; }
+  const g = mesh.geometry;
+  const uvInfo = _fenceUVVerticalInGeo(g);
+  g.computeBoundingBox();
+  const bb = g.boundingBox;
+  // Явно вытянутая вверх деталь (штакетина, ламель) — доски вдоль неё, что бы ни было
+  // в развёртке модели: у бруска её ориентация случайна. Для деталей во всю секцию
+  // (сплошное полотно) ориентацию решает развёртка модели — так вертикальный и
+  // горизонтальный заборы по-прежнему различаются только файлом.
+  const tall = (bb.max.y - bb.min.y) > (bb.max.x - bb.min.x) * 1.5;
+  const vertical = tall ? true : (uvInfo ? uvInfo.vertical : false);
+  _applyAxisUV(mesh, vertical ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 });
+  if (proto && !proto.userData._uvLogged) {
+    proto.userData._uvLogged = true;
+    console.info('[fence] развёртка полотна: доски', vertical ? 'вертикальные' : 'горизонтальные',
+                 '| наклон UV в модели:', uvInfo ? uvInfo.tiltDeg.toFixed(1) + '°' : 'UV нет',
+                 '— кладём свою проекцию, шаг', DECK_TILE.toFixed(2), 'м');
+  }
 }
 
 // Ставит деталь в секцию по оси X: начало секции (x0) переезжает в нуль, ЦЕНТР детали
