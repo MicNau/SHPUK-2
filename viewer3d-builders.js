@@ -315,6 +315,58 @@ function buildPool3d(parent, poly, deckTopY) {
   parent.add(body);
 }
 
+// Пересечение линий, параллельных рёбрам e и m и смещённых по их нормалям на de/dm.
+// Возвращает точку {x,z} или null, если рёбра почти параллельны (митры нет).
+function _nosingLineX(e, de, m, dm) {
+  const p1x = e.a.x + e.nx * de, p1z = e.a.z + e.nz * de;
+  const p2x = m.a.x + m.nx * dm, p2z = m.a.z + m.nz * dm;
+  const den = e.ux * m.uz - e.uz * m.ux;
+  if (Math.abs(den) < 1e-6) return null;
+  const t = ((p2x - p1x) * m.uz - (p2z - p1z) * m.ux) / den;
+  return { x: p1x + e.ux * t, z: p1z + e.uz * t };
+}
+
+// Призма высотой [yBot..yTop] по четырёхугольнику в плане (порядок точек — по
+// контуру). Геометрия неиндексированная: у каждой грани свои нормали, без
+// сглаживания на рёбрах доски.
+function _nosingPrism(quad, yTop, yBot) {
+  const P = (i, y) => [quad[i].x, y, quad[i].z];
+  const tri = [];
+  const push = (a, b, c) => { tri.push(...a, ...b, ...c); };
+  // Верх и низ (четырёхугольник = два треугольника).
+  push(P(0, yTop), P(1, yTop), P(2, yTop));
+  push(P(0, yTop), P(2, yTop), P(3, yTop));
+  push(P(0, yBot), P(2, yBot), P(1, yBot));
+  push(P(0, yBot), P(3, yBot), P(2, yBot));
+  // Боковины.
+  for (let i = 0; i < 4; i++) {
+    const j = (i + 1) % 4;
+    push(P(i, yTop), P(j, yBot), P(j, yTop));
+    push(P(i, yTop), P(i, yBot), P(j, yBot));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(tri, 3));
+  g.computeVertexNormals();
+  g.computeBoundingBox();
+  g.computeBoundingSphere();
+  return g;
+}
+
+// UV полуступени: u — вдоль доски (мировая привязка, чтобы соседние куски совпадали),
+// v — расстояние от НАРУЖНОЙ кромки. При tile = TERRACE_SIDE_TILE на ширину доски
+// (170 мм) приходится ровно одна доска текстуры.
+function _nosingUV(geo, e, tile) {
+  const pos = geo.attributes.position;
+  const uv = new Float32Array(pos.count * 2);
+  const ox = e.a.x + e.nx * NOSING_OUT, oz = e.a.z + e.nz * NOSING_OUT;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    uv[i * 2]     = (x * e.ux + z * e.uz) / tile;
+    uv[i * 2 + 1] = ((x - ox) * e.nx + (z - oz) * e.nz) / tile;
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+}
+
 // ── ПОЛУСТУПЕНЬ ──────────────────────────────────────────────────────────────
 // Доска по всему СВОБОДНОМУ контуру террасы (TODO.md, этап 1 п.7): 170 мм в плане,
 // 25 мм по высоте, верх заподлицо с настилом, наружу вылет 10 мм. Свободный контур —
@@ -425,44 +477,42 @@ function buildTerraceNosing(parent, M, worldRects, deckTopY, holes) {
         const s0 = ((p.ax - e.a.x) * e.ux + (p.az - e.a.z) * e.uz);
         const s1 = ((p.bx - e.a.x) * e.ux + (p.bz - e.a.z) * e.uz);
         if (s1 - s0 < 0.05) continue;
-        // Стыки на углах: доски ВДОЛЬ X доводим до наружной грани соседней доски,
-        // доски вдоль Z — до её внутренней грани. Так угловой квадрат закрыт ровно
-        // один раз, без наложения (иначе на перекрытии дрались бы верхние грани).
-        const join = (mi, ox, oz, neighbourStart) => {
+        // Стыки на углах — «в ус», под 45° (правка 2026-08-30): торец доски идёт по
+        // биссектрисе угла, то есть по линии, соединяющей точку пересечения НАРУЖНЫХ
+        // кромок соседних досок с точкой пересечения ВНУТРЕННИХ. Раньше доски
+        // стыковались внахлёст встык (одна доводилась до наружной грани другой) —
+        // угол выглядел «внакладку», а не запиленным.
+        // Сосед в начале ребра — предыдущее ребро (стык на его КОНЦЕ), в конце —
+        // следующее (стык на его НАЧАЛЕ). Если у соседа доски нет (стена дома),
+        // торец остаётся прямым.
+        const mitre = (mi, atVertex, neighbourStart) => {
+          if (!atVertex) return null;
           const m = seg[mi];
-          // Соседнее ребро идёт вдоль стены дома — доски там нет, стыковать не с чем:
-          // доводим нашу доску прямо до вершины (иначе она обрывалась в 16 см от стены).
-          if (!m || !coveredAt(mi, neighbourStart)) return 0;
-          const fwd = m.nx * ox + m.nz * oz;      // нормаль соседа смотрит по ходу?
-          const outer = fwd > 0 ? NOSING_OUT : -(NOSING_W - NOSING_OUT);
-          const inner = fwd > 0 ? -(NOSING_W - NOSING_OUT) : NOSING_OUT;
-          return e.alongX ? outer : inner;
+          if (!m || !coveredAt(mi, neighbourStart)) return null;
+          const o = _nosingLineX(e, NOSING_OUT, m, NOSING_OUT);
+          const q = _nosingLineX(e, -(NOSING_W - NOSING_OUT), m, -(NOSING_W - NOSING_OUT));
+          return (o && q) ? { out: o, in: q } : null;
         };
-        // Сосед в начале ребра — предыдущее ребро (стык на его КОНЦЕ), в конце — следующее
-        // (стык на его НАЧАЛЕ).
-        const extA = (s0 < 1e-4) ? join((i - 1 + n) % n, -e.ux, -e.uz, false) : 0;
-        const extB = (s1 > e.L - 1e-4) ? join((i + 1) % n, e.ux, e.uz, true) : 0;
-        const t0 = s0 - extA, t1 = s1 + extB;
-        const len = t1 - t0;
-        if (len < 0.05) continue;
+        const mA = mitre((i - 1 + n) % n, s0 < 1e-4, false);
+        const mB = mitre((i + 1) % n, s1 > e.L - 1e-4, true);
+        // Прямой торец: точки на наружной и внутренней кромке при параметре s.
+        const at = (s, d) => ({ x: e.a.x + e.ux * s + e.nx * d,
+                                z: e.a.z + e.uz * s + e.nz * d });
+        const outA = mA ? mA.out : at(s0, NOSING_OUT);
+        const inA  = mA ? mA.in  : at(s0, -(NOSING_W - NOSING_OUT));
+        const outB = mB ? mB.out : at(s1, NOSING_OUT);
+        const inB  = mB ? mB.in  : at(s1, -(NOSING_W - NOSING_OUT));
+        // Слишком короткий кусок (митра съела длину) — пропускаем.
+        if (Math.hypot(outB.x - outA.x, outB.z - outA.z) < 0.02 &&
+            Math.hypot(inB.x - inA.x, inB.z - inA.z) < 0.02) continue;
 
-        const cAlong = (t0 + t1) / 2;
-        // Поперёк: от кромки 10 мм наружу и 160 мм внутрь → центр в 75 мм внутрь.
-        const cx = e.a.x + e.ux * cAlong + e.nx * (NOSING_OUT - NOSING_W / 2);
-        const cz = e.a.z + e.uz * cAlong + e.nz * (NOSING_OUT - NOSING_W / 2);
-        const dimX = e.alongX ? len : NOSING_W;
-        const dimZ = e.alongX ? NOSING_W : len;
-        const m = new THREE.Mesh(new THREE.BoxGeometry(dimX, NOSING_H, dimZ), mat);
-        m.position.set(cx, deckTopY + NOSING_LIFT - NOSING_H / 2, cz);
+        const yTop = deckTopY + NOSING_LIFT;
+        const geo = _nosingPrism([outA, outB, inB, inA], yTop, yTop - NOSING_H);
+        // Текстура ВСЕГДА вдоль доски; поперёк привязана к наружной кромке, и на
+        // 170 мм ложится ровно одна доска ребра зашивки (TERRACE_SIDE_TILE).
+        _nosingUV(geo, e, TERRACE_SIDE_TILE);
+        const m = new THREE.Mesh(geo, mat);
         m.castShadow = m.receiveShadow = true;
-        // Текстура ВСЕГДА вдоль доски. Поперёк привязываемся к наружной кромке и
-        // берём ребро зашивки (TERRACE_SIDE_TILE): на 170 мм ложится ровно одна доска.
-        if (typeof _applyBoxUV === 'function') {
-          const outerX = e.a.x + e.nx * NOSING_OUT, outerZ = e.a.z + e.nz * NOSING_OUT;
-          _applyBoxUV(m, TERRACE_SIDE_TILE,
-            e.alongX ? { x: 0, y: 0, z: -outerZ } : { x: -outerX, y: 0, z: 0 });
-          if (!e.alongX) _rotateBoxTopUV90(m.geometry);
-        }
         parent.add(m);
         threeState.deckMeshes.push(m);
         built++;
@@ -2675,7 +2725,8 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
   }
 
   const fenceGroup = new THREE.Group();
-  const panelH = (typeof S !== 'undefined' && S.fenceH) ? S.fenceH : 1.5;
+  const panelH = (typeof S !== 'undefined' && S.fenceH) ? S.fenceH
+                 : ((typeof FENCE_H !== 'undefined') ? FENCE_H : 1.92);
   // Масштаб модели по высоте — от её РОДНОЙ высоты (после нормализации она известна).
   const sy = proto ? (panelH / _fenceNativeH(proto)) : 1;
   // Материал условного забора: если к нему применён товар — его текстуры/цвет

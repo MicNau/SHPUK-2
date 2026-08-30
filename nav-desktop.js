@@ -312,11 +312,11 @@ function _dResetAllConfigurations() {
     secRects(secId).length = 0;
     setSecActiveIdx(secId, null);
   }
-  S.steps = { ...DEFAULT_STEPS_RECT };
+  S.stepsList = [{ ...DEFAULT_STEPS_RECT }]; S.activeSteps = 0;
   S.beds = [];
   S.activeBed = null;
   S.bedH = 0.20;
-  S.fenceH = 1.5;
+  S.fenceH = FENCE_H;
   S.furniture = [];
   S.activeFurniture = null;
   S.wallZones = {};   // выбор сегментов фасада привязан к контуру дома
@@ -652,18 +652,11 @@ function _dSyncTerraceHeight() {
   if (hint) hint.innerHTML = `<span>${min} см</span><span>${max} см</span>`;
 }
 
-function dSetFenceHeight(m) {
-  S.fenceH = m;
-  _dSyncFenceHeight();
-  if (typeof onParamChange === 'function') onParamChange();
-}
-
-// Подсветить активную кнопку высоты забора из S.fenceH (при открытии редактора/сбросе).
-function _dSyncFenceHeight() {
-  document.querySelectorAll('#fence-h-seg .bed-h-btn').forEach(btn => {
-    btn.classList.toggle('active', parseFloat(btn.dataset.m) === S.fenceH);
-  });
-}
+// Высота забора одна (FENCE_H = 1920 мм, правка 2026-08-30): выбор высоты убран,
+// кнопок больше нет. Функции оставлены пустыми заглушками — их зовут старые
+// обработчики и сброс редактора.
+function dSetFenceHeight() { S.fenceH = FENCE_H; }
+function _dSyncFenceHeight() {}
 
 function _dSyncRanges() {
   // Глобальные слайдеры
@@ -936,7 +929,7 @@ function dDeleteItem(secId) {
   // Чистим данные позиции
   if (S.pts && S.pts[secId]) S.pts[secId] = [];
   if (RECT_SECTIONS[secId]) { secRects(secId).length = 0; setSecActiveIdx(secId, null); }
-  if (secId === 'steps')   { S.steps = { ...DEFAULT_STEPS_RECT }; }
+  if (secId === 'steps')   { S.stepsList = [{ ...DEFAULT_STEPS_RECT }]; S.activeSteps = 0; }
   if (secId === 'beds')    { S.beds = []; S.activeBed = null; }
   if (secId === 'facade')  { S.wallZones = {}; }
   if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
@@ -1196,15 +1189,18 @@ function dFenceGate() {
 }
 
 // ── «Обозначить вход» в ограждении (TODO.md, этап 2 п.4) ──
-// Ставит разрыв на самом длинном свободном участке периметра; дальше пользователь
-// двигает две точки прямо на плане. Повторное нажатие вход убирает.
+// Ставит разрыв на самом длинном свободном участке периметра — ПО ОДНОМУ НА КАЖДУЮ
+// независимую террасу (правка 2026-08-30): у отдельно стоящих террас свои контуры,
+// и одного общего входа им мало. Дальше пользователь двигает точки прямо на плане.
+// Повторное нажатие входы убирает.
 function dRailingEntry() {
-  if (S.railingEntry) {
-    S.railingEntry = null;
+  const has = Array.isArray(S.railingEntries) && S.railingEntries.some(e => e);
+  if (has) {
+    S.railingEntries = [];
   } else {
-    const e = (typeof railingDefaultEntry === 'function') ? railingDefaultEntry() : null;
-    if (!e) { dToast('Сначала разметьте террасу — вход ставится на её периметре'); return; }
-    S.railingEntry = e;
+    const list = (typeof railingDefaultEntries === 'function') ? railingDefaultEntries() : [];
+    if (!list.some(e => e)) { dToast('Сначала разметьте террасу — вход ставится на её периметре'); return; }
+    S.railingEntries = list;
   }
   if (typeof _railingSync === 'function') _railingSync();
   if (typeof drawSnapCanvas === 'function') drawSnapCanvas('railing');
@@ -1224,14 +1220,14 @@ function dResetSection(secId) {
 
   if (S.pts && S.pts[secId]) S.pts[secId] = [];
   if (RECT_SECTIONS[secId]) { secRects(secId).length = 0; setSecActiveIdx(secId, null); }
-  if (secId === 'steps')     S.steps = { ...DEFAULT_STEPS_RECT };
+  if (secId === 'steps')     S.stepsList = [{ ...DEFAULT_STEPS_RECT }]; S.activeSteps = 0;
   if (secId === 'beds')      { S.beds = []; S.activeBed = null; }
   if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
   if (secId === 'facade')    S.wallZones = {};
   if (secId === 'fence')     S.fenceGate = null;
   if (secId === 'beds')      S.bedFilters = { h: [], mount: [] };
   if (secId === 'pool_terrace') S.pool = null;
-  if (secId === 'railing') { S.railingEntry = null; S.railFilters = { cap: [], postW: [] }; S.railPostW = null; }
+  if (secId === 'railing') { S.railingEntries = []; S.railFilters = { cap: [], postW: [] }; S.railPostW = null; }
   if (S.mats && S.mats[secId]) delete S.mats[secId];
   if (S.elementMat && S.elementMat[secId]) delete S.elementMat[secId];
   if (S.estimate && S.estimate[secId]) delete S.estimate[secId];
@@ -1763,6 +1759,42 @@ const _catalogCache = {};       // bitrix_id -> ProductResource[] | null
 const _catalogLoading = {};     // bitrix_id -> bool
 const _catalogFails = {};       // bitrix_id -> сколько раз запрос раздела не удался
 const CATALOG_MAX_TRIES = 2;    // после стольких неудач раздел считаем недоступным
+// Сервер может не отвечать вовсе. Тогда лимита «две попытки на раздел» мало: пользователь
+// ходит по разделам, и каждый начинает свои попытки. Считаем неудачи по ВСЕМУ каталогу и
+// после CATALOG_MAX_FAILS перестаём запрашивать что-либо, один раз показав окно
+// «Каталог временно недоступен…» (правка 2026-08-30).
+const CATALOG_MAX_FAILS = 3;
+let _catalogFailTotal = 0;
+let _catalogDown = false;       // каталог признан недоступным — запросов больше не шлём
+let _catalogDownShown = false;  // окно показано (одного раза достаточно)
+const CATALOG_DOWN_TEXT = 'Каталог временно недоступен, попробуйте позже. '
+                        + 'Приносим наши извинения.';
+
+// Отмечает неудачу запроса каталога и, когда их накопилось слишком много, гасит
+// дальнейшие запросы и показывает окно.
+function _catalogNoteFail(sectionId) {
+  _catalogFails[sectionId] = (_catalogFails[sectionId] || 0) + 1;
+  _catalogFailTotal++;
+  if (_catalogFailTotal >= CATALOG_MAX_FAILS && !_catalogDown) {
+    _catalogDown = true;
+    console.warn('[catalog] сервер не отвечает —', _catalogFailTotal,
+                 'неудачных запроса подряд, запросы остановлены');
+    _dShowCatalogDown();
+  }
+}
+
+// Окно «Каталог временно недоступен» — то же, что подсказки редакторов.
+function _dShowCatalogDown() {
+  if (_catalogDownShown) return;
+  _catalogDownShown = true;
+  const ov = document.getElementById('d-hint-overlay');
+  const body = document.getElementById('d-hint-text');
+  const title = document.getElementById('d-hint-title');
+  if (!ov || !body) { if (typeof dToast === 'function') dToast(CATALOG_DOWN_TEXT); return; }
+  if (title) title.textContent = 'Каталог недоступен';
+  body.textContent = CATALOG_DOWN_TEXT;
+  ov.classList.add('active');
+}
 
 function _getRM() {
   if (!_rm && typeof ResourceManager !== 'undefined') {
@@ -1786,6 +1818,8 @@ function _activeSectionId() {
 async function _ensureCatalogSection(sectionId) {
   if (Array.isArray(_catalogCache[sectionId])) return _catalogCache[sectionId];
   if (_catalogLoading[sectionId]) return undefined;
+  // Сервер не отвечает вовсе — запросы прекращены совсем (см. _catalogNoteFail).
+  if (_catalogDown) return null;
   // Раздел уже отвечал ошибкой (например, 400 на section_id) — больше не долбим сервер.
   if ((_catalogFails[sectionId] || 0) >= CATALOG_MAX_TRIES) return null;
   const rm = _getRM();
@@ -1821,12 +1855,13 @@ async function _ensureCatalogSection(sectionId) {
     console.info('[catalog] раздел', sectionId, tag ? `(тег «${tag}»)` : '(без тега)',
                  '→', products === null ? 'ошибка запроса' : products.length + ' товар(ов)');
     _catalogCache[sectionId] = products;
-    if (products === null) _catalogFails[sectionId] = (_catalogFails[sectionId] || 0) + 1;
-    else                   _catalogFails[sectionId] = 0;
+    if (products === null) _catalogNoteFail(sectionId);
+    // Ответ получен — счётчики сбрасываем: связь есть, прежние сбои были разовыми.
+    else { _catalogFails[sectionId] = 0; _catalogFailTotal = 0; }
   } catch (e) {
     console.warn('[catalog] section load failed', sectionId, e);
     _catalogCache[sectionId] = null;
-    _catalogFails[sectionId] = (_catalogFails[sectionId] || 0) + 1;
+    _catalogNoteFail(sectionId);
   }
   _catalogLoading[sectionId] = false;
   return _catalogCache[sectionId];
@@ -1902,10 +1937,14 @@ function dShowResults() {
     else               _dRenderStubResults();   // раздел реально пуст → заглушки
     return;
   }
-  // Раздел отвечал ошибкой CATALOG_MAX_TRIES раз (например, 400 на section_id) —
-  // показываем заглушки, а не вечную «Загрузку»: иначе dShowResults и
-  // _ensureCatalogSection зацикливались, перезапрашивая недоступный раздел.
-  if ((_catalogFails[secId] || 0) >= CATALOG_MAX_TRIES) { _dRenderStubResults(); return; }
+  // Раздел отвечал ошибкой CATALOG_MAX_TRIES раз (например, 400 на section_id), либо
+  // каталог целиком признан недоступным — показываем заглушки, а не вечную «Загрузку»:
+  // иначе dShowResults и _ensureCatalogSection зацикливались, перезапрашивая сервер.
+  if (_catalogDown || (_catalogFails[secId] || 0) >= CATALOG_MAX_TRIES) {
+    _dRenderStubResults();
+    if (_catalogDown) _dShowCatalogDown();
+    return;
+  }
   // undefined (не грузили) или null (прошлая попытка не удалась) → грузим.
   _dRenderCatalogLoading();
   if (!_catalogLoading[secId]) {
@@ -2233,7 +2272,12 @@ function _pathCenterLines() {
 // Метрика элемента: {kind:'deck'|'linear'|'piece', value, text}.
 function _elementMetric(el) {
   if (RECT_SECTIONS[el]) { const a = _rectsAreaM2(secRects(el)); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
-  if (el === 'steps')   { const G = _GRIDm(); const a = (S.steps.w * G) * (S.steps.h * G); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
+  if (el === 'steps')   {
+    const G = _GRIDm();
+    const list = (typeof stepsAll === 'function') ? stepsAll() : (S.steps ? [S.steps] : []);
+    const a = list.reduce((sum, st) => sum + (st.w * G) * (st.h * G), 0);
+    return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null;
+  }
   if (el === 'paths')   { const a = _pathsAreaM2(); return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null; }
   if (el === 'fence')   { const len = _polyLenM(S.pts.fence); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
   if (el === 'railing') { const len = _polyLenM(S.pts.railing); return len > 0 ? { kind: 'linear', value: len, text: len.toFixed(1) + ' м' } : null; }
@@ -2436,8 +2480,8 @@ function _vertexOnTerrace(pt, tol) {
 }
 
 // Ступени — прямоугольник на плане; высота подъёма = высота настила террасы.
-function _stepsProjectObject(name) {
-  const s = S.steps;
+function _stepsProjectObject(name, stair) {
+  const s = stair || S.steps;
   if (!s || !(s.w > 0) || !(s.h > 0)) return null;
   const tol = 0.15 / _GRIDm();          // 15 см в долях поля, как у примыкания к дому
   const corners = [
@@ -2525,8 +2569,14 @@ function _projectObjects() {
     if (req.payload) objs.push({ type: CalculationType.TERRACE, name: lbl(secId), ...req.payload });
   }
   if (S.sections.includes('steps')) {
-    const o = _stepsProjectObject(lbl('steps'));
-    if (o) objs.push(o);
+    // Лестниц может быть несколько — каждая идёт в расчёт отдельным объектом
+    // (правка 2026-08-30). Номер в имени появляется, только когда их больше одной.
+    const stairs = (typeof stepsAll === 'function') ? stepsAll() : (S.steps ? [S.steps] : []);
+    stairs.forEach((st, i) => {
+      const nm = stairs.length > 1 ? `${lbl('steps')} №${i + 1}` : lbl('steps');
+      const o = _stepsProjectObject(nm, st);
+      if (o) objs.push(o);
+    });
   }
   if (S.sections.includes('paths')) {
     for (const o of _pathProjectObjects(lbl('paths'))) objs.push(o);
