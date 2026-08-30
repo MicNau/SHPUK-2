@@ -316,7 +316,7 @@ function _dResetAllConfigurations() {
   S.beds = [];
   S.activeBed = null;
   S.bedH = 0.20;
-  S.fenceH = 1.5;
+  S.fenceH = FENCE_H;
   S.furniture = [];
   S.activeFurniture = null;
   S.wallZones = {};   // выбор сегментов фасада привязан к контуру дома
@@ -652,18 +652,11 @@ function _dSyncTerraceHeight() {
   if (hint) hint.innerHTML = `<span>${min} см</span><span>${max} см</span>`;
 }
 
-function dSetFenceHeight(m) {
-  S.fenceH = m;
-  _dSyncFenceHeight();
-  if (typeof onParamChange === 'function') onParamChange();
-}
-
-// Подсветить активную кнопку высоты забора из S.fenceH (при открытии редактора/сбросе).
-function _dSyncFenceHeight() {
-  document.querySelectorAll('#fence-h-seg .bed-h-btn').forEach(btn => {
-    btn.classList.toggle('active', parseFloat(btn.dataset.m) === S.fenceH);
-  });
-}
+// Высота забора одна (FENCE_H = 1920 мм, правка 2026-08-30): выбор высоты убран,
+// кнопок больше нет. Функции оставлены пустыми заглушками — их зовут старые
+// обработчики и сброс редактора.
+function dSetFenceHeight() { S.fenceH = FENCE_H; }
+function _dSyncFenceHeight() {}
 
 function _dSyncRanges() {
   // Глобальные слайдеры
@@ -1763,6 +1756,42 @@ const _catalogCache = {};       // bitrix_id -> ProductResource[] | null
 const _catalogLoading = {};     // bitrix_id -> bool
 const _catalogFails = {};       // bitrix_id -> сколько раз запрос раздела не удался
 const CATALOG_MAX_TRIES = 2;    // после стольких неудач раздел считаем недоступным
+// Сервер может не отвечать вовсе. Тогда лимита «две попытки на раздел» мало: пользователь
+// ходит по разделам, и каждый начинает свои попытки. Считаем неудачи по ВСЕМУ каталогу и
+// после CATALOG_MAX_FAILS перестаём запрашивать что-либо, один раз показав окно
+// «Каталог временно недоступен…» (правка 2026-08-30).
+const CATALOG_MAX_FAILS = 3;
+let _catalogFailTotal = 0;
+let _catalogDown = false;       // каталог признан недоступным — запросов больше не шлём
+let _catalogDownShown = false;  // окно показано (одного раза достаточно)
+const CATALOG_DOWN_TEXT = 'Каталог временно недоступен, попробуйте позже. '
+                        + 'Приносим наши извинения.';
+
+// Отмечает неудачу запроса каталога и, когда их накопилось слишком много, гасит
+// дальнейшие запросы и показывает окно.
+function _catalogNoteFail(sectionId) {
+  _catalogFails[sectionId] = (_catalogFails[sectionId] || 0) + 1;
+  _catalogFailTotal++;
+  if (_catalogFailTotal >= CATALOG_MAX_FAILS && !_catalogDown) {
+    _catalogDown = true;
+    console.warn('[catalog] сервер не отвечает —', _catalogFailTotal,
+                 'неудачных запроса подряд, запросы остановлены');
+    _dShowCatalogDown();
+  }
+}
+
+// Окно «Каталог временно недоступен» — то же, что подсказки редакторов.
+function _dShowCatalogDown() {
+  if (_catalogDownShown) return;
+  _catalogDownShown = true;
+  const ov = document.getElementById('d-hint-overlay');
+  const body = document.getElementById('d-hint-text');
+  const title = document.getElementById('d-hint-title');
+  if (!ov || !body) { if (typeof dToast === 'function') dToast(CATALOG_DOWN_TEXT); return; }
+  if (title) title.textContent = 'Каталог недоступен';
+  body.textContent = CATALOG_DOWN_TEXT;
+  ov.classList.add('active');
+}
 
 function _getRM() {
   if (!_rm && typeof ResourceManager !== 'undefined') {
@@ -1786,6 +1815,8 @@ function _activeSectionId() {
 async function _ensureCatalogSection(sectionId) {
   if (Array.isArray(_catalogCache[sectionId])) return _catalogCache[sectionId];
   if (_catalogLoading[sectionId]) return undefined;
+  // Сервер не отвечает вовсе — запросы прекращены совсем (см. _catalogNoteFail).
+  if (_catalogDown) return null;
   // Раздел уже отвечал ошибкой (например, 400 на section_id) — больше не долбим сервер.
   if ((_catalogFails[sectionId] || 0) >= CATALOG_MAX_TRIES) return null;
   const rm = _getRM();
@@ -1821,12 +1852,13 @@ async function _ensureCatalogSection(sectionId) {
     console.info('[catalog] раздел', sectionId, tag ? `(тег «${tag}»)` : '(без тега)',
                  '→', products === null ? 'ошибка запроса' : products.length + ' товар(ов)');
     _catalogCache[sectionId] = products;
-    if (products === null) _catalogFails[sectionId] = (_catalogFails[sectionId] || 0) + 1;
-    else                   _catalogFails[sectionId] = 0;
+    if (products === null) _catalogNoteFail(sectionId);
+    // Ответ получен — счётчики сбрасываем: связь есть, прежние сбои были разовыми.
+    else { _catalogFails[sectionId] = 0; _catalogFailTotal = 0; }
   } catch (e) {
     console.warn('[catalog] section load failed', sectionId, e);
     _catalogCache[sectionId] = null;
-    _catalogFails[sectionId] = (_catalogFails[sectionId] || 0) + 1;
+    _catalogNoteFail(sectionId);
   }
   _catalogLoading[sectionId] = false;
   return _catalogCache[sectionId];
@@ -1902,10 +1934,14 @@ function dShowResults() {
     else               _dRenderStubResults();   // раздел реально пуст → заглушки
     return;
   }
-  // Раздел отвечал ошибкой CATALOG_MAX_TRIES раз (например, 400 на section_id) —
-  // показываем заглушки, а не вечную «Загрузку»: иначе dShowResults и
-  // _ensureCatalogSection зацикливались, перезапрашивая недоступный раздел.
-  if ((_catalogFails[secId] || 0) >= CATALOG_MAX_TRIES) { _dRenderStubResults(); return; }
+  // Раздел отвечал ошибкой CATALOG_MAX_TRIES раз (например, 400 на section_id), либо
+  // каталог целиком признан недоступным — показываем заглушки, а не вечную «Загрузку»:
+  // иначе dShowResults и _ensureCatalogSection зацикливались, перезапрашивая сервер.
+  if (_catalogDown || (_catalogFails[secId] || 0) >= CATALOG_MAX_TRIES) {
+    _dRenderStubResults();
+    if (_catalogDown) _dShowCatalogDown();
+    return;
+  }
   // undefined (не грузили) или null (прошлая попытка не удалась) → грузим.
   _dRenderCatalogLoading();
   if (!_catalogLoading[secId]) {

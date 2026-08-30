@@ -2675,7 +2675,8 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
   }
 
   const fenceGroup = new THREE.Group();
-  const panelH = (typeof S !== 'undefined' && S.fenceH) ? S.fenceH : 1.5;
+  const panelH = (typeof S !== 'undefined' && S.fenceH) ? S.fenceH
+                 : ((typeof FENCE_H !== 'undefined') ? FENCE_H : 1.92);
   // Масштаб модели по высоте — от её РОДНОЙ высоты (после нормализации она известна).
   const sy = proto ? (panelH / _fenceNativeH(proto)) : 1;
   // Материал условного забора: если к нему применён товар — его текстуры/цвет

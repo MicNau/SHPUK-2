@@ -738,12 +738,20 @@ function _schematicDeckMat() {
   return new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.05 });
 }
 
-// Материал элемента: свой выбранный товар, иначе условный серый вид.
-// Наследование материала террасы ограждением (была такая правка) ОТМЕНЕНО:
-// до выбора СВОЕГО товара ограждение серое (TODO п.3) — иначе перила выглядели
-// уже отделанными, хотя товар для них не выбирали.
+// Элементы, которые до выбора СВОЕГО товара берут материал ТЕРРАСЫ (правка
+// 2026-08-30): ступени — часть той же конструкции, и по умолчанию они должны быть
+// из той же доски. Ограждение сюда НЕ входит: там наследование отменено намеренно
+// (TODO п.3) — перила выглядели бы отделанными без выбора товара.
+const INHERIT_TERRACE_MAT = new Set(['steps']);
+
+// Материал элемента: свой выбранный товар, иначе материал террасы (для элементов
+// из INHERIT_TERRACE_MAT), иначе условный серый вид.
 function _resolveDeckMat(baseDeck, el) {
   const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat[el] : null;
+  if (!em && INHERIT_TERRACE_MAT.has(el)) {
+    const t = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat.terrace : null;
+    if (t) return _resolveDeckMat(baseDeck, 'terrace');
+  }
   if (!em) return SCHEMATIC_UNTIL_PRODUCT.has(el) ? _schematicDeckMat() : baseDeck;
   const m = baseDeck.clone();
   if (em.textures && _applyDeckProductTextures({ deck: m }, em.textures)) return m;
