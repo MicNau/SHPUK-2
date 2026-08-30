@@ -631,11 +631,16 @@ const _padColor = () => ((typeof HouseBuilder !== 'undefined' && HouseBuilder.PA
 // Отметка верха плиты — тоже из HouseBuilder: подкладка притоплена (см. PAD_TOP_Y).
 const _padTopY = () => ((typeof HouseBuilder !== 'undefined' && HouseBuilder.PAD_TOP_Y !== undefined)
                           ? HouseBuilder.PAD_TOP_Y : 0.005);
+// offset — число (запас по обеим осям) или {x, z} (запас по каждой оси отдельно:
+// подкладке лестницы запас нужен только вдоль спуска, вбок она вылезала за край веранды).
 function buildConstructionPad(parent, minX, maxX, minZ, maxZ, offset) {
   const padThick = 0.05;
-  const off = (offset === undefined) ? PAD_OFFSET : offset;
-  const W = (maxX - minX) + 2 * off;
-  const D = (maxZ - minZ) + 2 * off;
+  const offX = (offset === undefined) ? PAD_OFFSET
+             : (typeof offset === 'number' ? offset : (offset.x || 0));
+  const offZ = (offset === undefined) ? PAD_OFFSET
+             : (typeof offset === 'number' ? offset : (offset.z || 0));
+  const W = (maxX - minX) + 2 * offX;
+  const D = (maxZ - minZ) + 2 * offZ;
   if (W < 0.3 || D < 0.3) return;
   const mat = new THREE.MeshStandardMaterial({ color: _padColor(), roughness: 0.95, metalness: 0.0 });
   mat.name = 'mat_construction_pad';
@@ -1503,6 +1508,13 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   // Перила лестницы (toggle steps-railing) — из того же GLB-модуля, что и ограждение
   // террасы (post / rails / balu_floor). Поручень+нижнее перило идут под РЕЙК (наклон по
   // разнице уровней верх→низ), балясины — вертикальные, нативного сечения, по проступям.
+  // Габарит СТУПЕНЕЙ — снимаем ДО постройки перил: подкладка должна лежать под самой
+  // лестницей, а не под её перилами. Перила стоят шире ступеней (столбы-ньюэлы плюс
+  // вылет крышки), и подкладка по общему bbox выпирала за край веранды (правка
+  // 2026-08-30).
+  stairGroup.updateMatrixWorld(true);
+  const _sbSteps = new THREE.Box3().setFromObject(stairGroup);
+
   const hasRailing = tgOn('steps-railing');
   if (hasRailing) {
     // Перила лестницы берут тот же модуль, что и ограждение террасы (один товар).
@@ -1541,12 +1553,10 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       // и та же высота низа поручня — перила лестницы стыкуются с террасными.
       const ky = RC.ky || 1;
       const railTopH = RC.baluTopH || (RC.nativeBaluH || 1.055) * ky;
-      // uvDir — ось «досок»: столбы-ньюэлы, крышки и балясины вертикальны, перила
-      // идут по скату. Проекция та же, что у ограждения террасы (_applyAxisUV).
-      const placeGeo = (geo, m4, matOv, uvDir) => {
+      // UV не трогаем — приходят из GLB (то же решение, что у ограждения террасы).
+      const placeGeo = (geo, m4, matOv) => {
         const g = geo.clone(); g.applyMatrix4(m4);
         const mm = mesh(g, matOv || stairRailMat);
-        if (uvDir && typeof _applyAxisUV === 'function') _applyAxisUV(mm, uvDir);
         stairGroup.add(mm); threeState.railingMeshes.push(mm);
       };
       // Крышка столба-ньюэла — по тому же правилу, что у ограждения террасы.
@@ -1596,7 +1606,7 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         const mRail = new THREE.Matrix4().makeBasis(xAxis, up, zAxis);
         mRail.setPosition(A.x, A.y, A.z);
         mRail.multiply(new THREE.Matrix4().makeScale(L, ky, 1));       // длина ската × высота модуля
-        placeGeo(RC.rails, mRail, null, xAxis);                        // доски — по скату
+        placeGeo(RC.rails, mRail);
 
         // ── Нижний столб-ньюэл (post), вертикальный, стоит НА ЗЕМЛЕ (B продлён до Y=0) ──
         // Сечение — как у столбов ограждения террасы: это один товар, поэтому
@@ -1605,8 +1615,8 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         const mPost = new THREE.Matrix4().makeBasis(headX, up, crossH);
         mPost.setPosition(B.x, B.y, B.z);
         mPost.multiply(new THREE.Matrix4().makeScale(postK, ky, postK));
-        placeGeo(RC.post, mPost, null, up);
-        if (RC.cap) placeGeo(RC.cap, mPost, stairCapMat, up);
+        placeGeo(RC.post, mPost);
+        if (RC.cap) placeGeo(RC.cap, mPost, stairCapMat);
 
         // ── Балясины по видимым проступям (i=0..n-2): вертикальные, нативное сечение,
         //    высота по уровню (от проступи до поручня) — учитывает разницу уровней ──
@@ -1622,7 +1632,7 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
           const mBal = new THREE.Matrix4().makeBasis(headX, up, crossH);
           mBal.setPosition(bx, surfY, bz);
           mBal.multiply(new THREE.Matrix4().makeScale(1, baluH / 1.055, 1)); // тянем ТОЛЬКО по высоте
-          placeGeo(RC.baluFloor, mBal, null, up);
+          placeGeo(RC.baluFloor, mBal);
         }
       }
     }
@@ -1633,10 +1643,13 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   // Подкладка (отмостка) под ступенями — по РЕАЛЬНОМУ footprint лестницы (bbox stairGroup),
   // а не по drawn-rect S.steps: его глубину buildSteps3d игнорирует (пересчитывает на
   // n × stepDepth), из-за чего pad по drawn-rect торчал за лестницу.
-  stairGroup.updateMatrixWorld(true);
-  const _sb = new THREE.Box3().setFromObject(stairGroup);
+  const _sb = _sbSteps;
   if (isFinite(_sb.min.x) && _sb.max.x > _sb.min.x) {
-    buildConstructionPad(parent, _sb.min.x, _sb.max.x, _sb.min.z, _sb.max.z);
+    // Запас подкладки только ВДОЛЬ СПУСКА: вбок она упиралась бы в край веранды и
+    // выпирала из-под неё (правка 2026-08-30). Ось спуска — поперёк опорного ребра.
+    const padOff = (bestSide.axisAlong === 'X') ? { x: 0, z: PAD_OFFSET }
+                                                : { x: PAD_OFFSET, z: 0 };
+    buildConstructionPad(parent, _sb.min.x, _sb.max.x, _sb.min.z, _sb.max.z, padOff);
   }
 }
 
