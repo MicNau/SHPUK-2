@@ -48,7 +48,8 @@
      разную ширину, а «на глаз» пришлось бы закладывать запас. Здесь — фолбэк,
      если скрипт почему-то не отработал. */
   --sidebar-w: 364px;
-  --panel-w: 364px;
+  --panel-w: 364px;          /* правая панель той же ширины, что левая */
+  --panel-title-fz: 28px;    /* кегль заголовка раздела: подбирается под ширину */
 }
 /* Шрифт интерфейса — Segoe UI (как в макетах Figma). Roboto оставлен запасным
    вариантом для систем без Segoe UI. Подписи на canvas используют UI_FONT
@@ -593,9 +594,13 @@ button, input, select, textarea { font-family: inherit; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 20px 12px; border-bottom: 1px solid #e8e8e8; flex-shrink: 0;
 }
-/* Название раздела — в одну строку (TODO п.5); ширину панели под самое длинное
-   считает _dSyncSidebarWidth (--panel-w). */
-.d-panel-title { font-size: 36px; font-weight: 400; color: var(--accent); white-space: nowrap; }
+/* Название раздела — в одну строку (TODO п.5). Панель шириной с левую (--panel-w =
+   --sidebar-w), поэтому кегль подбирается под самое длинное название: его считает
+   _dSyncSidebarWidth (--panel-title-fz), один на все разделы. */
+.d-panel-title {
+  font-size: var(--panel-title-fz, 36px); font-weight: 400; color: var(--accent);
+  white-space: nowrap;
+}
 .d-panel-close {
   width: 32px; height: 32px; background: none; border: none;
   border-radius: 50%; font-size: 18px; cursor: pointer;

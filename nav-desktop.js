@@ -96,8 +96,15 @@ function _dSyncSidebarWidth() {
   probe.remove();
   const w = Math.ceil(Math.max(titleW + 2 * SIDEBAR_PAD, labelW + 28 + 4 + 2 + editW + 16));
   document.documentElement.style.setProperty('--sidebar-w', w + 'px');
-  document.documentElement.style.setProperty('--panel-w',
-    Math.ceil(Math.max(364, panelTitleW + 40 + 32 + 8)) + 'px');
+  // Правая панель — ТОЙ ЖЕ ширины, что левая (требование продукта 2026-08-31).
+  // Раньше она считалась по своему заголовку и была шире левой на ~95 px.
+  document.documentElement.style.setProperty('--panel-w', w + 'px');
+  // Заголовок раздела в неё уже не влезает 36-м кеглем, а переносить его нельзя
+  // (TODO п.5). Подбираем ОДИН кегль на все разделы — такой, при котором самое
+  // длинное название встаёт в строку: паддинги хедера 20+20, кнопка закрытия 32,
+  // зазор 8. Считается по реальным метрикам, как и остальные ширины здесь.
+  const fz = Math.max(18, Math.min(36, Math.floor(36 * (w - 100) / panelTitleW)));
+  document.documentElement.style.setProperty('--panel-title-fz', fz + 'px');
 }
 
 // Сразу рендерим сетку при загрузке (step 1 активен по умолчанию)
