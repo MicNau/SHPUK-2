@@ -184,7 +184,7 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 ```
 styles-desktop.css?v=38   state.js?v=68              canvas.js?v=57
 shared/house-builder.js?v=85                          ResourceManager.js?v=9
-viewer3d-core.js?v=150    viewer3d-builders.js?v=49   viewer3d-railing.js?v=16
+viewer3d-core.js?v=150    viewer3d-builders.js?v=50   viewer3d-railing.js?v=16
 viewer3d-entourage.js?v=14                            nav-desktop.js?v=112
 backend_API/Calculator.js?v=2
 ```

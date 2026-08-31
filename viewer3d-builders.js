@@ -2472,6 +2472,37 @@ function _fenceProtoLimits(proto) {
   return lim;
 }
 
+// Разовый дамп разбора модели: что она содержит и кем мы считаем каждую деталь.
+// Нужен для разбора жалоб «забор развалился» на конкретном товаре: модели лежат на
+// бэкенде, локально их не открыть, а по этому выводу видно и структуру файла, и то,
+// как её прочитал разбор (столб / боковина / полотно / каркас).
+function _fenceDumpProto(proto) {
+  if (proto.userData._dumped) return;
+  proto.userData._dumped = true;
+  const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
+  const panelSet = _fenceProtoPanels(proto);
+  const lim = _fenceProtoLimits(proto);
+  const rows = [];
+  proto.updateMatrixWorld(true);
+  proto.traverse(o => {
+    if (!o.isMesh) return;
+    const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
+    const bb = new THREE.Box3().setFromObject(o);
+    const role = _fencePostSpan(o, nw, nh) ? 'столб'
+               : panelSet.has(o) ? 'полотно'
+               : (!FENCE_POST_RE.test(nm) && FENCE_SIDE_RE.test(nm)) ? 'боковина'
+               : 'каркас';
+    rows.push(`  ${(o.name || '(без имени)').padEnd(22)} ${role.padEnd(8)}`
+            + ` X[${bb.min.x.toFixed(3)}…${bb.max.x.toFixed(3)}]`
+            + ` Y[${bb.min.y.toFixed(3)}…${bb.max.y.toFixed(3)}]`
+            + ` Z[${bb.min.z.toFixed(3)}…${bb.max.z.toFixed(3)}]`);
+  });
+  console.info('[fence] РАЗБОР МОДЕЛИ (габарит '
+             + nw.toFixed(3) + ' × ' + nh.toFixed(3) + ' м, боковины '
+             + (lim ? `[${lim.x0.toFixed(3)}…${lim.x1.toFixed(3)}]` : 'нет') + '):\n'
+             + rows.join('\n'));
+}
+
 // Обрезает геометрию по X диапазоном [x0, x1]: треугольники целиком снаружи
 // выбрасываются из индекса, у пересекающих границу вершины прижимаются к плоскости
 // реза. Именно РЕЗ, а не сжатие (_fenceClampX): длинную ленту досок или плетёнки
@@ -2873,7 +2904,8 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
       ensureFenceModel(url).then(() => { if (threeState) buildScene3d(); });
     } else {
       proto = _fenceCache[url];          // null → модель не загрузилась, строим условный
-      if (proto) console.info('[fence] секции из модели товара:', url);
+      if (proto) { console.info('[fence] секции из модели товара:', url);
+                   _fenceDumpProto(proto); }
     }
   }
 
