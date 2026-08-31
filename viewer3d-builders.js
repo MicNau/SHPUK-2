@@ -2356,9 +2356,18 @@ function _fenceBoxPost(group, x, z, angle, panelH, frameMat) {
 // — горизонтальные прогоны, поперечины, полотно — столбом не считаются.
 const FENCE_POST_RE = /post|stolb|столб|стойк|pillar|opora|опор/i;
 
+// Боковины секции по соглашению моделей забора: `fence_left` и `fence_right` —
+// вертикальные рамки по краям секции. ИМИ ограничивается полотно (доски, плетёнка),
+// см. _fenceProtoLimits и _fenceClipX. Столбами они не считаются: раньше узкая
+// высокая рамка проходила по признакам столба, `fence_right` попадал в «конечный
+// столб» секции и выбрасывался из каждого клона — правая боковина пропадала
+// (правка 2026-08-31).
+const FENCE_SIDE_RE = /(^|[_.\-\s|])(left|right)([_.\-\s0-9|]|$)/i;
+
 function _fencePostSpan(o, nativeW, nativeH) {
   const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
   if (FENCE_PANEL_RE.test(nm)) return null;
+  if (!FENCE_POST_RE.test(nm) && FENCE_SIDE_RE.test(nm)) return null;   // боковина рамы
   const bb = new THREE.Box3().setFromObject(o);
   if (!isFinite(bb.min.x) || !isFinite(bb.max.x)) return null;
   const w = bb.max.x - bb.min.x, h = bb.max.y - bb.min.y, d = bb.max.z - bb.min.z;
@@ -2379,7 +2388,7 @@ function _fenceProtoPosts(proto) {
   const tol = _fencePostTol(nw);
   proto.updateMatrixWorld(true);
   const info = { any: false, atStart: false, atEnd: false, startCx: 0, endCx: 0, pitch: 0,
-                 postHalf: 0 };
+                 postHalf: 0, twoPosts: false };
   const posts = [], other = [];
   const centers = [], halves = [];
   proto.traverse(o => {
@@ -2390,8 +2399,6 @@ function _fenceProtoPosts(proto) {
     centers.push((p.minX + p.maxX) / 2);
     halves.push((p.maxX - p.minX) / 2);
     info.any = true;
-    if (p.minX <= tol) info.atStart = true;
-    if (p.maxX >= nw - tol) info.atEnd = true;
   });
   // Полутолщина столба — по ней полотно дотягивается до граней столбов (см. _fenceModelSection).
   if (halves.length) info.postHalf = Math.min(...halves);
@@ -2402,20 +2409,105 @@ function _fenceProtoPosts(proto) {
   if (centers.length) {
     info.startCx = Math.min(...centers);
     info.endCx = Math.max(...centers);
-    if (info.endCx - info.startCx > 0.2) info.pitch = info.endCx - info.startCx;
+    if (info.endCx - info.startCx > 0.2) { info.pitch = info.endCx - info.startCx; info.twoPosts = true; }
+    // Столб в модели ОДИН (в начале секции): шаг берём из соглашения — 2 м между
+    // осями столбов, файл так и рассчитан. Раньше шаг падал на габарит модели
+    // (`nativeW`), а он у секции с длинным полотном (доски нарисованы «с запасом»)
+    // ничего общего с шагом столбов не имеет.
+    else info.pitch = FENCE_SECTION_W;
+    // Секция ставится ПО ОСИ стартового столба (shift = startCx), поэтому столб в
+    // начале секции есть всегда, когда столб вообще распознан; столб в конце — только
+    // когда их в модели два. Раньше эти признаки считались от габарита модели
+    // (`minX <= tol`, `maxX >= nativeW - tol`) и у модели с длинным полотном оба
+    // выходили false: замыкающий столб пролёта подменялся простым box-столбом.
+    info.atStart = true;
+    info.atEnd = info.twoPosts;
   }
   // На стенде должно быть видно, как разобрана конкретная модель: если столб слит
   // с прогонами в один меш, он сюда не попадёт и на свободном конце встанет
   // простой box-столб (это фолбэк, а не баг разбора).
   console.info('[fence] столбы в модели:', posts.length ? posts.join(', ') : 'не распознаны',
                '| начало секции:', info.atStart, '| конец секции:', info.atEnd,
-               '| шаг столбов:', info.pitch ? info.pitch.toFixed(2) + ' м' : 'по габариту модели',
+               '| шаг столбов:', info.pitch
+                 ? info.pitch.toFixed(2) + ' м' + (info.twoPosts ? '' : ' (по соглашению)')
+                 : 'по габариту модели',
                '| прочие меши:', other.join(', '));
   proto.userData._posts = info;
   return info;
 }
 
-function _fencePostTol(nativeW) { return Math.max(0.15, nativeW * 0.08); }
+// Допуск «столб в начале/конце секции». Считается от ширины модели, но сверху
+// ограничен: у модели с длинной лентой полотна габарит — несколько секций, и допуск
+// без потолка вырастал до метров.
+function _fencePostTol(nativeW) { return Math.min(0.40, Math.max(0.15, nativeW * 0.08)); }
+
+// Границы полотна в секции: боковины `fence_left` / `fence_right` из модели.
+// Полотно (доски, плетёнка) в файле часто нарисовано «с запасом» — длинной лентой
+// на несколько секций; ограничителями служат боковины, по ним лента и режется
+// (_fenceClipX). Без этого лента проходила НАСКВОЗЬ через соседние модули забора
+// (баг с рендера 2026-08-31). Модель без боковин работает по-прежнему: полотно
+// дотягивается до граней столбов (_fenceSpanBetweenPosts).
+function _fenceProtoLimits(proto) {
+  if (proto.userData._limits !== undefined) return proto.userData._limits;
+  proto.updateMatrixWorld(true);
+  let x0 = Infinity, x1 = -Infinity;
+  const names = [];
+  proto.traverse(o => {
+    if (!o.isMesh) return;
+    const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
+    // Боковина — это КАРКАС: деталь, прямо названная полотном или столбом, границей
+    // секции быть не может (иначе полотно ограничило бы само себя).
+    if (FENCE_PANEL_RE.test(nm) || FENCE_POST_RE.test(nm) || !FENCE_SIDE_RE.test(nm)) return;
+    const bb = new THREE.Box3().setFromObject(o);
+    if (!isFinite(bb.min.x) || !isFinite(bb.max.x)) return;
+    x0 = Math.min(x0, bb.min.x); x1 = Math.max(x1, bb.max.x);
+    names.push(o.name || '(без имени)');
+  });
+  const lim = (x1 - x0 > 0.2) ? { x0, x1 } : null;
+  if (lim) {
+    console.info('[fence] боковины секции:', names.join(', '),
+                 `→ полотно режется по X [${lim.x0.toFixed(2)}…${lim.x1.toFixed(2)}]`);
+  }
+  proto.userData._limits = lim;
+  return lim;
+}
+
+// Обрезает геометрию по X диапазоном [x0, x1]: треугольники целиком снаружи
+// выбрасываются из индекса, у пересекающих границу вершины прижимаются к плоскости
+// реза. Именно РЕЗ, а не сжатие (_fenceClampX): длинную ленту досок или плетёнки
+// сжимать нельзя — рисунок стал бы в разы плотнее, чем в модели.
+// Режем ИНДЕКСОМ, а не пересборкой атрибутов: буферы вершин остаются общими с клоном
+// (у плетёнки это 30 тыс. вершин на секцию — разворачивать их в неиндексные значит
+// вчетверо раздуть память на каждую секцию пролёта). Правится геометрия на месте,
+// вызывающий передаёт сюда СВОЙ клон.
+function _fenceClipX(geo, x0, x1) {
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  if (!bb) return geo;
+  if (bb.min.x >= x0 - 1e-4 && bb.max.x <= x1 + 1e-4) return geo;     // и так внутри
+  const pos = geo.attributes.position;
+  if (!pos) return geo;
+  const idx = geo.index;
+  const triCount = Math.floor((idx ? idx.count : pos.count) / 3);
+  const vAt = i => (idx ? idx.getX(i) : i);
+  const keep = [];
+  for (let t = 0; t < triCount; t++) {
+    const a = vAt(t * 3), b = vAt(t * 3 + 1), c = vAt(t * 3 + 2);
+    const xa = pos.getX(a), xb = pos.getX(b), xc = pos.getX(c);
+    const mn = Math.min(xa, xb, xc), mx = Math.max(xa, xb, xc);
+    if (mx > x0 + 1e-4 && mn < x1 - 1e-4) keep.push(a, b, c);
+  }
+  if (!keep.length) return geo;                     // от полотна ничего не осталось — не режем
+  if (keep.length < triCount * 3) {
+    const Arr = (pos.count > 65535) ? Uint32Array : Uint16Array;
+    geo.setIndex(new THREE.BufferAttribute(new Arr(keep), 1));
+  }
+  for (let i = 0; i < pos.count; i++) pos.setX(i, Math.min(x1, Math.max(x0, pos.getX(i))));
+  pos.needsUpdate = true;
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+  return geo;
+}
 
 // Замыкающий столб для забора ИЗ МОДЕЛИ товара: клонируем секцию и оставляем в ней
 // ТОЛЬКО столб начала секции — всё остальное (полотно, горизонтальные прогоны,
@@ -2435,7 +2527,7 @@ function _fenceModelPost(proto, group, x, z, angle, sy, frameMat) {
   inst.traverse(o => {
     if (!o.isMesh) return;
     const p = _fencePostSpan(o, nw, nh);
-    if (p && p.minX <= tol) {
+    if (p && Math.abs((p.minX + p.maxX) / 2 - info.startCx) < tol) {
       o.material = frameMat;             // в threeState.fenceMeshes не идёт: примерка
       o.castShadow = o.receiveShadow = true;  // образца красит только полотно
       kept++;
@@ -2523,22 +2615,30 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
   const inst = new THREE.Group();
   proto.updateMatrixWorld(true);
   const panelSet = _fenceProtoPanels(proto);
+  const limits = _fenceProtoLimits(proto);
   // Сначала собираем детали секции, потом строим: в режиме калитки нужно ЗНАТЬ все
   // вертикальные элементы полотна, чтобы оставить из них один.
   const parts = [];
   proto.traverse(o => {
     if (!o.isMesh || !o.geometry) return;
     const p = _fencePostSpan(o, nw, nh);
-    if (p && info.pitch) {
+    if (p && info.twoPosts) {
       const cx = (p.minX + p.maxX) / 2;
       // Конечный столб выбрасываем: его место занимает стартовый столб следующей
-      // секции (на свободном конце — замыкающий, см. _fenceModelPost).
+      // секции (на свободном конце — замыкающий, см. _fenceModelPost). Только когда
+      // столбов в модели ДВА: у модели с одним столбом начало и конец совпадают, и
+      // проверка выбросила бы единственный столб секции.
       if (Math.abs(cx - info.endCx) < tol) return;
     }
     const bb = new THREE.Box3().setFromObject(o);
-    const len = bb.max.x - bb.min.x, hgt = bb.max.y - bb.min.y;
-    parts.push({ o, isPost: !!p, isPanel: panelSet.has(o),
-                 cx: (bb.min.x + bb.max.x) / 2, len, hgt });
+    const isPanel = panelSet.has(o);
+    // Полотно меряем ПО РЕЗУ (боковины секции): длина ленты в файле — не длина
+    // секции, и по ней деталь ошибочно считалась бы «во всю секцию» или наоборот.
+    const minX = (isPanel && limits) ? Math.max(bb.min.x, limits.x0) : bb.min.x;
+    const maxX = (isPanel && limits) ? Math.min(bb.max.x, limits.x1) : bb.max.x;
+    if (isPanel && limits && maxX - minX < 0.005) return;   // полотно целиком вне секции
+    const len = maxX - minX, hgt = bb.max.y - bb.min.y;
+    parts.push({ o, isPost: !!p, isPanel, cx: (minX + maxX) / 2, len, hgt });
   });
   if (isGate) {
     // Вертикальный элемент полотна: узкий по длине секции и заметно выше, чем шире.
@@ -2555,8 +2655,13 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
   let panels = 0;
   for (const s of parts) {
     if (s.drop) continue;
-    const g = s.o.geometry.clone();
+    let g = s.o.geometry.clone();
     g.applyMatrix4(s.o.matrixWorld);
+    // ПОЛОТНО режем боковинами секции (`fence_left` / `fence_right`): в модели оно
+    // нарисовано лентой на несколько секций и без реза проходило насквозь через
+    // соседние модули забора (баг с рендера 2026-08-31). Рез — до подгонки длины:
+    // дальше деталь уже имеет длину секции и тянется вместе с ней.
+    if (s.isPanel && limits) g = _fenceClipX(g, limits.x0, limits.x1);
     // Позиция детали внутри секции — пропорционально (k), собственная длина — только
     // у деталей во всю секцию (полотно, прогоны): им она меняется РОВНО на разницу
     // длины секции, тогда зазоры до столбов остаются как в модели. Столбы и мелочь
@@ -2565,7 +2670,9 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
     // ПОЛОТНО дотягиваем до граней столбов: в модели между полотном и столбом часто
     // оставлен зазор, и на пролёте он читается как щель (правка 2026-08-30). Растягиваем
     // только сплошное полотно во всю секцию — штакетины и ламели трогать нельзя.
-    if (s.isPanel && !s.isPost && s.len > pitch * 0.5 && info.postHalf > 0) {
+    // Если в модели есть боковины, границы полотна заданы ИМИ — дотягивать его до
+    // столбов нельзя, иначе рез по боковинам тут же и разъехался бы.
+    if (s.isPanel && !s.isPost && !limits && s.len > pitch * 0.5 && info.postHalf > 0) {
       _fenceSpanBetweenPosts(g, info.postHalf, spanW - info.postHalf);
     }
     // Деталь не должна вылезать за границы секции. В модели полотно и прогоны часто
@@ -2654,6 +2761,7 @@ function _fenceProtoPanels(proto) {
     if (!o.isMesh) return;
     const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
     if (FENCE_PANEL_RE.test(nm)) { byName.add(o); return; }
+    if (FENCE_SIDE_RE.test(nm)) return;                 // боковина рамы — каркас, не полотно
     if (_fencePostSpan(o, nw, nh)) return;              // столб — точно не полотно
     const bb = new THREE.Box3().setFromObject(o);
     cand.push({ o, area: (bb.max.x - bb.min.x) * (bb.max.y - bb.min.y) });
