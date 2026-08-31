@@ -182,10 +182,10 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-styles-desktop.css?v=38   state.js?v=66              canvas.js?v=57
-shared/house-builder.js?v=85                          ResourceManager.js?v=8
+styles-desktop.css?v=38   state.js?v=67              canvas.js?v=57
+shared/house-builder.js?v=85                          ResourceManager.js?v=9
 viewer3d-core.js?v=150    viewer3d-builders.js?v=48   viewer3d-railing.js?v=16
-viewer3d-entourage.js?v=14                            nav-desktop.js?v=111
+viewer3d-entourage.js?v=14                            nav-desktop.js?v=112
 backend_API/Calculator.js?v=2
 ```
 
@@ -877,6 +877,32 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Сделано в итерации v=183 (бэкенд выложил обновлённый backend_API):
+
+- **`backend_API` синхронизирован** (ревизия 2026-08-31). В корневой `ResourceManager.js`
+  перенесены `PropertyPath` (согласованные пути характеристик) и `PriceCategory`
+  (`budget` / `balance` / `premium`); пресеты разделов переведены на актуальные теги
+  (`dpk`, `mpk`, `steps`). Строка `await import('three')` и создание менеджера на верхнем
+  уровне из файла бэкендера НЕ переносились: у нас THREE подключается глобально, а
+  top-level await в обычном скрипте недопустим.
+- **Грядки уходят в расчёт**: `CalculationType.GARDEN_BEDS` (`calculate_garden_beds/`)
+  появился в `Calculator.js`, поэтому `_bedsProjectObject` теперь не пропускается.
+  Замер: три грядки на плане → `{type: 'garden_beds', items: {<id конфигурации>: 3}}`.
+  Размер грядки — это конфигурация товара, поэтому в `items` идёт id выбранной
+  конфигурации (тот же, что применён к элементу).
+- **`vertexType` только на КОНЦАХ линии и только у оградки.** По контракту метка на
+  внутренней точке — ошибка 400 («примыкание к дому отмечается только на концах линии»),
+  а у забора поле пока ничего не меняет. Замер: 2 метки на концах, 0 внутри, у забора
+  метки не отправляются.
+- **Ценовая категория** сопоставляется со значениями `PriceCategory`; синонимы (русские
+  подписи) оставлены запасным вариантом. Категория приходит в `properties` выдачи,
+  поэтому второго запроса не нужно.
+- **Замечание по тегам**: `section_id` с этой ревизии выборку не сужает — отбор идёт по
+  тегу, и тег обязателен каждому разделу (`SECTION_TAGS`). Снятые теги
+  `terrasnaya_doska` и `dpk_steps` у нас не используются.
+- Cache-bust: `state.js?v=67`, `ResourceManager.js?v=9`, `backend_API/Calculator.js?v=3`,
+  `nav-desktop.js?v=112`.
 
 Сделано в итерации v=182 (обновление контракта бэкенда 2026-08-31):
 

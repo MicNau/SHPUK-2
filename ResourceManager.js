@@ -38,6 +38,30 @@ const PropertyOp = Object.freeze({
     IN: 'in',
 });
 
+// Пути характеристик товара — согласованный словарь (backend_API/ResourceManager.js,
+// ревизия 2026-08-31). Наши константы PROP_* в state.js держать в синхроне с ним.
+const PropertyPath = Object.freeze({
+    HEIGHT: 'dimensions.height',
+    WIDTH: 'dimensions.width',
+    LENGTH: 'dimensions.length',
+
+    FENCING_POST_CAP_TYPE: 'components.post_cap.type',
+    FENCING_POST_WIDTH: 'components.post.dimensions.width',
+
+    GARDEN_BED_CORNER_BRACKET_TYPE: 'components.corner_bracket.type',
+
+    PRICE_CATEGORY: 'price_category',
+});
+
+// Ценовая категория товара: значение характеристики по пути
+// PropertyPath.PRICE_CATEGORY. Значения латиницей, потому что это ключ, а не
+// подпись: показывать его пользователю должен интерфейс, своими словами.
+const PriceCategory = Object.freeze({
+    BUDGET: 'budget',    // бюджет
+    BALANCE: 'balance',  // баланс
+    PREMIUM: 'premium',  // премиум
+});
+
 const PROPERTY_PATH = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)*$/;
 
 const isScalar = (value) => ['string', 'number', 'boolean'].includes(typeof value);
@@ -60,19 +84,19 @@ class Filter {
 // см. backend_API/ResourceManager.js, откуда они перенесены сюда 2026-08-18.
 const Presets = {
     terrasnaya_doska_dpk: () => [
-        new Filter(FilterType.TAGS, ['terrasnaya_doska']),
+        new Filter(FilterType.TAGS, ['dpk']),
         new Filter(FilterType.SECTION_CODE, 'terrasnaya-doska-iz-dpk')
     ],
     terrasnaya_doska_mpk: () => [
-        new Filter(FilterType.TAGS, ['terrasnaya_doska']),
+        new Filter(FilterType.TAGS, ['mpk']),
         new Filter(FilterType.SECTION_CODE, 'terrasnaya-doska-iz-mpk')
     ],
     universalnaya_doska_dpk: () => [
-        new Filter(FilterType.TAGS, ['terrasnaya_doska']),
+        new Filter(FilterType.TAGS, ['dpk']),
         new Filter(FilterType.SECTION_CODE, 'doska-dpk-universalnaya')
     ],
     steps_dpk: () => [
-        new Filter(FilterType.TAGS, ['dpk_steps']),
+        new Filter(FilterType.TAGS, ['steps']),
         new Filter(FilterType.SECTION_CODE, 'stupeni-iz-dpk')
     ],
     walls_dpk: () => [

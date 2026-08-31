@@ -1929,9 +1929,11 @@ const PRICE_TIER_MATCH = {
 // сервер отдаёт русские или иные названия; незнакомое значение оставляет
 // товар на прежнем правиле по цене.
 const PROP_PRICE_CATEGORY = 'price_category';
+// Значения — PriceCategory из backend_API/ResourceManager.js (budget/balance/premium);
+// синонимы оставлены на случай русских подписей в админке.
 const PRICE_CATEGORY_ALIASES = {
   budget:   ['budget', 'эконом', 'бюджет'],
-  balanced: ['balanced', 'standard', 'middle', 'баланс', 'стандарт', 'средний'],
+  balanced: ['balance', 'balanced', 'standard', 'middle', 'баланс', 'стандарт', 'средний'],
   premium:  ['premium', 'lux', 'премиум', 'люкс'],
 };
 function _priceCategoryOf(p) {
@@ -2538,9 +2540,11 @@ function _vertexAtHouse(pt, tol) {
 }
 
 // Ломаные элемента: разрывы (break) делят разметку на отдельные линии.
-// У вершин, стоящих на стене дома, проставляется vertexType: 'house' — остальные
-// точки уходят без поля (оно необязательное, обратная совместимость сохраняется).
-function _linesToMm(name) {
+// Концам линии, стоящим на стене дома, проставляется vertexType: 'house' — там
+// оградка крепится к дому и столб не нужен (calculation_api.md, «Примыкание к дому»).
+// Метить можно ТОЛЬКО первую и последнюю точку: метка на внутренней точке — ошибка 400.
+// У забора поле пока ничего не меняет, поэтому шлём его только для оградки.
+function _linesToMm(name, markHouse) {
   const pts = S.pts[name] || [];
   const segs = (typeof splitAtBreaks === 'function')
     ? splitAtBreaks(pts)
@@ -2548,7 +2552,10 @@ function _linesToMm(name) {
   const tol = 0.15 / _GRIDm();          // 15 см в долях поля, как у примыкания ступеней
   return segs.filter(s => s.length >= 2).map(seg => {
     const mm = _ptsToMm(seg);
-    seg.forEach((p, i) => { if (_vertexAtHouse(p, tol)) mm[i].vertexType = 'house'; });
+    if (!markHouse) return mm;
+    for (const i of [0, seg.length - 1]) {
+      if (_vertexAtHouse(seg[i], tol)) mm[i].vertexType = 'house';
+    }
     return mm;
   });
 }
@@ -2624,15 +2631,15 @@ function _furnitureProjectObject(name) {
     : null;
 }
 
-// Грядки — состав изделий, как у мебели (контракт бэкенда от 2026-08-31: «мапа
-// id: количество»). Тип объекта у грядок свой; пока в CalculationType нашей копии
-// Calculator.js его нет, объект не отправляется — см. _projectObjects.
+// Грядки — состав изделий, как у мебели: `items` с идентификаторами конфигураций
+// и количеством (calculation_api.md, «Грядки»). Размер грядки — это вариант товара,
+// поэтому в расчёт уходит id ВЫБРАННОЙ конфигурации, то есть тот же id, что применён
+// к элементу.
 function _bedsProjectObject(name) {
   const id = _elementProductId('beds');
   const n = (S.beds || []).length;
   if (!id || !n) return null;
-  const type = (typeof CalculationType !== 'undefined')
-    ? (CalculationType.BEDS || CalculationType.GARDEN_BEDS) : null;
+  const type = (typeof CalculationType !== 'undefined') ? CalculationType.GARDEN_BEDS : null;
   if (!type) return null;
   return { type, name, items: { [id]: n } };
 }
@@ -2706,7 +2713,7 @@ function _projectObjects() {
   }
   for (const el of ['railing', 'fence']) {
     if (!S.sections.includes(el)) continue;
-    const lines = _linesToMm(el);
+    const lines = _linesToMm(el, el === 'railing');
     if (!lines.length) continue;
     const o = { type: el === 'fence' ? CalculationType.FENCE : CalculationType.RAILING,
                 name: lbl(el), lines, sectionProductId: _elementProductId(el) };
