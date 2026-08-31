@@ -2377,6 +2377,12 @@ function _fencePostSpan(o, nativeW, nativeH) {
   // поперёк линии. Без этой проверки штакетина с непонятным именем шла в столбы: шаг
   // секций считался по ламелям, секции разъезжались, а полотно красилось как каркас.
   if (!FENCE_POST_RE.test(nm) && d < w * 0.5) return null;
+  // Столб СТОИТ НА ЗЕМЛЕ. В моделях 003/005 декоративные вертикальные накладки
+  // полотна приезжают из GLTF отдельными мешами со сгенерированными именами
+  // (`Cube002`, `Cube005`), и по сечению они неотличимы от столба: шаг секции
+  // считался по ним (1.32 м вместо 2 м), и забор рассыпался — рендер 2026-08-31.
+  // Полотно и его накладки в этих моделях начинаются с 0.135 м над землёй.
+  if (!FENCE_POST_RE.test(nm) && bb.min.y > nativeH * 0.05) return null;
   return { minX: bb.min.x, maxX: bb.max.x };
 }
 
@@ -2450,8 +2456,7 @@ function _fencePostTol(nativeW) { return Math.min(0.40, Math.max(0.15, nativeW *
 function _fenceProtoLimits(proto) {
   if (proto.userData._limits !== undefined) return proto.userData._limits;
   proto.updateMatrixWorld(true);
-  let x0 = Infinity, x1 = -Infinity;
-  const names = [];
+  const sides = [];
   proto.traverse(o => {
     if (!o.isMesh) return;
     const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
@@ -2460,16 +2465,57 @@ function _fenceProtoLimits(proto) {
     if (FENCE_PANEL_RE.test(nm) || FENCE_POST_RE.test(nm) || !FENCE_SIDE_RE.test(nm)) return;
     const bb = new THREE.Box3().setFromObject(o);
     if (!isFinite(bb.min.x) || !isFinite(bb.max.x)) return;
-    x0 = Math.min(x0, bb.min.x); x1 = Math.max(x1, bb.max.x);
-    names.push(o.name || '(без имени)');
+    sides.push({ name: o.name || '(без имени)', min: bb.min.x, max: bb.max.x });
   });
-  const lim = (x1 - x0 > 0.2) ? { x0, x1 } : null;
-  if (lim) {
-    console.info('[fence] боковины секции:', names.join(', '),
-                 `→ полотно режется по X [${lim.x0.toFixed(2)}…${lim.x1.toFixed(2)}]`);
+  let lim = null;
+  if (sides.length) {
+    const x0 = Math.min(...sides.map(s => s.min)), x1 = Math.max(...sides.map(s => s.max));
+    if (x1 - x0 > 0.2) {
+      // Центры и полутолщины КРАЙНИХ боковин: по ним границы полотна пересчитываются
+      // в координаты секции (боковины — короткие детали, они не тянутся, а только
+      // раздвигаются вместе с секцией, см. _fenceFitX).
+      const l = sides.reduce((a, s) => (s.min < a.min ? s : a), sides[0]);
+      const r = sides.reduce((a, s) => (s.max > a.max ? s : a), sides[0]);
+      lim = { x0, x1,
+              lc: (l.min + l.max) / 2, lh: (l.max - l.min) / 2,
+              rc: (r.min + r.max) / 2, rh: (r.max - r.min) / 2 };
+      console.info('[fence] боковины секции:', sides.map(s => s.name).join(', '),
+                   `→ полотно по X [${x0.toFixed(2)}…${x1.toFixed(2)}]`);
+    }
   }
   proto.userData._limits = lim;
   return lim;
+}
+
+// Разовый дамп разбора модели: что она содержит и кем мы считаем каждую деталь.
+// Нужен для разбора жалоб «забор развалился» на конкретном товаре: модели лежат на
+// бэкенде, локально их не открыть, а по этому выводу видно и структуру файла, и то,
+// как её прочитал разбор (столб / боковина / полотно / каркас).
+function _fenceDumpProto(proto) {
+  if (proto.userData._dumped) return;
+  proto.userData._dumped = true;
+  const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
+  const panelSet = _fenceProtoPanels(proto);
+  const lim = _fenceProtoLimits(proto);
+  const rows = [];
+  proto.updateMatrixWorld(true);
+  proto.traverse(o => {
+    if (!o.isMesh) return;
+    const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
+    const bb = new THREE.Box3().setFromObject(o);
+    const role = _fencePostSpan(o, nw, nh) ? 'столб'
+               : panelSet.has(o) ? 'полотно'
+               : (!FENCE_POST_RE.test(nm) && FENCE_SIDE_RE.test(nm)) ? 'боковина'
+               : 'каркас';
+    rows.push(`  ${(o.name || '(без имени)').padEnd(22)} ${role.padEnd(8)}`
+            + ` X[${bb.min.x.toFixed(3)}…${bb.max.x.toFixed(3)}]`
+            + ` Y[${bb.min.y.toFixed(3)}…${bb.max.y.toFixed(3)}]`
+            + ` Z[${bb.min.z.toFixed(3)}…${bb.max.z.toFixed(3)}]`);
+  });
+  console.info('[fence] РАЗБОР МОДЕЛИ (габарит '
+             + nw.toFixed(3) + ' × ' + nh.toFixed(3) + ' м, боковины '
+             + (lim ? `[${lim.x0.toFixed(3)}…${lim.x1.toFixed(3)}]` : 'нет') + '):\n'
+             + rows.join('\n'));
 }
 
 // Обрезает геометрию по X диапазоном [x0, x1]: треугольники целиком снаружи
@@ -2670,10 +2716,17 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
     // ПОЛОТНО дотягиваем до граней столбов: в модели между полотном и столбом часто
     // оставлен зазор, и на пролёте он читается как щель (правка 2026-08-30). Растягиваем
     // только сплошное полотно во всю секцию — штакетины и ламели трогать нельзя.
-    // Если в модели есть боковины, границы полотна заданы ИМИ — дотягивать его до
-    // столбов нельзя, иначе рез по боковинам тут же и разъехался бы.
-    if (s.isPanel && !s.isPost && !limits && s.len > pitch * 0.5 && info.postHalf > 0) {
-      _fenceSpanBetweenPosts(g, info.postHalf, spanW - info.postHalf);
+    // Если в модели есть боковины, полотно подгоняется ПО НИМ: в файле оно нарисовано
+    // короче секции и несимметрично (в 003/005 слева заходит за столб, справа не
+    // достаёт 9 см), и на растянутой секции справа открывалась щель. Границы боковин
+    // пересчитываются в координаты секции так же, как двигаются сами боковины.
+    if (s.isPanel && !s.isPost && s.len > pitch * 0.5) {
+      if (limits) {
+        _fenceSpanBetweenPosts(g, (limits.lc - shift) * k - limits.lh,
+                                  (limits.rc - shift) * k + limits.rh);
+      } else if (info.postHalf > 0) {
+        _fenceSpanBetweenPosts(g, info.postHalf, spanW - info.postHalf);
+      }
     }
     // Деталь не должна вылезать за границы секции. В модели полотно и прогоны часто
     // ШИРЕ шага столбов (нарисованы с нахлёстом на столбы): внутри пролёта нахлёст
@@ -2873,7 +2926,8 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
       ensureFenceModel(url).then(() => { if (threeState) buildScene3d(); });
     } else {
       proto = _fenceCache[url];          // null → модель не загрузилась, строим условный
-      if (proto) console.info('[fence] секции из модели товара:', url);
+      if (proto) { console.info('[fence] секции из модели товара:', url);
+                   _fenceDumpProto(proto); }
     }
   }
 
