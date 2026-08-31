@@ -1,5 +1,6 @@
-
-const FilterType =  Object.freeze({
+const THREE = await import('https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js');
+ 
+ const FilterType =  Object.freeze({
     SECTION_ID: 'SECTION_ID',
     SECTION_NAME: "SECTION_NAME",
     SECTION_CODE: "SECTION_CODE",
@@ -37,6 +38,28 @@ const PropertyOp = Object.freeze({
     IN: 'in',
 });
 
+const PropertyPath = Object.freeze({
+    HEIGHT: 'dimensions.height',
+    WIDTH: 'dimensions.width',
+    LENGTH: 'dimensions.length',
+
+    FENCING_POST_CAP_TYPE: 'components.post_cap.type',
+    FENCING_POST_WIDTH: 'components.post.dimensions.width',
+
+    GARDEN_BED_CORNER_BRACKET_TYPE: 'components.corner_bracket.type',
+
+    PRICE_CATEGORY: 'price_category',
+});
+
+// Ценовая категория товара: значение характеристики по пути
+// PropertyPath.PRICE_CATEGORY. Значения латиницей, потому что это ключ, а не
+// подпись: показывать его пользователю должен интерфейс, своими словами.
+const PriceCategory = Object.freeze({
+    BUDGET: 'budget',    // бюджет
+    BALANCE: 'balance',  // баланс
+    PREMIUM: 'premium',  // премиум
+});
+
 const PROPERTY_PATH = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)*$/;
 
 const isScalar = (value) => ['string', 'number', 'boolean'].includes(typeof value);
@@ -57,19 +80,19 @@ class Filter {
 
 const Presets = {
     terrasnaya_doska_dpk: () => [
-        new Filter(FilterType.TAGS, ['terrasnaya_doska']),
+        new Filter(FilterType.TAGS, ['dpk']),
         new Filter(FilterType.SECTION_CODE, 'terrasnaya-doska-iz-dpk')
     ],
     terrasnaya_doska_mpk: () => [
-        new Filter(FilterType.TAGS, ['terrasnaya_doska']),
+        new Filter(FilterType.TAGS, ['mpk']),
         new Filter(FilterType.SECTION_CODE, 'terrasnaya-doska-iz-mpk')
     ],
     universalnaya_doska_dpk: () => [
-        new Filter(FilterType.TAGS, ['terrasnaya_doska']),
+        new Filter(FilterType.TAGS, ['dpk']),
         new Filter(FilterType.SECTION_CODE, 'doska-dpk-universalnaya')
     ],
     steps_dpk: () => [
-        new Filter(FilterType.TAGS, ['dpk_steps']),
+        new Filter(FilterType.TAGS, ['steps']),
         new Filter(FilterType.SECTION_CODE, 'stupeni-iz-dpk')
     ],
     walls_dpk: () => [
@@ -103,7 +126,9 @@ class ProductResource {
         this.prices = data.prices || [];
 
         this.properties = data.properties || {};
-        this.variants = data.variants || {};
+        this.color = data.color || "";
+        this.glbFileUrl = data.glb_file_url || null;
+        this.productVariants = data.variants_id || [];
         this.baseId = data.base_id ?? data.id;
         this.configId = data.config_id ?? null;
 
@@ -134,7 +159,9 @@ class ProductResource {
         this.detailPicture = productData.detail_picture || this.detailPicture;
         this.prices = productData.prices || this.prices;
         this.properties = productData.properties || this.properties;
-        this.variants = productData.variants || this.variants;
+        this.color = productData.color || this.color;
+        this.glbFileUrl = productData.glb_file_url || this.glbFileUrl;
+        this.productVariants = productData.variants_id || this.productVariants;
         this.baseId = productData.base_id ?? this.baseId;
         this.configId = productData.config_id ?? this.configId;
         
@@ -212,14 +239,14 @@ class ResourceManager {
             return section ? { section_id: section.bitrix_id } : {};
         },
         [FilterType.PRODUCT_IDS]: (value) => ({'ids': value.join(',')}),
-        [FilterType.BASE_IDS]: (value) => ({}),
+        [FilterType.BASE_IDS]: (value) => ({'base_ids': value.join(',')}),
         [FilterType.PRICE_MAX]: (value) => ({'price_max': value}),
         [FilterType.PRICE_MIN]: (value) => ({'price_min': value}),
         [FilterType.TAGS]: (value) => {
             console.log(value)
             return {'tags': value.join(',') }
         },
-        [FilterType.PROPERTIES]: (value) => ({}),
+        [FilterType.PROPERTIES]: (value) => ({'properties': JSON.stringify(value)}),
         [FilterType.SORT]: (value) => ({'sort': value}),
         [FilterType.SORT_ORDER]: (value) => ({'sort_order': value}),
         [FilterType.LIMIT]: (value) => ({'limit': value}),
@@ -491,3 +518,6 @@ class ResourceManager {
         return this.#flatCache?.find(s => s.code === code) || null;
     }
 }
+let manager = new ResourceManager()
+//let products = await manager.getResources(new Filter(FilterType.PRICE_MAX, 500), new Filter(FilterType.SECTION_NAME, "Террасная доска из ДПК"))
+//let pr = products.products[4]
