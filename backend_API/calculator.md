@@ -35,6 +35,7 @@ const calculator = new Calculator('https://sollersdev.ru/api/v1/');
 | Оградка | `RAILING` | `{lines, sectionProductId}` |
 | Дорожка | `PATH` | `{vertices, deckingBoardProductId}` |
 | Мебель | `FURNITURE` | `{items}` |
+| Грядки | `GARDEN_BEDS` | `{items}` |
 | Проект | `PROJECT` | `{objects, mergeMaterials}` |
 
 Идентификатор товара можно не передавать или прислать `null` — тогда расчёт
@@ -80,7 +81,8 @@ const materialsCost = await calculator.getTotalCost(
 
 Основные материалы заданы в `MAIN_MATERIALS`: у террасы доска и полуступень, у
 ступеней ступень, подступенок и фасадная доска, у забора секции и штакетник, у
-оградки секции, у дорожки доска. У мебели основными считаются все позиции.
+оградки секции, у дорожки доска. У мебели и грядок основными считаются все
+позиции.
 У проекта опция применяется к каждому объекту по его типу; в объединённой
 смете роли теряются при сложении по товарам, и она отдаётся целиком.
 
@@ -225,12 +227,27 @@ const fence = await calculator.getCalculation(CalculationType.FENCE, {
 
 ### Мебель по выбранным изделиям
 
+Ключ — составной идентификатор конфигурации из выдачи каталога, значение —
+количество.
+
 ```js
-const cart = {198835: 2, 197293: 1};
+const cart = {1988350000: 2, 1972930001: 1};
 
 const furniture = await calculator.getCalculation(
     CalculationType.FURNITURE,
     {items: cart},
+);
+```
+
+### Грядки
+
+Считаются так же, изделиями каталога: размер грядки — это вариант товара, и
+цену своего размера он приносит сам.
+
+```js
+const beds = await calculator.getCalculation(
+    CalculationType.GARDEN_BEDS,
+    {items: {1993400002: 3}},
 );
 ```
 

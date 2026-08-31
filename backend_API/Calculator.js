@@ -47,6 +47,7 @@ const CalculationType = {
     RAILING: 'railing',
     PATH: 'path',
     FURNITURE: 'furniture',
+    GARDEN_BEDS: 'garden_beds',
     PROJECT: 'project',
 };
 
@@ -57,12 +58,13 @@ const CALCULATION_PATHS = {
     railing: 'calculate_railing/',
     path: 'calculate_path/',
     furniture: 'calculate_furniture/',
+    garden_beds: 'calculate_garden_beds/',
     project: 'calculate_project/',
 };
 
-// Основные материалы объекта: по ним работает onlyMainMaterials. У мебели
-// ролей нет вовсе, у проекта с объединёнными материалами они теряются при
-// сложении по товарам, поэтому в обоих случаях смета отдаётся целиком.
+// Основные материалы объекта: по ним работает onlyMainMaterials. У мебели и
+// грядок ролей нет вовсе, у проекта с объединёнными материалами они теряются
+// при сложении по товарам, поэтому смета отдаётся целиком.
 const MAIN_MATERIALS = {
     terrace: ['deckingBoard', 'halfStep'],
     steps: ['step', 'riser', 'facadeBoard'],
@@ -70,6 +72,7 @@ const MAIN_MATERIALS = {
     railing: ['section'],
     path: ['deckingBoard'],
     furniture: null,
+    garden_beds: null,
     project: null,
 };
 
@@ -107,6 +110,7 @@ class Calculator {
      *   railing   - {lines, sectionProductId};
      *   path      - {vertices, deckingBoardProductId};
      *   furniture - {items};
+     *   garden_beds - {items};
      *   project   - {objects, mergeMaterials}.
      *
      * @param {string} type - значение CalculationType.
