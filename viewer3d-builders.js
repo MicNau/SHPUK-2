@@ -2378,19 +2378,23 @@ function _fenceProtoPosts(proto) {
   const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
   const tol = _fencePostTol(nw);
   proto.updateMatrixWorld(true);
-  const info = { any: false, atStart: false, atEnd: false, startCx: 0, endCx: 0, pitch: 0 };
+  const info = { any: false, atStart: false, atEnd: false, startCx: 0, endCx: 0, pitch: 0,
+                 postHalf: 0 };
   const posts = [], other = [];
-  const centers = [];
+  const centers = [], halves = [];
   proto.traverse(o => {
     if (!o.isMesh) return;
     const p = _fencePostSpan(o, nw, nh);
     if (!p) { other.push(o.name || '(без имени)'); return; }
     posts.push(`${o.name || '(без имени)'} [${p.minX.toFixed(2)}…${p.maxX.toFixed(2)}]`);
     centers.push((p.minX + p.maxX) / 2);
+    halves.push((p.maxX - p.minX) / 2);
     info.any = true;
     if (p.minX <= tol) info.atStart = true;
     if (p.maxX >= nw - tol) info.atEnd = true;
   });
+  // Полутолщина столба — по ней полотно дотягивается до граней столбов (см. _fenceModelSection).
+  if (halves.length) info.postHalf = Math.min(...halves);
   // Шаг секции — расстояние между ЦЕНТРАМИ крайних столбов, а не габарит модели.
   // Габарит включает по полстолба с каждого края: если ставить секции по нему,
   // столбы соседних секций встают ВПЛОТНУЮ ДРУГ К ДРУГУ (двойной столб на каждом
@@ -2558,6 +2562,12 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
     // длины секции, тогда зазоры до столбов остаются как в модели. Столбы и мелочь
     // вроде штакетин сохраняют родной размер и просто раздвигаются.
     _fenceFitX(g, shift, k, s.isPost ? 0 : dx, pitch);
+    // ПОЛОТНО дотягиваем до граней столбов: в модели между полотном и столбом часто
+    // оставлен зазор, и на пролёте он читается как щель (правка 2026-08-30). Растягиваем
+    // только сплошное полотно во всю секцию — штакетины и ламели трогать нельзя.
+    if (s.isPanel && !s.isPost && s.len > pitch * 0.5 && info.postHalf > 0) {
+      _fenceSpanBetweenPosts(g, info.postHalf, spanW - info.postHalf);
+    }
     // Деталь не должна вылезать за границы секции. В модели полотно и прогоны часто
     // ШИРЕ шага столбов (нарисованы с нахлёстом на столбы): внутри пролёта нахлёст
     // соседних секций не виден, а на конце забора и на углу полотно торчало наружу
@@ -2579,7 +2589,7 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
     mesh.castShadow = mesh.receiveShadow = true;
     inst.add(mesh);
     if (!s.isPanel) continue;            // не полотно — товаром не красится и в примерку не идёт
-    _applyFencePanelUV(mesh, proto);
+    _applyFencePanelUV(mesh, proto, pitch);
     threeState.fenceMeshes.push(mesh);
     panels++;
   }
@@ -2588,6 +2598,24 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
   inst.scale.set(1, sy, 1);            // по длине уже подогнано, тянем только высоту
   group.add(inst);
   return panels;
+}
+
+// Растягивает геометрию по X ровно на диапазон [x0, x1] — им полотно дотягивается от
+// грани одного столба до грани другого, чтобы у столбов не оставалось щелей. Работает в
+// обе стороны (и растянет, и подожмёт); вырожденную геометрию не трогает.
+function _fenceSpanBetweenPosts(geo, x0, x1) {
+  if (!(x1 > x0 + 0.02)) return;
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  if (!bb) return;
+  const a = bb.min.x, len = bb.max.x - a;
+  if (len < 0.02) return;
+  const k = (x1 - x0) / len;
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) pos.setX(i, x0 + (pos.getX(i) - a) * k);
+  pos.needsUpdate = true;
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
 }
 
 // Вписывает геометрию в диапазон [x0, x1] по X, сжимая её при выходе за границы.
@@ -2673,17 +2701,21 @@ function _fenceUVVerticalInGeo(geo) {
                                Math.max(Math.abs(a), Math.abs(b))) * 180 / Math.PI };
 }
 
-function _applyFencePanelUV(mesh, proto) {
+function _applyFencePanelUV(mesh, proto, pitch) {
   if (typeof _applyAxisUV !== 'function') { _applyFenceUV(mesh, false); return; }
   const g = mesh.geometry;
   const uvInfo = _fenceUVVerticalInGeo(g);
   g.computeBoundingBox();
   const bb = g.boundingBox;
-  // Явно вытянутая вверх деталь (штакетина, ламель) — доски вдоль неё, что бы ни было
+  const len = bb.max.x - bb.min.x;
+  // Узкая и вытянутая вверх деталь (штакетина, ламель) — доски вдоль неё, что бы ни было
   // в развёртке модели: у бруска её ориентация случайна. Для деталей во всю секцию
   // (сплошное полотно) ориентацию решает развёртка модели — так вертикальный и
-  // горизонтальный заборы по-прежнему различаются только файлом.
-  const tall = (bb.max.y - bb.min.y) > (bb.max.x - bb.min.x) * 1.5;
+  // горизонтальный заборы по-прежнему различаются только файлом. Условие «узкая»
+  // обязательно: без него узкая створка калитки получала вертикальные доски, хотя
+  // соседние секции того же забора — горизонтальные.
+  const narrow = !(pitch > 0) || len < pitch * 0.5;
+  const tall = narrow && (bb.max.y - bb.min.y) > len * 1.5;
   const vertical = tall ? true : (uvInfo ? uvInfo.vertical : false);
   _applyAxisUV(mesh, vertical ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 });
   if (proto && !proto.userData._uvLogged) {
