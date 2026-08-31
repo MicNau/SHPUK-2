@@ -631,11 +631,16 @@ const _padColor = () => ((typeof HouseBuilder !== 'undefined' && HouseBuilder.PA
 // Отметка верха плиты — тоже из HouseBuilder: подкладка притоплена (см. PAD_TOP_Y).
 const _padTopY = () => ((typeof HouseBuilder !== 'undefined' && HouseBuilder.PAD_TOP_Y !== undefined)
                           ? HouseBuilder.PAD_TOP_Y : 0.005);
+// offset — число (запас по обеим осям) или {x, z} (запас по каждой оси отдельно:
+// подкладке лестницы запас нужен только вдоль спуска, вбок она вылезала за край веранды).
 function buildConstructionPad(parent, minX, maxX, minZ, maxZ, offset) {
   const padThick = 0.05;
-  const off = (offset === undefined) ? PAD_OFFSET : offset;
-  const W = (maxX - minX) + 2 * off;
-  const D = (maxZ - minZ) + 2 * off;
+  const offX = (offset === undefined) ? PAD_OFFSET
+             : (typeof offset === 'number' ? offset : (offset.x || 0));
+  const offZ = (offset === undefined) ? PAD_OFFSET
+             : (typeof offset === 'number' ? offset : (offset.z || 0));
+  const W = (maxX - minX) + 2 * offX;
+  const D = (maxZ - minZ) + 2 * offZ;
   if (W < 0.3 || D < 0.3) return;
   const mat = new THREE.MeshStandardMaterial({ color: _padColor(), roughness: 0.95, metalness: 0.0 });
   mat.name = 'mat_construction_pad';
@@ -1503,6 +1508,13 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   // Перила лестницы (toggle steps-railing) — из того же GLB-модуля, что и ограждение
   // террасы (post / rails / balu_floor). Поручень+нижнее перило идут под РЕЙК (наклон по
   // разнице уровней верх→низ), балясины — вертикальные, нативного сечения, по проступям.
+  // Габарит СТУПЕНЕЙ — снимаем ДО постройки перил: подкладка должна лежать под самой
+  // лестницей, а не под её перилами. Перила стоят шире ступеней (столбы-ньюэлы плюс
+  // вылет крышки), и подкладка по общему bbox выпирала за край веранды (правка
+  // 2026-08-30).
+  stairGroup.updateMatrixWorld(true);
+  const _sbSteps = new THREE.Box3().setFromObject(stairGroup);
+
   const hasRailing = tgOn('steps-railing');
   if (hasRailing) {
     // Перила лестницы берут тот же модуль, что и ограждение террасы (один товар).
@@ -1541,12 +1553,10 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       // и та же высота низа поручня — перила лестницы стыкуются с террасными.
       const ky = RC.ky || 1;
       const railTopH = RC.baluTopH || (RC.nativeBaluH || 1.055) * ky;
-      // uvDir — ось «досок»: столбы-ньюэлы, крышки и балясины вертикальны, перила
-      // идут по скату. Проекция та же, что у ограждения террасы (_applyAxisUV).
-      const placeGeo = (geo, m4, matOv, uvDir) => {
+      // UV не трогаем — приходят из GLB (то же решение, что у ограждения террасы).
+      const placeGeo = (geo, m4, matOv) => {
         const g = geo.clone(); g.applyMatrix4(m4);
         const mm = mesh(g, matOv || stairRailMat);
-        if (uvDir && typeof _applyAxisUV === 'function') _applyAxisUV(mm, uvDir);
         stairGroup.add(mm); threeState.railingMeshes.push(mm);
       };
       // Крышка столба-ньюэла — по тому же правилу, что у ограждения террасы.
@@ -1596,7 +1606,7 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         const mRail = new THREE.Matrix4().makeBasis(xAxis, up, zAxis);
         mRail.setPosition(A.x, A.y, A.z);
         mRail.multiply(new THREE.Matrix4().makeScale(L, ky, 1));       // длина ската × высота модуля
-        placeGeo(RC.rails, mRail, null, xAxis);                        // доски — по скату
+        placeGeo(RC.rails, mRail);
 
         // ── Нижний столб-ньюэл (post), вертикальный, стоит НА ЗЕМЛЕ (B продлён до Y=0) ──
         // Сечение — как у столбов ограждения террасы: это один товар, поэтому
@@ -1605,8 +1615,8 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         const mPost = new THREE.Matrix4().makeBasis(headX, up, crossH);
         mPost.setPosition(B.x, B.y, B.z);
         mPost.multiply(new THREE.Matrix4().makeScale(postK, ky, postK));
-        placeGeo(RC.post, mPost, null, up);
-        if (RC.cap) placeGeo(RC.cap, mPost, stairCapMat, up);
+        placeGeo(RC.post, mPost);
+        if (RC.cap) placeGeo(RC.cap, mPost, stairCapMat);
 
         // ── Балясины по видимым проступям (i=0..n-2): вертикальные, нативное сечение,
         //    высота по уровню (от проступи до поручня) — учитывает разницу уровней ──
@@ -1622,7 +1632,7 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
           const mBal = new THREE.Matrix4().makeBasis(headX, up, crossH);
           mBal.setPosition(bx, surfY, bz);
           mBal.multiply(new THREE.Matrix4().makeScale(1, baluH / 1.055, 1)); // тянем ТОЛЬКО по высоте
-          placeGeo(RC.baluFloor, mBal, null, up);
+          placeGeo(RC.baluFloor, mBal);
         }
       }
     }
@@ -1633,10 +1643,13 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   // Подкладка (отмостка) под ступенями — по РЕАЛЬНОМУ footprint лестницы (bbox stairGroup),
   // а не по drawn-rect S.steps: его глубину buildSteps3d игнорирует (пересчитывает на
   // n × stepDepth), из-за чего pad по drawn-rect торчал за лестницу.
-  stairGroup.updateMatrixWorld(true);
-  const _sb = new THREE.Box3().setFromObject(stairGroup);
+  const _sb = _sbSteps;
   if (isFinite(_sb.min.x) && _sb.max.x > _sb.min.x) {
-    buildConstructionPad(parent, _sb.min.x, _sb.max.x, _sb.min.z, _sb.max.z);
+    // Запас подкладки только ВДОЛЬ СПУСКА: вбок она упиралась бы в край веранды и
+    // выпирала из-под неё (правка 2026-08-30). Ось спуска — поперёк опорного ребра.
+    const padOff = (bestSide.axisAlong === 'X') ? { x: 0, z: PAD_OFFSET }
+                                                : { x: PAD_OFFSET, z: 0 };
+    buildConstructionPad(parent, _sb.min.x, _sb.max.x, _sb.min.z, _sb.max.z, padOff);
   }
 }
 
@@ -2365,19 +2378,23 @@ function _fenceProtoPosts(proto) {
   const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
   const tol = _fencePostTol(nw);
   proto.updateMatrixWorld(true);
-  const info = { any: false, atStart: false, atEnd: false, startCx: 0, endCx: 0, pitch: 0 };
+  const info = { any: false, atStart: false, atEnd: false, startCx: 0, endCx: 0, pitch: 0,
+                 postHalf: 0 };
   const posts = [], other = [];
-  const centers = [];
+  const centers = [], halves = [];
   proto.traverse(o => {
     if (!o.isMesh) return;
     const p = _fencePostSpan(o, nw, nh);
     if (!p) { other.push(o.name || '(без имени)'); return; }
     posts.push(`${o.name || '(без имени)'} [${p.minX.toFixed(2)}…${p.maxX.toFixed(2)}]`);
     centers.push((p.minX + p.maxX) / 2);
+    halves.push((p.maxX - p.minX) / 2);
     info.any = true;
     if (p.minX <= tol) info.atStart = true;
     if (p.maxX >= nw - tol) info.atEnd = true;
   });
+  // Полутолщина столба — по ней полотно дотягивается до граней столбов (см. _fenceModelSection).
+  if (halves.length) info.postHalf = Math.min(...halves);
   // Шаг секции — расстояние между ЦЕНТРАМИ крайних столбов, а не габарит модели.
   // Габарит включает по полстолба с каждого края: если ставить секции по нему,
   // столбы соседних секций встают ВПЛОТНУЮ ДРУГ К ДРУГУ (двойной столб на каждом
@@ -2545,6 +2562,12 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
     // длины секции, тогда зазоры до столбов остаются как в модели. Столбы и мелочь
     // вроде штакетин сохраняют родной размер и просто раздвигаются.
     _fenceFitX(g, shift, k, s.isPost ? 0 : dx, pitch);
+    // ПОЛОТНО дотягиваем до граней столбов: в модели между полотном и столбом часто
+    // оставлен зазор, и на пролёте он читается как щель (правка 2026-08-30). Растягиваем
+    // только сплошное полотно во всю секцию — штакетины и ламели трогать нельзя.
+    if (s.isPanel && !s.isPost && s.len > pitch * 0.5 && info.postHalf > 0) {
+      _fenceSpanBetweenPosts(g, info.postHalf, spanW - info.postHalf);
+    }
     // Деталь не должна вылезать за границы секции. В модели полотно и прогоны часто
     // ШИРЕ шага столбов (нарисованы с нахлёстом на столбы): внутри пролёта нахлёст
     // соседних секций не виден, а на конце забора и на углу полотно торчало наружу
@@ -2566,7 +2589,7 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
     mesh.castShadow = mesh.receiveShadow = true;
     inst.add(mesh);
     if (!s.isPanel) continue;            // не полотно — товаром не красится и в примерку не идёт
-    _applyFencePanelUV(mesh, proto);
+    _applyFencePanelUV(mesh, proto, pitch);
     threeState.fenceMeshes.push(mesh);
     panels++;
   }
@@ -2575,6 +2598,24 @@ function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, fram
   inst.scale.set(1, sy, 1);            // по длине уже подогнано, тянем только высоту
   group.add(inst);
   return panels;
+}
+
+// Растягивает геометрию по X ровно на диапазон [x0, x1] — им полотно дотягивается от
+// грани одного столба до грани другого, чтобы у столбов не оставалось щелей. Работает в
+// обе стороны (и растянет, и подожмёт); вырожденную геометрию не трогает.
+function _fenceSpanBetweenPosts(geo, x0, x1) {
+  if (!(x1 > x0 + 0.02)) return;
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  if (!bb) return;
+  const a = bb.min.x, len = bb.max.x - a;
+  if (len < 0.02) return;
+  const k = (x1 - x0) / len;
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) pos.setX(i, x0 + (pos.getX(i) - a) * k);
+  pos.needsUpdate = true;
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
 }
 
 // Вписывает геометрию в диапазон [x0, x1] по X, сжимая её при выходе за границы.
@@ -2660,17 +2701,21 @@ function _fenceUVVerticalInGeo(geo) {
                                Math.max(Math.abs(a), Math.abs(b))) * 180 / Math.PI };
 }
 
-function _applyFencePanelUV(mesh, proto) {
+function _applyFencePanelUV(mesh, proto, pitch) {
   if (typeof _applyAxisUV !== 'function') { _applyFenceUV(mesh, false); return; }
   const g = mesh.geometry;
   const uvInfo = _fenceUVVerticalInGeo(g);
   g.computeBoundingBox();
   const bb = g.boundingBox;
-  // Явно вытянутая вверх деталь (штакетина, ламель) — доски вдоль неё, что бы ни было
+  const len = bb.max.x - bb.min.x;
+  // Узкая и вытянутая вверх деталь (штакетина, ламель) — доски вдоль неё, что бы ни было
   // в развёртке модели: у бруска её ориентация случайна. Для деталей во всю секцию
   // (сплошное полотно) ориентацию решает развёртка модели — так вертикальный и
-  // горизонтальный заборы по-прежнему различаются только файлом.
-  const tall = (bb.max.y - bb.min.y) > (bb.max.x - bb.min.x) * 1.5;
+  // горизонтальный заборы по-прежнему различаются только файлом. Условие «узкая»
+  // обязательно: без него узкая створка калитки получала вертикальные доски, хотя
+  // соседние секции того же забора — горизонтальные.
+  const narrow = !(pitch > 0) || len < pitch * 0.5;
+  const tall = narrow && (bb.max.y - bb.min.y) > len * 1.5;
   const vertical = tall ? true : (uvInfo ? uvInfo.vertical : false);
   _applyAxisUV(mesh, vertical ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 });
   if (proto && !proto.userData._uvLogged) {

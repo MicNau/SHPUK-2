@@ -157,14 +157,17 @@ function terracePerimeterSegments(worldPts, houseL, houseW, otherRects){
 const PORCH_COLUMN_COLOR = 0x6e4a2a; // дерево — коричневый (перила/колонны/балясины)
 // Inset перил и колонн внутрь от кромки настила (чтобы не свисали за край).
 const RAIL_INSET = 0.10;
-// Ось «досок» у вертикальных элементов ограждения (столбы, крышки, балясины).
-// Горизонтальные (перила, нижняя планка) получают ось вдоль своего пролёта, а
-// перила лестницы — вдоль ската; проекция — _applyAxisUV (viewer3d-core.js).
-const RAIL_UV_UP = { x: 0, y: 1, z: 0 };
+// UV ограждения берутся ИЗ GLB — так решено продуктом (правка 2026-08-30): развёртка
+// делается в самой модели, код её не пересчитывает. Прежняя осевая проекция
+// (_applyAxisUV) для столбов, крышек, балясин и перил отменена.
 // Inset перил лестницы от боковой грани ступеней (latOff в buildSteps3d). Тем же
-// значением сужается проём перил террасы под лестницу — конец перил террасы и колонна
-// навеса на углу проёма встают соосно с перилами лестницы.
-const STAIR_RAIL_INSET = 0.12;
+// значением сужается проём перил террасы под лестницу — конец перил террасы встаёт
+// соосно с перилами лестницы.
+// Значение РАВНО RAIL_INSET: у ограждения террасы ось столбов отстоит от кромки настила
+// на RAIL_INSET, и разные отступы (0.12 против 0.10) читались как уступ на стыке
+// перил лестницы с ограждением, особенно когда лестница стоит у самого угла
+// (правка 2026-08-30).
+const STAIR_RAIL_INSET = RAIL_INSET;
 
 // Единый контур ОБЪЕДИНЕНИЯ террасных блоков (axis-aligned rect'ы) → массив орто-полигонов
 // (петель) в мире. Так перила/балясины строятся по внешнему периметру всей террасы без
@@ -181,8 +184,16 @@ function _terraceUnionLoops(rects) {
   };
   const P = (i, j) => xs[i] + ',' + zs[j];
   const pt = (i, j) => ({ x: xs[i], z: zs[j] });
-  const edges = new Map();   // ключ start "x,z" → {to:[i,j], from:[i,j]}
-  const addEdge = (ai, aj, bi, bj) => edges.set(P(ai, aj), { a: [ai, aj], b: [bi, bj] });
+  // Ключ старта → СПИСОК рёбер. Список, а не одно ребро: там, где два блока касаются
+  // УГЛОМ, из одной точки выходят два граничных ребра, и при хранении по одному
+  // второе затиралось — контур второй террасы обрывался, и ограждение на ней не
+  // строилось вовсе (баг с рендера 2026-08-30).
+  const edges = new Map();
+  const addEdge = (ai, aj, bi, bj) => {
+    const k = P(ai, aj);
+    if (!edges.has(k)) edges.set(k, []);
+    edges.get(k).push({ a: [ai, aj], b: [bi, bj] });
+  };
   for (let i = 0; i < xs.length - 1; i++) for (let j = 0; j < zs.length - 1; j++) {
     if (!filled(i, j)) continue;
     if (j === 0 || !filled(i, j - 1)) addEdge(i, j, i + 1, j);             // низ: +x
@@ -190,16 +201,40 @@ function _terraceUnionLoops(rects) {
     if (i === 0 || !filled(i - 1, j)) addEdge(i, j + 1, i, j);             // лево: -z
     if (i === xs.length - 2 || !filled(i + 1, j)) addEdge(i + 1, j, i + 1, j + 1); // право: +z
   }
+  // Достаёт ребро, выходящее из точки k. Когда кандидатов несколько (точка касания
+  // двух блоков), берём тот, что поворачивает МАКСИМАЛЬНО ВЛЕВО относительно
+  // направления входа: интерьер у нас слева, и такой обход замыкает контур своей
+  // террасы, а не сшивает обе в одну «восьмёрку» через общую точку.
+  const takeEdge = (k, din) => {
+    const list = edges.get(k);
+    if (!list || !list.length) return null;
+    let bi = 0;
+    if (list.length > 1 && din) {
+      let bestAng = -Infinity;
+      for (let n = 0; n < list.length; n++) {
+        const c = list[n];
+        const cx = c.b[0] - c.a[0], cz = c.b[1] - c.a[1];
+        // Угол поворота от входящего направления к кандидату: >0 — влево, <0 — вправо.
+        const ang = Math.atan2(cz * din.x - cx * din.z, cx * din.x + cz * din.z);
+        if (ang > bestAng) { bestAng = ang; bi = n; }
+      }
+    }
+    const e = list.splice(bi, 1)[0];
+    if (!list.length) edges.delete(k);
+    return e;
+  };
   const loops = [];
   while (edges.size) {
     const startKey = edges.keys().next().value;
-    let e = edges.get(startKey);
+    let e = takeEdge(startKey, null);
     const loop = [];
     while (e) {
-      edges.delete(P(e.a[0], e.a[1]));
       loop.push(pt(e.a[0], e.a[1]));
-      e = edges.get(P(e.b[0], e.b[1]));
-      if (e && loop.length && pt(e.a[0], e.a[1]).x === loop[0].x && pt(e.a[0], e.a[1]).z === loop[0].z) break;
+      const din = { x: e.b[0] - e.a[0], z: e.b[1] - e.a[1] };
+      const nextKey = P(e.b[0], e.b[1]);
+      // Вернулись в начало петли — замкнулись.
+      if (loop.length > 1 && pt(e.b[0], e.b[1]).x === loop[0].x && pt(e.b[0], e.b[1]).z === loop[0].z) break;
+      e = takeEdge(nextKey, din);
     }
     // схлопнуть коллинеарные точки (оставляем только вершины-углы)
     const clean = [];
@@ -260,13 +295,10 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, segsOv
   const capMat = (typeof _railCapMaterial === 'function')
     ? _railCapMaterial(railMat, capType) : railMat;
 
-  // uvDir — вдоль какой оси идут «доски» на элементе: столбы, крышки и балясины —
-  // вертикально (RAIL_UV_UP), перила и нижняя планка — вдоль пролёта. Без этого UV
-  // брались из GLB и рисунок ложился поперёк линейных элементов.
-  function placeGeo(geo, m4, matOv, uvDir) {
+  // UV не трогаем — они приходят из GLB вместе с геометрией.
+  function placeGeo(geo, m4, matOv) {
     const g = geo.clone(); g.applyMatrix4(m4);
     const mesh = new THREE.Mesh(g, matOv || railMat);
-    if (uvDir && typeof _applyAxisUV === 'function') _applyAxisUV(mesh, uvDir);
     mesh.castShadow = mesh.receiveShadow = true;
     parent.add(mesh); threeState.railingMeshes.push(mesh);
   }
@@ -297,10 +329,9 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, segsOv
     }
     const m = mat(px, pz, ux, uz, 1);
     if (postK !== 1) m.multiply(new THREE.Matrix4().makeScale(postK, 1, postK));
-    placeGeo(_railingCache.post, m, null, RAIL_UV_UP);
-    // Крышка сидит на столбе — та же матрица (в том числе сечение 100/125 мм) и та же
-    // ориентация досок: крышка продолжает столб.
-    if (_railingCache.cap) placeGeo(_railingCache.cap, m, capMat, RAIL_UV_UP);
+    placeGeo(_railingCache.post, m);
+    // Крышка сидит на столбе — та же матрица (в том числе сечение 100/125 мм).
+    if (_railingCache.cap) placeGeo(_railingCache.cap, m, capMat);
     if (_railPostReg) _railPostReg.push({ x: px, z: pz });
   }
 
@@ -324,9 +355,8 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, segsOv
     for (let k = 0; k < pos.length - 1; k++) {
       const t0 = pos[k], gap = pos[k + 1] - pos[k];
       if (gap < 0.15) continue;
-      // Перила (верх/низ) тянем по длине секции; доски — вдоль пролёта.
-      placeGeo(_railingCache.rails, mat(s.ax + ux * t0, s.az + uz * t0, ux, uz, gap),
-               null, { x: ux, y: 0, z: uz });
+      // Перила (верх/низ) тянем по длине секции.
+      placeGeo(_railingCache.rails, mat(s.ax + ux * t0, s.az + uz * t0, ux, uz, gap));
       // Балясины: НЕ тянем — ставим нативного сечения, число подгоняем по шагу ~0.1 м,
       // но НЕ БОЛЕЕ RAIL_BALU_MAX на секцию (9 штук ровно ложатся на узор «2/5/8 от пола»);
       // при упоре в лимит шаг просто увеличивается. Узор (0-base j%3===1) перезапускается
@@ -340,7 +370,7 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, segsOv
           const local = n === 1 ? gap / 2 : RAIL_BALU_INSET + usable * j / (n - 1);
           const t = t0 + local;
           const geo = (j % 3 === 1) ? bg.baluFloor : bg.baluShort;
-          placeGeo(geo, mat(s.ax + ux * t, s.az + uz * t, ux, uz, 1), null, RAIL_UV_UP);
+          placeGeo(geo, mat(s.ax + ux * t, s.az + uz * t, ux, uz, 1));
         }
       }
     }
