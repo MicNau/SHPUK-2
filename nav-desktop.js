@@ -1504,6 +1504,38 @@ function _bedHeightFromProduct(sample) {
   return m ? parseInt(m[1], 10) / 1000 : null;
 }
 
+// Товар ступеней «по умолчанию» подтягивается за доской террасы: если пользователь
+// сам ступени не выбирал, берём товар из default_steps_id и красим ими 3D. Пометка
+// auto:true отличает автоматический выбор от ручного — ручной не перетираем.
+let _defStepsBusy = null;
+function _syncDefaultStepsProduct() {
+  const id = _defaultStepsProductId();
+  const cur = S.elementMat && S.elementMat.steps;
+  if (cur && !cur.auto) return;                       // ступени выбраны вручную
+  if (!id) { if (cur && cur.auto) { delete S.elementMat.steps; _rebuild3d(); } return; }
+  if (cur && cur.auto && cur.productId === id) return; // уже стоит нужный
+  if (_defStepsBusy === id) return;
+  const rm = _getRM();
+  if (!rm) return;
+  _defStepsBusy = id;
+  rm.getProductById(id).then(async product => {
+    _defStepsBusy = null;
+    if (!product) return;
+    const now = S.elementMat && S.elementMat.steps;
+    if (now && !now.auto) return;                     // пока грузили, выбрали вручную
+    try { await product.loadTextures(); } catch (_) {}
+    const meta = { productId: product.id, name: product.name || '',
+                   colorName: product.color || '', properties: product.properties || null,
+                   previewText: product.previewText || '', modelUrl: product.modelUrl || '',
+                   auto: true };
+    S.elementMat.steps = product.textures ? { textures: product.textures, ...meta } : meta;
+    console.info('[steps] ступень по умолчанию из доски террасы:', product.name || id);
+    _rebuild3d();
+  }).catch(() => { _defStepsBusy = null; });
+}
+
+function _rebuild3d() { if (typeof buildScene3d === 'function') buildScene3d(); }
+
 function _applySampleToActive(sample) {
   _setEstimateForActive(sample);           // смета обновляется вместе с материалом
   if (_activeIsDeck()) {
@@ -1512,6 +1544,10 @@ function _applySampleToActive(sample) {
     // colorName — имя цвета товара из каталога (пригождается 3D-слою).
     const meta = { productId: sample.id || null, name: sample.name || '',
                    colorName: sample.colorName || '',
+                   // properties/previewText — характеристики товара: вид крышки столба,
+                   // сечение столба, высота борта грядки, default_steps_id.
+                   properties: sample.properties || null,
+                   previewText: sample.previewText || '',
                    // modelUrl: у забора по нему берётся GLB товара (TODO.md → ЗАБОР 2).
                    modelUrl: sample.modelUrl || '' };
     S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures, ...meta }
@@ -1526,6 +1562,8 @@ function _applySampleToActive(sample) {
     // Ограждение: сечение столба (100/125 мм) — тоже свойство товара, фильтр
     // раздела только отбирает каталог (TODO п.1).
     if (dActiveItem === 'railing') S.railPostW = _railPostWFromProduct(sample);
+    // Доска террасы задаёт ступень по умолчанию (default_steps_id).
+    if (dActiveItem === 'terrace') _syncDefaultStepsProduct();
     if (typeof buildScene3d === 'function') buildScene3d();
   } else if (dActiveItem === 'furniture') {
     // Мебель: товар назначается ТОЧКЕ плана — выбранной, иначе первой свободной
@@ -1885,6 +1923,33 @@ const PRICE_TIER_MATCH = {
   mpk:      p => (p.sections || []).includes(2329) || /мпк/i.test(p.name || ''),
 };
 
+// Ценовая категория ТОВАРА — свойство price_category (появилось у доски 2026-08-31).
+// Если она есть, тир берём по ней, а не по порогам цены: у бэкенда категория
+// расставлена в админке и точнее наших 500/900 ₽. Синонимы — на случай, если
+// сервер отдаёт русские или иные названия; незнакомое значение оставляет
+// товар на прежнем правиле по цене.
+const PROP_PRICE_CATEGORY = 'price_category';
+const PRICE_CATEGORY_ALIASES = {
+  budget:   ['budget', 'эконом', 'бюджет'],
+  balanced: ['balanced', 'standard', 'middle', 'баланс', 'стандарт', 'средний'],
+  premium:  ['premium', 'lux', 'премиум', 'люкс'],
+};
+function _priceCategoryOf(p) {
+  const v = (typeof productProp === 'function') ? productProp(p, PROP_PRICE_CATEGORY) : undefined;
+  return (typeof v === 'string' && v) ? v.toLowerCase() : null;
+}
+// Совпадает ли категория товара с тиром: null — категории нет или она незнакомая,
+// тогда решает прежний предикат по цене.
+function _tierByCategory(p, tier) {
+  const cat = _priceCategoryOf(p);
+  if (!cat) return null;
+  const known = Object.keys(PRICE_CATEGORY_ALIASES)
+    .some(t => PRICE_CATEGORY_ALIASES[t].some(a => cat.includes(a)));
+  if (!known) return null;
+  const list = PRICE_CATEGORY_ALIASES[tier];
+  return list ? list.some(a => cat.includes(a)) : null;
+}
+
 // Несколько выбранных тиров объединяются: товар проходит, если подошёл хотя бы
 // под один. Раньше тир был один и включение второго снимало первый.
 function _filterRealByPrice(products) {
@@ -1892,6 +1957,8 @@ function _filterRealByPrice(products) {
   if (!_tiers.size) return products;
   return products.filter(p => {
     for (const t of _tiers) {
+      const byCat = _tierByCategory(p, t);
+      if (byCat !== null) { if (byCat) return true; continue; }
       const m = PRICE_TIER_MATCH[t];
       if (m && m(p)) return true;
     }
@@ -2127,6 +2194,12 @@ async function dApplyRealMat(e, pid) {
   _applySampleToActive({ id: product.id, name: product.name, color: null,
                          textures: product.textures, modelUrl: product.modelUrl || '',
                          colorName: product.color || '',
+                         // Характеристики товара — по ним 3D берёт вид крышки столба,
+                         // сечение столба, высоту борта грядки и default_steps_id.
+                         // Раньше они сюда не доезжали, и всё это читалось только из
+                         // названия (исправлено 2026-08-31).
+                         properties: product.properties || null,
+                         previewText: product.previewText || '',
                          price: _productPrice(product) });
 
   // Применённый товар нельзя применить повторно: кнопка гаснет, у остальных
@@ -2446,13 +2519,49 @@ function _ptsToMm(pts) {
   return pts.map(p => ({ x: Math.round(p.x * k), y: Math.round(p.y * k) }));
 }
 
+// Вершина линии стоит у СТЕНЫ ДОМА? По этому признаку в расчёт уходит
+// vertexType: 'house' (контракт бэкенда от 2026-08-31, необязательное поле точки —
+// «для точности расчёта»): у такой вершины линия упирается в дом, а не обрывается.
+function _vertexAtHouse(pt, tol) {
+  const hp = (typeof getHousePolygonNorm === 'function') ? getHousePolygonNorm() : null;
+  if (!hp || !hp.corners || hp.corners.length < 3) return false;
+  const c = hp.corners;
+  for (let i = 0; i < c.length; i++) {
+    const a = c[i], b = c[(i + 1) % c.length];
+    const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+    if (l2 < 1e-9) continue;
+    let t = ((pt.x - a.x) * dx + (pt.y - a.y) * dy) / l2;
+    t = Math.max(0, Math.min(1, t));
+    if (Math.hypot(pt.x - (a.x + dx * t), pt.y - (a.y + dy * t)) <= tol) return true;
+  }
+  return false;
+}
+
 // Ломаные элемента: разрывы (break) делят разметку на отдельные линии.
+// У вершин, стоящих на стене дома, проставляется vertexType: 'house' — остальные
+// точки уходят без поля (оно необязательное, обратная совместимость сохраняется).
 function _linesToMm(name) {
   const pts = S.pts[name] || [];
   const segs = (typeof splitAtBreaks === 'function')
     ? splitAtBreaks(pts)
     : [pts.filter(p => !p.break)];
-  return segs.filter(s => s.length >= 2).map(_ptsToMm);
+  const tol = 0.15 / _GRIDm();          // 15 см в долях поля, как у примыкания ступеней
+  return segs.filter(s => s.length >= 2).map(seg => {
+    const mm = _ptsToMm(seg);
+    seg.forEach((p, i) => { if (_vertexAtHouse(p, tol)) mm[i].vertexType = 'house'; });
+    return mm;
+  });
+}
+
+// Ступень по умолчанию для выбранной доски террасы: свойство default_steps_id
+// (контракт бэкенда от 2026-08-31). Поля может не быть или оно может быть null —
+// тогда возвращаем null и всё работает как раньше.
+const PROP_DEFAULT_STEPS = 'default_steps_id';
+function _defaultStepsProductId() {
+  const t = (S.elementMat && S.elementMat.terrace) || null;
+  const v = (t && typeof productProp === 'function') ? productProp(t, PROP_DEFAULT_STEPS) : undefined;
+  const id = (typeof v === 'string') ? parseInt(v, 10) : v;
+  return (typeof id === 'number' && isFinite(id) && id > 0) ? id : null;
 }
 
 // id товара, выбранного для элемента: сначала явный выбор «В смету», затем
@@ -2498,8 +2607,9 @@ function _stepsProjectObject(name, stair) {
   // ступени в запрос не кладём — лучше смета без них, чем никакой.
   if (!vertices.some(v => v.vertexType === 'terrace')) return null;
   const height = Math.round((typeof S.terraceH === 'number' ? S.terraceH : 0.8) * 1000);
+  // Свой товар ступеней важнее; если его нет — ступень по умолчанию от доски террасы.
   return { type: CalculationType.STEPS, name, vertices, height,
-           stepProductId: _elementProductId('steps') };
+           stepProductId: _elementProductId('steps') || _defaultStepsProductId() };
 }
 
 // Мебель — состав изделий: id товара → количество точек с ним.
@@ -2512,6 +2622,19 @@ function _furnitureProjectObject(name) {
   return Object.keys(items).length
     ? { type: CalculationType.FURNITURE, name, items }
     : null;
+}
+
+// Грядки — состав изделий, как у мебели (контракт бэкенда от 2026-08-31: «мапа
+// id: количество»). Тип объекта у грядок свой; пока в CalculationType нашей копии
+// Calculator.js его нет, объект не отправляется — см. _projectObjects.
+function _bedsProjectObject(name) {
+  const id = _elementProductId('beds');
+  const n = (S.beds || []).length;
+  if (!id || !n) return null;
+  const type = (typeof CalculationType !== 'undefined')
+    ? (CalculationType.BEDS || CalculationType.GARDEN_BEDS) : null;
+  if (!type) return null;
+  return { type, name, items: { [id]: n } };
 }
 
 // ── Дорожки: осевая линия + ширина → замкнутый контур ленты ──
@@ -2591,6 +2714,10 @@ function _projectObjects() {
     // Калитка в разметке — одна на забор (TODO.md, этап 2 п.8).
     if (el === 'fence') { o.gateCount = S.fenceGate ? 1 : 0; o.picketProductId = null; }
     objs.push(o);
+  }
+  if (S.sections.includes('beds')) {
+    const o = _bedsProjectObject(lbl('beds'));
+    if (o) objs.push(o);
   }
   if (S.sections.includes('furniture')) {
     const o = _furnitureProjectObject(lbl('furniture'));
