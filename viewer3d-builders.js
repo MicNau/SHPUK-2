@@ -352,19 +352,31 @@ function _nosingPrism(quad, yTop, yBot) {
   return g;
 }
 
-// UV полуступени: u — вдоль доски (мировая привязка, чтобы соседние куски совпадали),
-// v — расстояние от НАРУЖНОЙ кромки. При tile = TERRACE_SIDE_TILE на ширину доски
-// (170 мм) приходится ровно одна доска текстуры.
-function _nosingUV(geo, e, tile) {
-  const pos = geo.attributes.position;
-  const uv = new Float32Array(pos.count * 2);
-  const ox = e.a.x + e.nx * NOSING_OUT, oz = e.a.z + e.nz * NOSING_OUT;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), z = pos.getZ(i);
-    uv[i * 2]     = (x * e.ux + z * e.uz) / tile;
-    uv[i * 2 + 1] = ((x - ox) * e.nx + (z - oz) * e.nz) / tile;
+// UV полуступени: доска РИСУЕТСЯ ВДОЛЬ СВОЕЙ ДЛИННОЙ СТОРОНЫ и СО СВОЕЙ привязкой —
+// начало отсчёта в наружном углу самого куска (origin), а не в мировом нуле.
+// Мировая привязка (до 2026-08-31) совпадала с проекцией настила, и на кромке,
+// параллельной доскам террасы, рисунок полуступени продолжал соседнюю доску настила:
+// полуступень «маскировалась» под обычную доску. Локальная привязка рвёт этот стык.
+// Проекция осевая (_applyAxisUV): на верхней грани доски идут вдоль ребра, на наружной
+// грани высотой 25 мм — тоже вдоль (раньше плоская проекция по x/z размазывала по ней
+// одну линию текстуры). При tile = TERRACE_SIDE_TILE на ширину доски (170 мм)
+// приходится ровно одна доска текстуры, то есть грувы ложатся на обе кромки.
+function _nosingUV(mesh, e, origin, tile) {
+  const geo = mesh.geometry;
+  geo.translate(-origin.x, -origin.y, -origin.z);
+  if (typeof _applyAxisUV === 'function') {
+    _applyAxisUV(mesh, { x: e.ux, y: 0, z: e.uz }, tile);
+  } else {                                   // фолбэк: прежняя плоская проекция
+    const pos = geo.attributes.position;
+    const uv = new Float32Array(pos.count * 2);
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      uv[i * 2]     = (x * e.ux + z * e.uz) / tile;
+      uv[i * 2 + 1] = (x * e.nx + z * e.nz) / tile;
+    }
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   }
-  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.translate(origin.x, origin.y, origin.z);
 }
 
 // ── ПОЛУСТУПЕНЬ ──────────────────────────────────────────────────────────────
@@ -508,10 +520,11 @@ function buildTerraceNosing(parent, M, worldRects, deckTopY, holes) {
 
         const yTop = deckTopY + NOSING_LIFT;
         const geo = _nosingPrism([outA, outB, inB, inA], yTop, yTop - NOSING_H);
-        // Текстура ВСЕГДА вдоль доски; поперёк привязана к наружной кромке, и на
-        // 170 мм ложится ровно одна доска ребра зашивки (TERRACE_SIDE_TILE).
-        _nosingUV(geo, e, TERRACE_SIDE_TILE);
         const m = new THREE.Mesh(geo, mat);
+        // Текстура ВСЕГДА вдоль доски и со своей привязкой — от наружного угла этого
+        // куска, а не от мирового нуля: иначе на кромке, параллельной доскам настила,
+        // полуступень продолжает их рисунок и не читается как отдельная доска.
+        _nosingUV(m, e, { x: outA.x, y: yTop, z: outA.z }, TERRACE_SIDE_TILE);
         m.castShadow = m.receiveShadow = true;
         parent.add(m);
         threeState.deckMeshes.push(m);
