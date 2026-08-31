@@ -315,6 +315,58 @@ function buildPool3d(parent, poly, deckTopY) {
   parent.add(body);
 }
 
+// Пересечение линий, параллельных рёбрам e и m и смещённых по их нормалям на de/dm.
+// Возвращает точку {x,z} или null, если рёбра почти параллельны (митры нет).
+function _nosingLineX(e, de, m, dm) {
+  const p1x = e.a.x + e.nx * de, p1z = e.a.z + e.nz * de;
+  const p2x = m.a.x + m.nx * dm, p2z = m.a.z + m.nz * dm;
+  const den = e.ux * m.uz - e.uz * m.ux;
+  if (Math.abs(den) < 1e-6) return null;
+  const t = ((p2x - p1x) * m.uz - (p2z - p1z) * m.ux) / den;
+  return { x: p1x + e.ux * t, z: p1z + e.uz * t };
+}
+
+// Призма высотой [yBot..yTop] по четырёхугольнику в плане (порядок точек — по
+// контуру). Геометрия неиндексированная: у каждой грани свои нормали, без
+// сглаживания на рёбрах доски.
+function _nosingPrism(quad, yTop, yBot) {
+  const P = (i, y) => [quad[i].x, y, quad[i].z];
+  const tri = [];
+  const push = (a, b, c) => { tri.push(...a, ...b, ...c); };
+  // Верх и низ (четырёхугольник = два треугольника).
+  push(P(0, yTop), P(1, yTop), P(2, yTop));
+  push(P(0, yTop), P(2, yTop), P(3, yTop));
+  push(P(0, yBot), P(2, yBot), P(1, yBot));
+  push(P(0, yBot), P(3, yBot), P(2, yBot));
+  // Боковины.
+  for (let i = 0; i < 4; i++) {
+    const j = (i + 1) % 4;
+    push(P(i, yTop), P(j, yBot), P(j, yTop));
+    push(P(i, yTop), P(i, yBot), P(j, yBot));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(tri, 3));
+  g.computeVertexNormals();
+  g.computeBoundingBox();
+  g.computeBoundingSphere();
+  return g;
+}
+
+// UV полуступени: u — вдоль доски (мировая привязка, чтобы соседние куски совпадали),
+// v — расстояние от НАРУЖНОЙ кромки. При tile = TERRACE_SIDE_TILE на ширину доски
+// (170 мм) приходится ровно одна доска текстуры.
+function _nosingUV(geo, e, tile) {
+  const pos = geo.attributes.position;
+  const uv = new Float32Array(pos.count * 2);
+  const ox = e.a.x + e.nx * NOSING_OUT, oz = e.a.z + e.nz * NOSING_OUT;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    uv[i * 2]     = (x * e.ux + z * e.uz) / tile;
+    uv[i * 2 + 1] = ((x - ox) * e.nx + (z - oz) * e.nz) / tile;
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+}
+
 // ── ПОЛУСТУПЕНЬ ──────────────────────────────────────────────────────────────
 // Доска по всему СВОБОДНОМУ контуру террасы (TODO.md, этап 1 п.7): 170 мм в плане,
 // 25 мм по высоте, верх заподлицо с настилом, наружу вылет 10 мм. Свободный контур —
@@ -425,44 +477,42 @@ function buildTerraceNosing(parent, M, worldRects, deckTopY, holes) {
         const s0 = ((p.ax - e.a.x) * e.ux + (p.az - e.a.z) * e.uz);
         const s1 = ((p.bx - e.a.x) * e.ux + (p.bz - e.a.z) * e.uz);
         if (s1 - s0 < 0.05) continue;
-        // Стыки на углах: доски ВДОЛЬ X доводим до наружной грани соседней доски,
-        // доски вдоль Z — до её внутренней грани. Так угловой квадрат закрыт ровно
-        // один раз, без наложения (иначе на перекрытии дрались бы верхние грани).
-        const join = (mi, ox, oz, neighbourStart) => {
+        // Стыки на углах — «в ус», под 45° (правка 2026-08-30): торец доски идёт по
+        // биссектрисе угла, то есть по линии, соединяющей точку пересечения НАРУЖНЫХ
+        // кромок соседних досок с точкой пересечения ВНУТРЕННИХ. Раньше доски
+        // стыковались внахлёст встык (одна доводилась до наружной грани другой) —
+        // угол выглядел «внакладку», а не запиленным.
+        // Сосед в начале ребра — предыдущее ребро (стык на его КОНЦЕ), в конце —
+        // следующее (стык на его НАЧАЛЕ). Если у соседа доски нет (стена дома),
+        // торец остаётся прямым.
+        const mitre = (mi, atVertex, neighbourStart) => {
+          if (!atVertex) return null;
           const m = seg[mi];
-          // Соседнее ребро идёт вдоль стены дома — доски там нет, стыковать не с чем:
-          // доводим нашу доску прямо до вершины (иначе она обрывалась в 16 см от стены).
-          if (!m || !coveredAt(mi, neighbourStart)) return 0;
-          const fwd = m.nx * ox + m.nz * oz;      // нормаль соседа смотрит по ходу?
-          const outer = fwd > 0 ? NOSING_OUT : -(NOSING_W - NOSING_OUT);
-          const inner = fwd > 0 ? -(NOSING_W - NOSING_OUT) : NOSING_OUT;
-          return e.alongX ? outer : inner;
+          if (!m || !coveredAt(mi, neighbourStart)) return null;
+          const o = _nosingLineX(e, NOSING_OUT, m, NOSING_OUT);
+          const q = _nosingLineX(e, -(NOSING_W - NOSING_OUT), m, -(NOSING_W - NOSING_OUT));
+          return (o && q) ? { out: o, in: q } : null;
         };
-        // Сосед в начале ребра — предыдущее ребро (стык на его КОНЦЕ), в конце — следующее
-        // (стык на его НАЧАЛЕ).
-        const extA = (s0 < 1e-4) ? join((i - 1 + n) % n, -e.ux, -e.uz, false) : 0;
-        const extB = (s1 > e.L - 1e-4) ? join((i + 1) % n, e.ux, e.uz, true) : 0;
-        const t0 = s0 - extA, t1 = s1 + extB;
-        const len = t1 - t0;
-        if (len < 0.05) continue;
+        const mA = mitre((i - 1 + n) % n, s0 < 1e-4, false);
+        const mB = mitre((i + 1) % n, s1 > e.L - 1e-4, true);
+        // Прямой торец: точки на наружной и внутренней кромке при параметре s.
+        const at = (s, d) => ({ x: e.a.x + e.ux * s + e.nx * d,
+                                z: e.a.z + e.uz * s + e.nz * d });
+        const outA = mA ? mA.out : at(s0, NOSING_OUT);
+        const inA  = mA ? mA.in  : at(s0, -(NOSING_W - NOSING_OUT));
+        const outB = mB ? mB.out : at(s1, NOSING_OUT);
+        const inB  = mB ? mB.in  : at(s1, -(NOSING_W - NOSING_OUT));
+        // Слишком короткий кусок (митра съела длину) — пропускаем.
+        if (Math.hypot(outB.x - outA.x, outB.z - outA.z) < 0.02 &&
+            Math.hypot(inB.x - inA.x, inB.z - inA.z) < 0.02) continue;
 
-        const cAlong = (t0 + t1) / 2;
-        // Поперёк: от кромки 10 мм наружу и 160 мм внутрь → центр в 75 мм внутрь.
-        const cx = e.a.x + e.ux * cAlong + e.nx * (NOSING_OUT - NOSING_W / 2);
-        const cz = e.a.z + e.uz * cAlong + e.nz * (NOSING_OUT - NOSING_W / 2);
-        const dimX = e.alongX ? len : NOSING_W;
-        const dimZ = e.alongX ? NOSING_W : len;
-        const m = new THREE.Mesh(new THREE.BoxGeometry(dimX, NOSING_H, dimZ), mat);
-        m.position.set(cx, deckTopY + NOSING_LIFT - NOSING_H / 2, cz);
+        const yTop = deckTopY + NOSING_LIFT;
+        const geo = _nosingPrism([outA, outB, inB, inA], yTop, yTop - NOSING_H);
+        // Текстура ВСЕГДА вдоль доски; поперёк привязана к наружной кромке, и на
+        // 170 мм ложится ровно одна доска ребра зашивки (TERRACE_SIDE_TILE).
+        _nosingUV(geo, e, TERRACE_SIDE_TILE);
+        const m = new THREE.Mesh(geo, mat);
         m.castShadow = m.receiveShadow = true;
-        // Текстура ВСЕГДА вдоль доски. Поперёк привязываемся к наружной кромке и
-        // берём ребро зашивки (TERRACE_SIDE_TILE): на 170 мм ложится ровно одна доска.
-        if (typeof _applyBoxUV === 'function') {
-          const outerX = e.a.x + e.nx * NOSING_OUT, outerZ = e.a.z + e.nz * NOSING_OUT;
-          _applyBoxUV(m, TERRACE_SIDE_TILE,
-            e.alongX ? { x: 0, y: 0, z: -outerZ } : { x: -outerX, y: 0, z: 0 });
-          if (!e.alongX) _rotateBoxTopUV90(m.geometry);
-        }
         parent.add(m);
         threeState.deckMeshes.push(m);
         built++;
@@ -581,11 +631,16 @@ const _padColor = () => ((typeof HouseBuilder !== 'undefined' && HouseBuilder.PA
 // Отметка верха плиты — тоже из HouseBuilder: подкладка притоплена (см. PAD_TOP_Y).
 const _padTopY = () => ((typeof HouseBuilder !== 'undefined' && HouseBuilder.PAD_TOP_Y !== undefined)
                           ? HouseBuilder.PAD_TOP_Y : 0.005);
+// offset — число (запас по обеим осям) или {x, z} (запас по каждой оси отдельно:
+// подкладке лестницы запас нужен только вдоль спуска, вбок она вылезала за край веранды).
 function buildConstructionPad(parent, minX, maxX, minZ, maxZ, offset) {
   const padThick = 0.05;
-  const off = (offset === undefined) ? PAD_OFFSET : offset;
-  const W = (maxX - minX) + 2 * off;
-  const D = (maxZ - minZ) + 2 * off;
+  const offX = (offset === undefined) ? PAD_OFFSET
+             : (typeof offset === 'number' ? offset : (offset.x || 0));
+  const offZ = (offset === undefined) ? PAD_OFFSET
+             : (typeof offset === 'number' ? offset : (offset.z || 0));
+  const W = (maxX - minX) + 2 * offX;
+  const D = (maxZ - minZ) + 2 * offZ;
   if (W < 0.3 || D < 0.3) return;
   const mat = new THREE.MeshStandardMaterial({ color: _padColor(), roughness: 0.95, metalness: 0.0 });
   mat.name = 'mat_construction_pad';
@@ -868,20 +923,45 @@ function ensureRailingLoaded(url) {
   return _railingLoads[url];
 }
 
-// Материал крышки столба по её виду (правило продукта от 2026-08-26):
+// Материал крышки столба по её виду (правило продукта, уточнено 2026-08-28):
 //   dpk     — материал и текстура как у самого ограждения;
-//   metal   — карт нет вовсе, цвет ограждения, roughness 0.30, metalness 0.50;
-//   plastic — остаётся только карта normal (рельеф тот же), цвет ограждения,
-//             roughness 0.50 без карты.
+//   metal   — карт нет вовсе, цвет из карточки товара, roughness 0.30, metalness 0.30;
+//   plastic — остаётся ТОЛЬКО карта normal (рельеф тот же), цвет из карточки товара,
+//             roughness 0.50 без карты, metalness 0.
+// Цвет обязательно свой: у товара с PBR-текстурами материал ограждения белый
+// (color=0xffffff, чтобы не красить текстуру), и крышка без карт вышла бы белой.
 const RAIL_CAP_MAPS = ['map', 'roughnessMap', 'metalnessMap', 'aoMap', 'bumpMap',
                        'displacementMap', 'emissiveMap', 'specularMap', 'alphaMap'];
+const RAIL_CAP_FALLBACK_COLOR = 0x8c8c8c;   // «Серый» палитры — когда цвет не распознан
+
+// Цвет выбранного товара ограждения: поле color каталога, иначе имя цвета в
+// названии, иначе в описании (тот же порядок, что у фильтра цвета в каталоге).
+function _railProductColorHex() {
+  const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat.railing : null;
+  if (!em) return null;
+  if (typeof _detectColorNames !== 'function' || typeof CATALOG_COLOR_HEX === 'undefined') return null;
+  for (const text of [em.color, em.name, em.previewText]) {
+    if (!text) continue;
+    for (const name of _detectColorNames(text)) {
+      if (CATALOG_COLOR_HEX[name]) return CATALOG_COLOR_HEX[name];
+    }
+  }
+  return null;
+}
+
 function _railCapMaterial(base, capType) {
   if (capType !== 'metal' && capType !== 'plastic') return base;   // дпк и неизвестное — как ограждение
   const m = base.clone();
   m.name = 'mat_railing_cap_' + capType;
+  const hasMaps = !!(base.map || base.normalMap || base.roughnessMap);
   for (const k of RAIL_CAP_MAPS) if (m[k]) m[k] = null;
-  if (capType === 'metal') { m.normalMap = null; m.roughness = 0.30; m.metalness = 0.50; }
+  if (capType === 'metal') { m.normalMap = null; m.roughness = 0.30; m.metalness = 0.30; }
   else                     { m.roughness = 0.50; m.metalness = 0.0; }
+  const hex = _railProductColorHex();
+  if (hex) m.color.set(hex);
+  // Цвет не распознан, а материал ограждения был белой «подложкой под текстуру» —
+  // ставим нейтральный серый, иначе крышка светилась бы белым.
+  else if (hasMaps) m.color.set(RAIL_CAP_FALLBACK_COLOR);
   m.needsUpdate = true;
   return m;
 }
@@ -1428,15 +1508,28 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   // Перила лестницы (toggle steps-railing) — из того же GLB-модуля, что и ограждение
   // террасы (post / rails / balu_floor). Поручень+нижнее перило идут под РЕЙК (наклон по
   // разнице уровней верх→низ), балясины — вертикальные, нативного сечения, по проступям.
+  // Габарит СТУПЕНЕЙ — снимаем ДО постройки перил: подкладка должна лежать под самой
+  // лестницей, а не под её перилами. Перила стоят шире ступеней (столбы-ньюэлы плюс
+  // вылет крышки), и подкладка по общему bbox выпирала за край веранды (правка
+  // 2026-08-30).
+  stairGroup.updateMatrixWorld(true);
+  const _sbSteps = new THREE.Box3().setFromObject(stairGroup);
+
   const hasRailing = tgOn('steps-railing');
   if (hasRailing) {
     // Перила лестницы берут тот же модуль, что и ограждение террасы (один товар).
     const _stairRailUrl = (typeof railingModelUrl === 'function') ? railingModelUrl() : null;
-    if (typeof railingUseModule === 'function') railingUseModule(_stairRailUrl);
+    const _stairRailMod = (typeof railingUseModule === 'function') ? railingUseModule(_stairRailUrl) : null;
+    // Как и у ограждения террасы: модуля товара может не быть в кэше, тогда активным
+    // остаётся прежний. Грузим нужный и пересобираем сцену, когда он появится.
+    if (!_stairRailMod && _stairRailUrl && typeof ensureRailingLoaded === 'function') {
+      ensureRailingLoaded(_stairRailUrl).then(() => {
+        if (threeState && railingUseModule(_stairRailUrl)) buildScene3d();
+      });
+    }
     const RC = _railingCache;
     if (!(RC && RC.rails && RC.post && RC.baluFloor)) {
-      // GLB ещё не загружен — подгружаем и перестраиваем сцену (как для перил террасы).
-      ensureRailingLoaded(_stairRailUrl).then(c => { if (c && threeState) buildScene3d(); });
+      // Модуля пока нет — перила лестницы построятся при пересборке после загрузки.
     } else {
       // latOff: перила сдвинуты от краёв ступеней внутрь (на STAIR_RAIL_INSET) — соосны
       // колонне навеса на углу проёма террасы (см. terracePerimeterSegments).
@@ -1460,9 +1553,11 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
       // и та же высота низа поручня — перила лестницы стыкуются с террасными.
       const ky = RC.ky || 1;
       const railTopH = RC.baluTopH || (RC.nativeBaluH || 1.055) * ky;
+      // UV не трогаем — приходят из GLB (то же решение, что у ограждения террасы).
       const placeGeo = (geo, m4, matOv) => {
         const g = geo.clone(); g.applyMatrix4(m4);
-        const mm = mesh(g, matOv || stairRailMat); stairGroup.add(mm); threeState.railingMeshes.push(mm);
+        const mm = mesh(g, matOv || stairRailMat);
+        stairGroup.add(mm); threeState.railingMeshes.push(mm);
       };
       // Крышка столба-ньюэла — по тому же правилу, что у ограждения террасы.
       const stairCapType = (typeof railingCapType === 'function') ? railingCapType() : '';
@@ -1548,10 +1643,13 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
   // Подкладка (отмостка) под ступенями — по РЕАЛЬНОМУ footprint лестницы (bbox stairGroup),
   // а не по drawn-rect S.steps: его глубину buildSteps3d игнорирует (пересчитывает на
   // n × stepDepth), из-за чего pad по drawn-rect торчал за лестницу.
-  stairGroup.updateMatrixWorld(true);
-  const _sb = new THREE.Box3().setFromObject(stairGroup);
+  const _sb = _sbSteps;
   if (isFinite(_sb.min.x) && _sb.max.x > _sb.min.x) {
-    buildConstructionPad(parent, _sb.min.x, _sb.max.x, _sb.min.z, _sb.max.z);
+    // Запас подкладки только ВДОЛЬ СПУСКА: вбок она упиралась бы в край веранды и
+    // выпирала из-под неё (правка 2026-08-30). Ось спуска — поперёк опорного ребра.
+    const padOff = (bestSide.axisAlong === 'X') ? { x: 0, z: PAD_OFFSET }
+                                                : { x: PAD_OFFSET, z: 0 };
+    buildConstructionPad(parent, _sb.min.x, _sb.max.x, _sb.min.z, _sb.max.z, padOff);
   }
 }
 
@@ -2263,9 +2361,13 @@ function _fencePostSpan(o, nativeW, nativeH) {
   if (FENCE_PANEL_RE.test(nm)) return null;
   const bb = new THREE.Box3().setFromObject(o);
   if (!isFinite(bb.min.x) || !isFinite(bb.max.x)) return null;
-  const w = bb.max.x - bb.min.x, h = bb.max.y - bb.min.y;
+  const w = bb.max.x - bb.min.x, h = bb.max.y - bb.min.y, d = bb.max.z - bb.min.z;
   if (w > nativeW * 0.5) return null;                      // деталь во всю секцию — не столб
   if (!FENCE_POST_RE.test(nm) && (w > Math.max(0.35, nativeW * 0.25) || h < nativeH * 0.5)) return null;
+  // Сечение столба в плане близко к квадрату, а вертикальная ламель полотна тонкая
+  // поперёк линии. Без этой проверки штакетина с непонятным именем шла в столбы: шаг
+  // секций считался по ламелям, секции разъезжались, а полотно красилось как каркас.
+  if (!FENCE_POST_RE.test(nm) && d < w * 0.5) return null;
   return { minX: bb.min.x, maxX: bb.max.x };
 }
 
@@ -2276,19 +2378,23 @@ function _fenceProtoPosts(proto) {
   const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
   const tol = _fencePostTol(nw);
   proto.updateMatrixWorld(true);
-  const info = { any: false, atStart: false, atEnd: false, startCx: 0, endCx: 0, pitch: 0 };
+  const info = { any: false, atStart: false, atEnd: false, startCx: 0, endCx: 0, pitch: 0,
+                 postHalf: 0 };
   const posts = [], other = [];
-  const centers = [];
+  const centers = [], halves = [];
   proto.traverse(o => {
     if (!o.isMesh) return;
     const p = _fencePostSpan(o, nw, nh);
     if (!p) { other.push(o.name || '(без имени)'); return; }
     posts.push(`${o.name || '(без имени)'} [${p.minX.toFixed(2)}…${p.maxX.toFixed(2)}]`);
     centers.push((p.minX + p.maxX) / 2);
+    halves.push((p.maxX - p.minX) / 2);
     info.any = true;
     if (p.minX <= tol) info.atStart = true;
     if (p.maxX >= nw - tol) info.atEnd = true;
   });
+  // Полутолщина столба — по ней полотно дотягивается до граней столбов (см. _fenceModelSection).
+  if (halves.length) info.postHalf = Math.min(...halves);
   // Шаг секции — расстояние между ЦЕНТРАМИ крайних столбов, а не габарит модели.
   // Габарит включает по полстолба с каждого края: если ставить секции по нему,
   // столбы соседних секций встают ВПЛОТНУЮ ДРУГ К ДРУГУ (двойной столб на каждом
@@ -2396,68 +2502,254 @@ const FENCE_PANEL_RE = /panel|polotno|полотн|board|plank|доск|штак
 // стыке стояло по два столба вплотную, а на углу — четыре.
 // Сами столбы по длине не тянутся: масштаб секции им компенсируется, иначе на
 // коротком пролёте они становились тоньше, на длинном — толще.
-function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, frameMat) {
+// isGate — секция калитки (узкая, 1 м): у неё из ПОВТОРЯЮЩИХСЯ вертикальных элементов
+// полотна (штакетины, ламели) остаётся один — средний. Требование продукта 2026-08-28:
+// калитка выглядит как секция забора шириной 1 м, а не как просвет.
+function _fenceModelSection(proto, group, x, z, angle, spanW, sy, panelMat, frameMat, isGate) {
   const info = _fenceProtoPosts(proto);
   const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
   const tol = _fencePostTol(nw);
   const pitch = (info.pitch > 0.2) ? info.pitch : nw;
-  const k = spanW / pitch;
+  const dx = spanW - pitch;                  // насколько секция длиннее/короче родной
+  const k = spanW / pitch;                   // им двигаются ПОЗИЦИИ деталей внутри секции
+  const shift = info.pitch ? info.startCx : 0;
 
-  const inst = proto.clone(true);
-  inst.updateMatrixWorld(true);
-  // Классифицируем меши, пока клон стоит в нуле и не масштабирован.
-  const drop = [], keepPosts = [], spans = [];
-  inst.traverse(o => {
-    if (!o.isMesh) return;
+  // Геометрия каждого меша ЗАПЕКАЕТСЯ в систему прототипа (o.matrixWorld), после чего
+  // все детали лежат в общих осях секции: +X вдоль пролёта. Так и делаются подгонка
+  // длины, и сдвиг. Раньше длина менялась через o.scale.x, а он действует по ЛОКАЛЬНОЙ
+  // оси меша: в модели с повёрнутыми узлами полотно тянулось поперёк линии и вылезало
+  // за раму скошенным, а вложенные меши масштабировались дважды (баг с рендера
+  // 2026-08-28). Заодно ушёл общий масштаб inst по X — он же скашивал повёрнутые узлы.
+  const inst = new THREE.Group();
+  proto.updateMatrixWorld(true);
+  const panelSet = _fenceProtoPanels(proto);
+  // Сначала собираем детали секции, потом строим: в режиме калитки нужно ЗНАТЬ все
+  // вертикальные элементы полотна, чтобы оставить из них один.
+  const parts = [];
+  proto.traverse(o => {
+    if (!o.isMesh || !o.geometry) return;
     const p = _fencePostSpan(o, nw, nh);
     if (p && info.pitch) {
       const cx = (p.minX + p.maxX) / 2;
-      if (Math.abs(cx - info.endCx) < tol) { drop.push(o); return; }
-      if (Math.abs(cx - info.startCx) < tol) { keepPosts.push(o); return; }
+      // Конечный столб выбрасываем: его место занимает стартовый столб следующей
+      // секции (на свободном конце — замыкающий, см. _fenceModelPost).
+      if (Math.abs(cx - info.endCx) < tol) return;
     }
-    // Не столб — полотно, прогоны, крепёж: запоминаем родную длину по X.
     const bb = new THREE.Box3().setFromObject(o);
-    if (isFinite(bb.min.x) && isFinite(bb.max.x)) spans.push({ o, len: bb.max.x - bb.min.x });
+    const len = bb.max.x - bb.min.x, hgt = bb.max.y - bb.min.y;
+    parts.push({ o, isPost: !!p, isPanel: panelSet.has(o),
+                 cx: (bb.min.x + bb.max.x) / 2, len, hgt });
   });
-  for (const o of drop) if (o.parent) o.parent.remove(o);
-  for (const o of keepPosts) o.scale.x /= k;       // столб остаётся своей толщины
-
-  // Полотно и прогоны НЕ масштабируются пропорционально: они укорачиваются
-  // (или удлиняются) ровно на столько, на сколько изменилась секция, — так зазор
-  // до столбов остаётся таким же, как в модели. Раньше здесь работал общий
-  // масштаб k, и на пролёте с шагом меньше родного (14.4 м → 7 секций по 2.06 при
-  // родных 2.5) полотно ужималось до 1.89 м: промежуток между полотнами
-  // становился 0.17 м при столбе 0.10, и у каждого столба, особенно на углу,
-  // зияла щель (баг с рендера 2026-08-28).
-  const dx = spanW - pitch;
-  for (const s of spans) {
-    if (s.len < 0.05) continue;                    // мелкая деталь — тянуть нечего
-    const target = s.len + dx;
-    if (target <= 0.02) continue;                  // не влезает — оставляем как есть
-    s.o.scale.x *= target / (s.len * k);
+  if (isGate) {
+    // Вертикальный элемент полотна: узкий по длине секции и заметно выше, чем шире.
+    const verts = parts.filter(s => s.isPanel && !s.isPost
+                                    && s.len < pitch * 0.5 && s.hgt > s.len * 1.5);
+    if (verts.length > 1) {
+      // Оставляем средний по X — он приходится на середину створки.
+      verts.sort((a, b) => a.cx - b.cx);
+      const keep = verts[Math.floor(verts.length / 2)];
+      for (const s of verts) if (s !== keep) s.drop = true;
+      keep.center = true;                    // и ставим его ровно по центру калитки
+    }
   }
-
-  // Сдвиг: центр стартового столба — в нуль секции. Профиль поперёк линии (Z)
-  // не трогаем, по высоте — масштаб от родной высоты модели.
-  if (info.pitch) for (const c of inst.children) c.position.x -= info.startCx;
+  let panels = 0;
+  for (const s of parts) {
+    if (s.drop) continue;
+    const g = s.o.geometry.clone();
+    g.applyMatrix4(s.o.matrixWorld);
+    // Позиция детали внутри секции — пропорционально (k), собственная длина — только
+    // у деталей во всю секцию (полотно, прогоны): им она меняется РОВНО на разницу
+    // длины секции, тогда зазоры до столбов остаются как в модели. Столбы и мелочь
+    // вроде штакетин сохраняют родной размер и просто раздвигаются.
+    _fenceFitX(g, shift, k, s.isPost ? 0 : dx, pitch);
+    // ПОЛОТНО дотягиваем до граней столбов: в модели между полотном и столбом часто
+    // оставлен зазор, и на пролёте он читается как щель (правка 2026-08-30). Растягиваем
+    // только сплошное полотно во всю секцию — штакетины и ламели трогать нельзя.
+    if (s.isPanel && !s.isPost && s.len > pitch * 0.5 && info.postHalf > 0) {
+      _fenceSpanBetweenPosts(g, info.postHalf, spanW - info.postHalf);
+    }
+    // Деталь не должна вылезать за границы секции. В модели полотно и прогоны часто
+    // ШИРЕ шага столбов (нарисованы с нахлёстом на столбы): внутри пролёта нахлёст
+    // соседних секций не виден, а на конце забора и на углу полотно торчало наружу
+    // (баг с рендера 2026-08-30). Столбы не вписываем: стартовый стоит по центру нуля
+    // и половиной сечения законно уходит в минус.
+    if (!s.isPost && _fenceClampX(g, 0, spanW) && proto && !proto.userData._clampLogged) {
+      proto.userData._clampLogged = true;
+      console.info('[fence] детали модели шире шага столбов — вписываю в секцию,',
+                   'иначе полотно торчит за концом забора и за углом');
+    }
+    if (s.center) {                          // единственная штакетина калитки — по центру
+      g.computeBoundingBox();
+      const bb = g.boundingBox;
+      g.translate(spanW / 2 - (bb.min.x + bb.max.x) / 2, 0, 0);
+      g.computeBoundingSphere();
+    }
+    const mesh = new THREE.Mesh(g, s.isPanel ? panelMat : frameMat);
+    mesh.name = s.o.name;
+    mesh.castShadow = mesh.receiveShadow = true;
+    inst.add(mesh);
+    if (!s.isPanel) continue;            // не полотно — товаром не красится и в примерку не идёт
+    _applyFencePanelUV(mesh, proto, pitch);
+    threeState.fenceMeshes.push(mesh);
+    panels++;
+  }
   inst.position.set(x, 0, z);
   inst.rotation.y = angle;
-  inst.scale.set(k, sy, 1);
-
-  let panels = 0;
-  inst.traverse(o => {
-    if (!o.isMesh) return;
-    const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
-    const isPanel = FENCE_PANEL_RE.test(nm);
-    o.material = isPanel ? panelMat : frameMat;
-    o.castShadow = o.receiveShadow = true;
-    if (!isPanel) return;                // не полотно — товаром не красится и в примерку не идёт
-    if (panelMat.map && o.geometry && !o.geometry.attributes.uv) _applyFenceUV(o, false);
-    threeState.fenceMeshes.push(o);
-    panels++;
-  });
+  inst.scale.set(1, sy, 1);            // по длине уже подогнано, тянем только высоту
   group.add(inst);
   return panels;
+}
+
+// Растягивает геометрию по X ровно на диапазон [x0, x1] — им полотно дотягивается от
+// грани одного столба до грани другого, чтобы у столбов не оставалось щелей. Работает в
+// обе стороны (и растянет, и подожмёт); вырожденную геометрию не трогает.
+function _fenceSpanBetweenPosts(geo, x0, x1) {
+  if (!(x1 > x0 + 0.02)) return;
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  if (!bb) return;
+  const a = bb.min.x, len = bb.max.x - a;
+  if (len < 0.02) return;
+  const k = (x1 - x0) / len;
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) pos.setX(i, x0 + (pos.getX(i) - a) * k);
+  pos.needsUpdate = true;
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+}
+
+// Вписывает геометрию в диапазон [x0, x1] по X, сжимая её при выходе за границы.
+// Возвращает true, если что-то пришлось поджать. Крайние точки внутри диапазона
+// остаются на месте — деталь просто перестаёт торчать наружу.
+function _fenceClampX(geo, x0, x1) {
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  if (!bb) return false;
+  const a = bb.min.x, b = bb.max.x, len = b - a;
+  if (len < 1e-6) return false;
+  if (a >= x0 - 1e-4 && b <= x1 + 1e-4) return false;      // и так внутри секции
+  const na = Math.max(a, x0), nb = Math.min(b, x1);
+  if (nb - na < 0.01) return false;                        // вырождается — оставляем как есть
+  const s = (nb - na) / len;
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) pos.setX(i, na + (pos.getX(i) - a) * s);
+  pos.needsUpdate = true;
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+  return true;
+}
+
+// Какие меши модели считать ПОЛОТНОМ (их красит товар, всё прочее — тёмно-серое).
+// Сначала по именам (FENCE_PANEL_RE), а если ни одно имя не подошло — ПО ГЕОМЕТРИИ:
+// полотно — самые крупные по площади фасада детали, не являющиеся столбами. Без этого
+// запаса модель товара с непривычными именами красилась целиком тёмно-серым, и после
+// выбора товара забор становился чёрным (баг с рендера 2026-08-28).
+// Считается один раз на модель и кэшируется в userData.
+function _fenceProtoPanels(proto) {
+  if (proto.userData._panels) return proto.userData._panels;
+  const nw = _fenceNativeW(proto), nh = _fenceNativeH(proto);
+  const byName = new Set(), cand = [];
+  proto.updateMatrixWorld(true);
+  proto.traverse(o => {
+    if (!o.isMesh) return;
+    const nm = (o.name || '') + '|' + ((o.material && o.material.name) || '');
+    if (FENCE_PANEL_RE.test(nm)) { byName.add(o); return; }
+    if (_fencePostSpan(o, nw, nh)) return;              // столб — точно не полотно
+    const bb = new THREE.Box3().setFromObject(o);
+    cand.push({ o, area: (bb.max.x - bb.min.x) * (bb.max.y - bb.min.y) });
+  });
+  let set = byName;
+  if (!byName.size && cand.length) {
+    const max = Math.max(...cand.map(c => c.area));
+    set = new Set(cand.filter(c => c.area >= max * 0.4).map(c => c.o));
+    console.info('[fence] полотно по именам не опознано, взято по площади:',
+                 [...set].map(o => o.name || '(без имени)').join(', '),
+                 '| остальное красится тёмно-серым');
+  }
+  proto.userData._panels = set;
+  return set;
+}
+
+// ── Развёртка полотна забора ──
+// UV из GLB БОЛЬШЕ НЕ ИСПОЛЬЗУЮТСЯ напрямую: у моделей товара развёртка полотна сделана
+// наискось, и доски текстуры шли под углом к раме (баг с рендера 2026-08-28: рама и
+// контур полотна ровные, а полосы наклонены). Прежнее решение «развёртку делает GLB»
+// (2026-08-23) на практике не выполняется.
+// Что делаем: ОРИЕНТАЦИЮ досок берём из модели (по тому, вдоль чего растёт u в её
+// развёртке) — так вертикальный и горизонтальный заборы по-прежнему различаются только
+// файлом, — а саму развёртку кладём заново, ровной осевой проекцией (_applyAxisUV,
+// шаг DECK_TILE, тот же, что у настила и ограждения).
+// Наклон развёртки модели печатается один раз на модель: на стенде должно быть видно,
+// насколько кривой была родная UV.
+function _fenceUVVerticalInGeo(geo) {
+  const uv = geo.attributes.uv, pos = geo.attributes.position;
+  if (!uv || !pos || pos.count < 3) return null;
+  // Регрессия u ~ a·x + b·y + c по нормальным уравнениям 3×3 (метод Крамера).
+  let sxx = 0, sxy = 0, syy = 0, sx = 0, sy = 0, n = 0, sux = 0, suy = 0, su = 0;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), u = uv.getX(i);
+    sxx += x * x; sxy += x * y; syy += y * y; sx += x; sy += y; n++;
+    sux += u * x; suy += u * y; su += u;
+  }
+  const det = sxx * (syy * n - sy * sy) - sxy * (sxy * n - sy * sx) + sx * (sxy * sy - syy * sx);
+  if (Math.abs(det) < 1e-12) return null;
+  const a = (sux * (syy * n - sy * sy) - sxy * (suy * n - sy * su) + sx * (suy * sy - syy * su)) / det;
+  const b = (sxx * (suy * n - sy * su) - sux * (sxy * n - sy * sx) + sx * (sxy * su - suy * sx)) / det;
+  if (Math.abs(a) < 1e-9 && Math.abs(b) < 1e-9) return null;
+  return { vertical: Math.abs(b) > Math.abs(a),
+           tiltDeg: Math.atan2(Math.min(Math.abs(a), Math.abs(b)),
+                               Math.max(Math.abs(a), Math.abs(b))) * 180 / Math.PI };
+}
+
+function _applyFencePanelUV(mesh, proto, pitch) {
+  if (typeof _applyAxisUV !== 'function') { _applyFenceUV(mesh, false); return; }
+  const g = mesh.geometry;
+  const uvInfo = _fenceUVVerticalInGeo(g);
+  g.computeBoundingBox();
+  const bb = g.boundingBox;
+  const len = bb.max.x - bb.min.x;
+  // Узкая и вытянутая вверх деталь (штакетина, ламель) — доски вдоль неё, что бы ни было
+  // в развёртке модели: у бруска её ориентация случайна. Для деталей во всю секцию
+  // (сплошное полотно) ориентацию решает развёртка модели — так вертикальный и
+  // горизонтальный заборы по-прежнему различаются только файлом. Условие «узкая»
+  // обязательно: без него узкая створка калитки получала вертикальные доски, хотя
+  // соседние секции того же забора — горизонтальные.
+  const narrow = !(pitch > 0) || len < pitch * 0.5;
+  const tall = narrow && (bb.max.y - bb.min.y) > len * 1.5;
+  const vertical = tall ? true : (uvInfo ? uvInfo.vertical : false);
+  _applyAxisUV(mesh, vertical ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 });
+  if (proto && !proto.userData._uvLogged) {
+    proto.userData._uvLogged = true;
+    console.info('[fence] развёртка полотна: доски', vertical ? 'вертикальные' : 'горизонтальные',
+                 '| наклон UV в модели:', uvInfo ? uvInfo.tiltDeg.toFixed(1) + '°' : 'UV нет',
+                 '— кладём свою проекцию, шаг', DECK_TILE.toFixed(2), 'м');
+  }
+}
+
+// Ставит деталь в секцию по оси X: начало секции (x0) переезжает в нуль, ЦЕНТР детали
+// сдвигается пропорционально k, а собственная длина меняется на dx — но только если
+// деталь тянется хотя бы на половину секции (полотно, прогоны). Короткие детали
+// (штакетины, ламели, крепёж) сохраняют родной размер и просто раздвигаются:
+// растягивать их на dx нельзя — на пролёте с шагом меньше родного планка шириной
+// 0.10 м ужималась до 0.02 м.
+// Пропорциональный сдвиг центра и подгонка длины согласованы: у детали во всю секцию
+// центр (≈pitch/2) уезжает в spanW/2, то есть ровно туда, где он оказывается при
+// удлинении на dx с неподвижным левым краем — зазоры до столбов сохраняются с обеих
+// сторон.
+function _fenceFitX(geo, x0, k, dx, pitch) {
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  if (!bb) return;
+  const len = bb.max.x - bb.min.x;
+  const cx = (bb.min.x + bb.max.x) / 2;
+  const ncx = (cx - x0) * k;
+  const stretch = dx && len > 0.05 && len > pitch * 0.5;
+  const s = stretch ? Math.max(0.02, len + dx) / len : 1;
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) pos.setX(i, ncx + (pos.getX(i) - cx) * s);
+  pos.needsUpdate = true;
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
 }
 
 // Забор по ломаной: пролёты делятся на секции РАВНОЙ ширины (округление длины на
@@ -2478,7 +2770,8 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
   }
 
   const fenceGroup = new THREE.Group();
-  const panelH = (typeof S !== 'undefined' && S.fenceH) ? S.fenceH : 1.5;
+  const panelH = (typeof S !== 'undefined' && S.fenceH) ? S.fenceH
+                 : ((typeof FENCE_H !== 'undefined') ? FENCE_H : 1.92);
   // Масштаб модели по высоте — от её РОДНОЙ высоты (после нормализации она известна).
   const sy = proto ? (panelH / _fenceNativeH(proto)) : 1;
   // Материал условного забора: если к нему применён товар — его текстуры/цвет
@@ -2519,7 +2812,9 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
       // собирается своими секциями, как обычный пролёт.
       const parts = _fenceGateSplit(a, ux, uz, segLen, gateW);
       for (const part of parts) {
-        _fenceRun(a.x + ux * part.t0, a.z + uz * part.t0, ux, uz, part.len, angle);
+        const px = a.x + ux * part.t0, pz = a.z + uz * part.t0;
+        if (part.gate) _fenceGateLeaf(px, pz, ux, uz, part.len, angle);
+        else           _fenceRun(px, pz, ux, uz, part.len, angle);
       }
     }
   }
@@ -2563,10 +2858,28 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
       // следующий ещё не размечен, и на углу вырастал лишний столб.
       runEnds.push({ x: a.x + ux * segLen, z: a.z + uz * segLen, angle });
   }
+
+  // ── Створка калитки: ОДНА секция во всю ширину проёма ──
+  // Просвета быть не должно (требование продукта 2026-08-28): калитка выглядит как
+  // секция забора шириной FENCE_GATE_W3D. От обычной секции отличается тем, что из
+  // повторяющихся вертикальных элементов полотна остаётся один.
+  function _fenceGateLeaf(sx, sz, ux, uz, len, angle) {
+    if (len < 0.2) return;
+    const key = postKey(sx, sz);
+    const withPost = !postSet.has(key);
+    postSet.add(key);
+    if (proto) panelsPainted += _fenceModelSection(proto, fenceGroup, sx, sz, angle, len, sy,
+                                                   panelMat, frameMat, true);
+    else       _fenceSchematicSection(fenceGroup, sx, sz, angle, len, panelH,
+                                      panelMat, frameMat, withPost);
+    runEnds.push({ x: sx + ux * len, z: sz + uz * len, angle });
+  }
 }
 
-// Делит пролёт на куски вокруг калитки: [{t0, len}]. Калитка задана точкой плана
+// Делит пролёт на куски вокруг калитки: [{t0, len, gate?}]. Калитка задана точкой плана
 // (S.fenceGate); на пролёт она влияет, только если лежит на нём (в пределах 0.3 м).
+// Кусок с gate:true — сама створка: её строит _fenceGateLeaf одной секцией, просвета
+// на месте калитки не остаётся.
 function _fenceGateSplit(a, ux, uz, segLen, gate) {
   if (!gate) return [{ t0: 0, len: segLen }];
   const vx = gate.x - a.x, vz = gate.z - a.z;
@@ -2577,7 +2890,8 @@ function _fenceGateSplit(a, ux, uz, segLen, gate) {
   const g0 = Math.max(0, t - half), g1 = Math.min(segLen, t + half);
   const parts = [];
   if (g0 > 0.3) parts.push({ t0: 0, len: g0 });
+  if (g1 - g0 > 0.2) parts.push({ t0: g0, len: g1 - g0, gate: true });
   if (segLen - g1 > 0.3) parts.push({ t0: g1, len: segLen - g1 });
-  return parts.length ? parts : [];
+  return parts.length ? parts : [{ t0: 0, len: segLen }];
 }
 

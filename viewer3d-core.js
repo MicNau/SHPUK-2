@@ -655,6 +655,44 @@ function _applyDeckUV(mesh, plankAlongX, uvOffset) {
   if (!plankAlongX) _rotateBoxTopUV90(mesh.geometry);
 }
 
+// UV-проекция ВДОЛЬ ЗАДАННОЙ ОСИ — для линейных элементов, у которых доска идёт
+// вдоль самого элемента: столбы и балясины ограждения (ось вверх), перила и нижняя
+// планка (ось вдоль пролёта), перила лестницы (ось по скату). Кубическая проекция
+// для них не годится: она всегда кладёт доски горизонтально и по мировым осям, из-за
+// чего у столбов рисунок ложился поперёк, а у наклонных перил — под углом к брусу.
+//   u = P·dir      — вдоль элемента (в текстуре доска вытянута по U);
+//   v = P·(n × dir) — поперёк, по плоскости грани (шаг досок = tile / 9).
+// Ось dir не обязана совпадать с мировой: годится любое направление.
+function _applyAxisUV(mesh, dir, tile) {
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position;
+  const nor = geo.attributes.normal;
+  if (!pos) return;
+  const T = tile || DECK_TILE;
+  const d = new THREE.Vector3(dir.x, dir.y, dir.z);
+  if (d.lengthSq() < 1e-12) return;
+  d.normalize();
+  // Запасная ось для торцов (нормаль параллельна dir → n × dir вырождается).
+  const fb = Math.abs(d.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+  const uv = new Float32Array(pos.count * 2);
+  const vP = new THREE.Vector3(), vN = new THREE.Vector3(), vV = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    vP.fromBufferAttribute(pos, i);
+    if (nor) vN.fromBufferAttribute(nor, i); else vN.copy(fb);
+    vV.crossVectors(vN, d);
+    if (vV.lengthSq() < 1e-8) vV.crossVectors(fb, d);
+    vV.normalize();
+    uv[i * 2]     = vP.dot(d) / T;
+    uv[i * 2 + 1] = vP.dot(vV) / T;
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.attributes.uv.needsUpdate = true;
+  ['map', 'normalMap', 'roughnessMap'].forEach(slot => {
+    const tex = mesh.material && mesh.material[slot];
+    if (tex) { tex.repeat.set(1, 1); tex.needsUpdate = true; }
+  });
+}
+
 // Накладывает реальные PBR-текстуры товара (из каталога API, ProductResource.textures)
 // на deck-материал — то есть на террасы, дорожки и борта грядок. Текстуры
 // бесшовные → RepeatWrapping; тайлинг задаётся UV-проекцией (_applyBoxUV, мир/DECK_TILE),
@@ -700,12 +738,20 @@ function _schematicDeckMat() {
   return new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.05 });
 }
 
-// Материал элемента: свой выбранный товар, иначе условный серый вид.
-// Наследование материала террасы ограждением (была такая правка) ОТМЕНЕНО:
-// до выбора СВОЕГО товара ограждение серое (TODO п.3) — иначе перила выглядели
-// уже отделанными, хотя товар для них не выбирали.
+// Элементы, которые до выбора СВОЕГО товара берут материал ТЕРРАСЫ (правка
+// 2026-08-30): ступени — часть той же конструкции, и по умолчанию они должны быть
+// из той же доски. Ограждение сюда НЕ входит: там наследование отменено намеренно
+// (TODO п.3) — перила выглядели бы отделанными без выбора товара.
+const INHERIT_TERRACE_MAT = new Set(['steps']);
+
+// Материал элемента: свой выбранный товар, иначе материал террасы (для элементов
+// из INHERIT_TERRACE_MAT), иначе условный серый вид.
 function _resolveDeckMat(baseDeck, el) {
   const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat[el] : null;
+  if (!em && INHERIT_TERRACE_MAT.has(el)) {
+    const t = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat.terrace : null;
+    if (t) return _resolveDeckMat(baseDeck, 'terrace');
+  }
   if (!em) return SCHEMATIC_UNTIL_PRODUCT.has(el) ? _schematicDeckMat() : baseDeck;
   const m = baseDeck.clone();
   if (em.textures && _applyDeckProductTextures({ deck: m }, em.textures)) return m;
@@ -1130,8 +1176,14 @@ function buildScene3d() {
         const Sx0 = Tt.minX, Sx1 = Tt.maxX, Sz0 = W.minZ, Sz1 = W.maxZ;   // угловая ячейка (x-полоса T × z-полоса W)
         // Крылья должны соприкасаться по обеим осям (связный угол; работает и для
         // перекрытия, и для встык, и для обёртки вокруг выпуклого угла дома).
-        if (Math.min(W.maxX, Tt.maxX) < Math.max(W.minX, Tt.minX) - E) continue;
-        if (Math.min(W.maxZ, Tt.maxZ) < Math.max(W.minZ, Tt.minZ) - E) continue;
+        const ovX = Math.min(W.maxX, Tt.maxX) - Math.max(W.minX, Tt.minX);
+        const ovZ = Math.min(W.maxZ, Tt.maxZ) - Math.max(W.minZ, Tt.minZ);
+        if (ovX < -E || ovZ < -E) continue;
+        // Блоки, соприкасающиеся ТОЛЬКО углом (перекрытие нулевое по обеим осям), —
+        // не угол составной террасы, а две разные террасы, поставленные по диагонали.
+        // Раньше между ними достраивалась угловая ячейка, и пустой сектор заполнялся
+        // настилом (баг с рендера 2026-08-30).
+        if (ovX <= E && ovZ <= E) continue;
         const exRight = W.maxX > Sx1 + E, exLeft = W.minX < Sx0 - E;
         if (exRight === exLeft) continue;               // W торчит ровно с одной стороны (угол, не T/+)
         const exUp = Tt.maxZ > Sz1 + E, exDown = Tt.minZ < Sz0 - E;
@@ -1238,8 +1290,11 @@ function buildScene3d() {
     // Зашивка (щёки) и подступенки — материал ТЕРРАСЫ, как её боковины.
     M.terraceSide = _resolveDeckMat(_baseDeck, 'terrace');
     try {
+      // Лестниц может быть несколько (правка 2026-08-30) — строим каждую.
       // Подкладку строит сам buildSteps3d по реальному footprint лестницы.
-      buildSteps3d(houseGroup, M, S.steps, terraceLevel, houseL, houseW);
+      for (const st of (typeof stepsAll === 'function' ? stepsAll() : [S.steps])) {
+        if (st) buildSteps3d(houseGroup, M, st, terraceLevel, houseL, houseW);
+      }
     } catch (e) { console.error('[buildSteps3d]', e); }
     // M.railing сам к мешам не привязан (перила лестницы берут его клон) — клон-заготовку
     // освобождаем сразу, иначе на каждой пересборке остаётся висячий материал.
@@ -1309,7 +1364,18 @@ function buildScene3d() {
     // Модуль выбирается по товару: его GLB, иначе файл под вид крышки столба
     // (mod_railing_dpk/metal/plastic), иначе базовый модуль без крышки.
     const _railUrl = (typeof railingModelUrl === 'function') ? railingModelUrl() : null;
-    if (typeof railingUseModule === 'function') railingUseModule(_railUrl);
+    const _railMod = (typeof railingUseModule === 'function') ? railingUseModule(_railUrl) : null;
+    // Нужного модуля ещё нет в кэше — грузим и пересобираем сцену. Раньше загрузка
+    // запускалась ТОЛЬКО когда не загружено вообще ничего: при смене товара (другой
+    // вид крышки → другой файл) railingUseModule возвращал null, а прежний модуль
+    // оставался активным — ограждение так и строилось старым, без крышки.
+    // buildScene3d зовём лишь когда модуль реально появился в кэше: если GLB не
+    // открылся, повторная сборка не запускается и цикл «грузим-строим» не возникает.
+    if (!_railMod && _railUrl && typeof ensureRailingLoaded === 'function') {
+      ensureRailingLoaded(_railUrl).then(() => {
+        if (threeState && railingUseModule(_railUrl)) buildScene3d();
+      });
+    }
     if (_railingCache && _railingCache.rails) {
       // Материал ограждения — свой (товар раздела 2331, тег fencing), а пока товар
       // не выбран — условный, тот же, что у террасы.
@@ -1319,10 +1385,9 @@ function buildScene3d() {
       // товара, и после.
       buildRailingLine3d(houseGroup, S.pts.railing, terraceLevel, houseL, houseW,
                          _resolveDeckMat(_baseDeck, 'railing'));
-    } else {
-      // GLB ограждения ещё не загружен — грузим и перестраиваем сцену (как грядки).
-      ensureRailingLoaded(_railUrl).then(c => { if (c && threeState) buildScene3d(); });
     }
+    // Ветки «ещё ничего не загружено» здесь больше нет: загрузку модуля запускает
+    // проверка выше, она же покрывает и первую сборку.
   }
 
   // Собираем зоны, занятые конструкциями (для проверки растительности)
