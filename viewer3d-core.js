@@ -641,6 +641,52 @@ const SIDE_BOARD_W = 0.17;   // доска зашивки: юбка террас
 const DECK_TILE = DECK_BOARD_W * DECK_BOARDS_PER_TILE;          // 1.35 м
 const TERRACE_SIDE_TILE = SIDE_BOARD_W * DECK_BOARDS_PER_TILE;  // 1.53 м
 
+// ── ФАЗА ШВА В ТЕКСТУРЕ ──
+// Где в картинке проходят грувы (стыки досок). Нужна полуступени: её ширина — ровно
+// одна доска текстуры, и шов должен ложиться на её КРОМКИ, а не поперёк середины
+// (требование продукта 2026-09-01). У разных текстур товара шов стоит по-своему,
+// поэтому фазу меряем по самой картинке: складываем яркость строк, попадающих в один
+// и тот же остаток по шагу доски, и берём самый тёмный остаток — это и есть грув.
+// Возвращает сдвиг в долях ТАЙЛА (0 … 1/9) либо null, если картинка ещё не загружена
+// или холст «протух» (текстура с чужого домена без CORS).
+const _groovePhase = new WeakMap();
+function _texGroovePhase(tex) {
+  if (!tex || !tex.image || !tex.image.width || !tex.image.height) return null;
+  if (_groovePhase.has(tex)) return _groovePhase.get(tex);
+  const period = 1 / DECK_BOARDS_PER_TILE;
+  let phase = null;
+  try {
+    const img = tex.image;
+    const H = Math.min(img.height, 512), W = Math.min(img.width, 128);
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, W, H);
+    const data = ctx.getImageData(0, 0, W, H).data;
+    const rows = new Float32Array(H);
+    for (let y = 0; y < H; y++) {
+      let s = 0;
+      for (let x = 0; x < W; x++) { const i = (y * W + x) * 4; s += data[i] + data[i + 1] + data[i + 2]; }
+      rows[y] = s / (W * 3);
+    }
+    const step = H / DECK_BOARDS_PER_TILE;          // шаг доски в пикселях
+    let best = Infinity, bestY = 0;
+    for (let k = 0; k < Math.round(step); k++) {
+      let s = 0, n = 0;
+      for (let y = k; y < H; y += step) { s += rows[Math.min(H - 1, Math.round(y))]; n++; }
+      if (n && s / n < best) { best = s / n; bestY = k; }
+    }
+    // Строка bestY — грув. В координатах текстуры v растёт снизу вверх (flipY).
+    const vImg = bestY / H;
+    const vTex = tex.flipY === false ? vImg : (1 - vImg);
+    phase = ((vTex % period) + period) % period;
+  } catch (e) {
+    phase = 0;                                       // читать картинку нельзя — шов «как есть»
+  }
+  _groovePhase.set(tex, phase);
+  return phase;
+}
+
 // Кубическая deck-UV проекция с ориентацией досок вдоль нужной оси.
 // Текстура: грувы (стыки досок) — горизонтальные линии (const V). После _applyBoxUV
 // верхняя грань даёт u=X, v=Z → доски тянутся ВДОЛЬ X (по умолчанию).
@@ -714,6 +760,8 @@ function _applyDeckProductTextures(M, textures) {
   if (applied) {
     M.deck.color.set(0xffffff); // не подкрашиваем поверх реальной текстуры
     M.deck.needsUpdate = true;
+    // Шов в текстуре товара стоит по-своему — переставляем полуступени по нему.
+    if (typeof _syncNosingPhase === 'function') _syncNosingPhase();
   }
   return applied; // false → у товара нет PBR-текстур (напр. мебель), деке не трогаем
 }
@@ -995,6 +1043,7 @@ function buildScene3d() {
   if (vegGroup) clearGroup(vegGroup, false);   // материалы общие с GLB-источником
   threeState.wallMeshes    = [];
   threeState.deckMeshes    = [];
+  threeState.nosingMeshes  = [];      // полуступени: им доводится фаза шва текстуры
   threeState.porchMeshes   = [];
   threeState.stepMeshes    = [];
   threeState.fenceMeshes   = [];
