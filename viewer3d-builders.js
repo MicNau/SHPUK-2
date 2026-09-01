@@ -377,6 +377,42 @@ function _nosingUV(mesh, e, origin, tile) {
     geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   }
   geo.translate(origin.x, origin.y, origin.z);
+  _nosingPhaseShift(mesh);
+}
+
+// Шов текстуры не должен попадать НА полуступень (требование продукта 2026-09-01):
+// её ширина — ровно одна доска текстуры, и грувы должны совпасть с её кромками.
+// У разных текстур товара шов стоит в картинке по-своему, поэтому v сдвигается на
+// измеренную фазу (_texGroovePhase). Пока картинка не догрузилась, фазы нет — тогда
+// сдвиг доложим позже, из _syncNosingPhase.
+function _nosingPhaseShift(mesh) {
+  const map = mesh.material && mesh.material.map;
+  const phase = (typeof _texGroovePhase === 'function') ? _texGroovePhase(map) : 0;
+  if (phase === null) return;                       // текстура ещё грузится
+  const was = mesh.userData._nosingPhase || 0;
+  const d = phase - was;
+  if (Math.abs(d) < 1e-6) { mesh.userData._nosingPhase = phase; return; }
+  const uv = mesh.geometry.attributes.uv;
+  if (!uv) return;
+  for (let i = 0; i < uv.count; i++) uv.setY(i, uv.getY(i) + d);
+  uv.needsUpdate = true;
+  mesh.userData._nosingPhase = phase;
+}
+
+// Текстура догружается уже после сборки сцены, поэтому фазу шва доносим до готовых
+// полуступеней отдельно: несколько попыток с интервалом, пока картинка не появится.
+// Сцена рисуется в постоянном animation loop — пересборка для этого не нужна.
+function _syncNosingPhase(tries) {
+  const list = (threeState && threeState.nosingMeshes) || [];
+  let pending = false;
+  for (const m of list) {
+    if (!m.material) continue;
+    const phase = (typeof _texGroovePhase === 'function') ? _texGroovePhase(m.material.map) : 0;
+    if (phase === null) { pending = true; continue; }
+    _nosingPhaseShift(m);
+  }
+  const left = (tries === undefined ? 20 : tries) - 1;
+  if (pending && left > 0) setTimeout(() => _syncNosingPhase(left), 300);
 }
 
 // ── ПОЛУСТУПЕНЬ ──────────────────────────────────────────────────────────────
@@ -531,10 +567,14 @@ function buildTerraceNosing(parent, M, worldRects, deckTopY, holes) {
         m.castShadow = m.receiveShadow = true;
         parent.add(m);
         threeState.deckMeshes.push(m);
+        if (!threeState.nosingMeshes) threeState.nosingMeshes = [];
+        threeState.nosingMeshes.push(m);          // для доводки фазы шва по текстуре
         built++;
       }
     }
   }
+  // Текстура товара могла ещё не догрузиться — доводим фазу шва, когда появится.
+  if (built) _syncNosingPhase();
   return built;
 }
 
