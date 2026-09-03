@@ -266,12 +266,12 @@ function initSnapCanvas(name) {
       const ny2 = nearest(snY, terrY); snY = (ny2 !== null) ? ny2 : (nearest(snY, wallY) ?? snY);
     }
 
-    // Дорожки: клик по первой точке текущей линии ЗАМЫКАЕТ контур (TODO п.7) —
-    // точка ставится ровно в неё, и дорожка получается кольцевой.
-    if (name === 'paths') {
-      const segs = splitAtBreaks(S.pts.paths || []);
-      const cur = segs[segs.length - 1];
-      if (cur && cur.length > 2 && Math.hypot(cur[0].x - snX, cur[0].y - snY) < 0.02) {
+    // Клик рядом с первой точкой текущей линии ЗАМЫКАЕТ контур (TODO п.7, забор
+    // добавлен 2026-09-01): точка ставится РОВНО в первую, и контур получается
+    // кольцевым — у дорожки кольцо, у забора замкнутый периметр со столбом на стыке.
+    if (name === 'paths' || name === 'fence') {
+      const cur = _lineCurrentSegment(name);
+      if (cur && cur.length > 2 && Math.hypot(cur[0].x - snX, cur[0].y - snY) < LINE_CLOSE_SNAP) {
         snX = cur[0].x; snY = cur[0].y;
       }
     }
@@ -324,6 +324,11 @@ function initSnapCanvas(name) {
     if (name === 'fence' && _fenceTooClose(p)) return;   // ближе 3 м не пускаем
     const pt = S.pts[name][_lineSel.idx];
     if (!pt || pt.break) return;
+    // Замыкание перетаскиванием: конец линии, подведённый к её началу (или наоборот),
+    // прилипает ровно к нему — контур закрывается без «почти совпавших» точек
+    // (правка 2026-09-01, дорожки и забор).
+    const snapTo = _lineCloseTarget(name, _lineSel.idx, p);
+    if (snapTo) { p.x = snapTo.x; p.y = snapTo.y; }
     pt.x = p.x; pt.y = p.y;
     _lineDragged = true;
     drawSnapCanvas(name);
@@ -350,6 +355,32 @@ let _lineDragged = false;                   // точка реально сдв�
 const LINE_START_LEN = 3.0;    // длина стартового участка, м
 const FENCE_MIN_CLEAR = 3.0;   // минимальное расстояние забора до дома и террасы, м
 const FENCE_GATE_W = 1.0;      // ширина проёма под калитку, м
+// Радиус «прилипания» к первой/последней точке для автозамыкания контура (нормированный:
+// 0.02 × GRID ≈ 0.64 м на плане). Применяется и к клику, и к перетаскиванию.
+const LINE_CLOSE_SNAP = 0.02;
+
+// Последний (текущий) участок ломаной — на нём и замыкается контур.
+function _lineCurrentSegment(name) {
+  const segs = (typeof splitAtBreaks === 'function')
+    ? splitAtBreaks(S.pts[name] || [])
+    : [(S.pts[name] || []).filter(p => !p.break)];
+  return segs.length ? segs[segs.length - 1] : null;
+}
+
+// Куда прилипнуть точке idx, чтобы контур замкнулся: конец участка тянут к его началу
+// или начало — к концу. Возвращает точку-цель или null.
+function _lineCloseTarget(name, idx, p) {
+  if (name !== 'paths' && name !== 'fence') return null;
+  const pts = S.pts[name] || [];
+  const cur = _lineCurrentSegment(name);
+  if (!cur || cur.length < 3) return null;
+  const first = cur[0], last = cur[cur.length - 1];
+  const moving = pts[idx];
+  if (!moving) return null;
+  const target = (moving === last) ? first : (moving === first ? last : null);
+  if (!target) return null;
+  return (Math.hypot(target.x - p.x, target.y - p.y) < LINE_CLOSE_SNAP) ? target : null;
+}
 
 // Указатель → нормированные координаты плана (со снапом, если snap=true).
 function _snapPointerNorm(wrap, name, e, snap) {

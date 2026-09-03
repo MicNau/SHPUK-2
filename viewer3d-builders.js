@@ -289,8 +289,13 @@ function polyAreaM2(poly) {
 
 // Чаша бассейна: вода чуть ниже настила + тёмные стенки вниз. Модели бассейна нет —
 // это геометрия с задаваемыми размерами (решение продукта 2026-08-24).
-const POOL_WATER_DROP = 0.12;   // вода ниже уровня настила, м
+const POOL_WATER_DROP = 0.12;   // вода ниже уровня настила, м (до правки 2026-09-01)
 const POOL_DEPTH = 1.20;        // глубина чаши, м
+// Борт бассейна ВЫШЕ настила террасы на 5 см (требование продукта 2026-09-01):
+// чаша ставится на грунт, терраса собирается вокруг неё, и борт должен выступать над
+// настилом — иначе вода «вровень» с досками. Раньше верх чаши был НИЖЕ настила на
+// POOL_WATER_DROP.
+const POOL_RIM_UP = 0.05;       // борт выше настила, м
 // Бассейн — ОДНО простое тело: цилиндр для круглого, бокс для прямоугольного
 // (TODO п.16). Верх тела — на отметке воды. Раньше строились отдельно плоскость
 // воды (ShapeGeometry по полигону) и стенки чаши: плоскость выглядела «съехавшей»
@@ -309,7 +314,7 @@ function buildPool3d(parent, poly, deckTopY) {
   const body = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
     color: 0x2f7fa8, roughness: 0.22, metalness: 0.0,
   }));
-  const topY = deckTopY - POOL_WATER_DROP;
+  const topY = deckTopY + POOL_RIM_UP;
   body.position.set((minX + maxX) / 2, topY - POOL_DEPTH / 2, (minZ + maxZ) / 2);
   body.castShadow = body.receiveShadow = true;
   parent.add(body);
@@ -1022,16 +1027,46 @@ function _railCapMaterial(base, capType) {
   const m = base.clone();
   m.name = 'mat_railing_cap_' + capType;
   const hasMaps = !!(base.map || base.normalMap || base.roughnessMap);
+  const srcMap = base.map || null;                 // по ней подбирается цвет крышки
   for (const k of RAIL_CAP_MAPS) if (m[k]) m[k] = null;
   if (capType === 'metal') { m.normalMap = null; m.roughness = 0.30; m.metalness = 0.30; }
   else                     { m.roughness = 0.50; m.metalness = 0.0; }
-  const hex = _railProductColorHex();
-  if (hex) m.color.set(hex);
+  // Цвет крышки — СРЕДНИЙ ЦВЕТ ТЕКСТУРЫ ограждения: название цвета из карточки с самой
+  // текстурой часто расходилось, и крышка выделялась на фоне полотна (жалоба 2026-09-01).
+  // Текстуры может ещё не быть в памяти — тогда цвет доводится позже (_syncRailCapColors).
+  m.userData._capSrcMap = srcMap;
+  const avg = (srcMap && typeof _texAverageColor === 'function') ? _texAverageColor(srcMap) : null;
+  const hex = (avg !== null && avg !== undefined) ? avg : _railProductColorHex();
+  if (hex !== null && hex !== undefined) m.color.set(hex);
   // Цвет не распознан, а материал ограждения был белой «подложкой под текстуру» —
   // ставим нейтральный серый, иначе крышка светилась бы белым.
   else if (hasMaps) m.color.set(RAIL_CAP_FALLBACK_COLOR);
   m.needsUpdate = true;
+  if (threeState) {
+    if (!threeState.railCapMats) threeState.railCapMats = [];
+    threeState.railCapMats.push(m);
+    if (avg === null && srcMap) _syncRailCapColors();
+  }
   return m;
+}
+
+// Текстура ограждения догружается уже после сборки сцены — доводим цвет крышек,
+// когда картинку станет можно прочитать. Несколько попыток с интервалом; сцена
+// рисуется постоянным animation loop, пересборка не нужна.
+function _syncRailCapColors(tries) {
+  const list = (threeState && threeState.railCapMats) || [];
+  let pending = false;
+  for (const m of list) {
+    const map = m.userData && m.userData._capSrcMap;
+    if (!map) continue;
+    const avg = (typeof _texAverageColor === 'function') ? _texAverageColor(map) : null;
+    if (avg === null || avg === undefined) { pending = true; continue; }
+    m.color.set(avg);
+    m.needsUpdate = true;
+    m.userData._capSrcMap = null;                  // цвет взят, больше не пересчитываем
+  }
+  const left = (tries === undefined ? 20 : tries) - 1;
+  if (pending && left > 0) setTimeout(() => _syncRailCapColors(left), 300);
 }
 
 // Матрица, отображающая родной базис планки в мировой прямоугольник грядки.

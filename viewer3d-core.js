@@ -687,6 +687,39 @@ function _texGroovePhase(tex) {
   return phase;
 }
 
+// СРЕДНИЙ ЦВЕТ ТЕКСТУРЫ. Нужен крышкам столбов ограждения: у них карт нет (правило
+// продукта), и цвет раньше брался по НАЗВАНИЮ цвета из карточки товара — он часто не
+// совпадал с самой текстурой (жалоба 2026-09-01). Среднее по картинке всегда совпадает.
+// Возвращает hex-число либо null, если картинка ещё не загружена или холст «протух»
+// (текстура с чужого домена без CORS).
+const _texAvgColor = new WeakMap();
+function _texAverageColor(tex) {
+  if (!tex || !tex.image || !tex.image.width || !tex.image.height) return null;
+  if (_texAvgColor.has(tex)) return _texAvgColor.get(tex);
+  let hex = null;
+  try {
+    const img = tex.image;
+    const W = Math.min(img.width, 64), H = Math.min(img.height, 64);
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, W, H);
+    const d = ctx.getImageData(0, 0, W, H).data;
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+    if (!n) return null;
+    // Картинка в sRGB, а цвет материала three трактует линейно — переводим, иначе
+    // крышка выходит заметно светлее текстуры.
+    const lin = v => { const s = v / n / 255; return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
+    const c = new THREE.Color(lin(r), lin(g), lin(b));
+    hex = c.getHex();
+  } catch (e) {
+    hex = null;                                   // холст с чужого домена — не читается
+  }
+  _texAvgColor.set(tex, hex);
+  return hex;
+}
+
 // Кубическая deck-UV проекция с ориентацией досок вдоль нужной оси.
 // Текстура: грувы (стыки досок) — горизонтальные линии (const V). После _applyBoxUV
 // верхняя грань даёт u=X, v=Z → доски тянутся ВДОЛЬ X (по умолчанию).
@@ -777,10 +810,10 @@ const DECK_ELEMENTS = ['terrace', 'steps', 'paths', 'beds', 'pool_terrace'];
 // текстурой доски (TODO.md, этап 1 п.6): терраса, ступени, ограждение и перила
 // (перила берут материал ограждения). Цвет — тот же, что у полотна условного
 // забора: он читается как «черновик», а не как готовый материал.
-// Дорожки, грядки и терраса у бассейна в список не входят — там прежний вид.
 // Пока товар не выбран — условный (серый) вид, а не дефолтная доска: терраса,
-// ступени, ограждение и терраса у бассейна (TODO пп.3, 4).
-const SCHEMATIC_UNTIL_PRODUCT = new Set(['terrace', 'steps', 'railing', 'pool_terrace']);
+// ступени, ограждение, терраса у бассейна (TODO пп.3, 4) и дорожки (2026-09-01).
+// Грядки в список не входят — там прежний вид.
+const SCHEMATIC_UNTIL_PRODUCT = new Set(['terrace', 'steps', 'railing', 'pool_terrace', 'paths']);
 function _schematicDeckMat() {
   const c = (typeof FENCE_SCHEMATIC_COLOR !== 'undefined') ? FENCE_SCHEMATIC_COLOR : 0xb0a89c;
   return new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.05 });
@@ -1044,6 +1077,7 @@ function buildScene3d() {
   threeState.wallMeshes    = [];
   threeState.deckMeshes    = [];
   threeState.nosingMeshes  = [];      // полуступени: им доводится фаза шва текстуры
+  threeState.railCapMats   = [];      // крышки столбов: им доводится цвет по текстуре
   threeState.porchMeshes   = [];
   threeState.stepMeshes    = [];
   threeState.fenceMeshes   = [];
