@@ -1602,9 +1602,21 @@ function _assignFurnitureProduct(sample) {
     alert('Сначала поставьте точку на плане: «Садовая мебель» → карандаш ✏ → клик по плану.');
     return -1;
   }
-  let idx = (S.activeFurniture !== null && pts[S.activeFurniture]) ? S.activeFurniture : -1;
+  // Активная точка годится, только если она СВОБОДНА. После правки плана активной
+  // остаётся та, которую двигали, и она обычно уже с товаром — «Применить» перезаписывал
+  // её, хотя рядом стояли пустые точки (баг 2026-09-01). Свободные всегда в приоритете:
+  // сначала ближайшая свободная после активной, потом с начала списка.
+  const act = (S.activeFurniture !== null && pts[S.activeFurniture]) ? S.activeFurniture : -1;
+  let idx = (act >= 0 && !pts[act].product) ? act : -1;
+  if (idx < 0 && act >= 0) {
+    for (let k = 1; k <= pts.length; k++) {
+      const j = (act + k) % pts.length;
+      if (!pts[j].product) { idx = j; break; }
+    }
+  }
   if (idx < 0) idx = pts.findIndex(p => !p.product);
-  if (idx < 0) idx = pts.length - 1;
+  // Свободных нет вовсе — перезаписываем активную (явный выбор), иначе последнюю.
+  if (idx < 0) idx = (act >= 0) ? act : pts.length - 1;
   pts[idx].product = { id: sample.id, name: sample.name, modelUrl: sample.modelUrl || '' };
   // Следующая свободная — сначала после текущей, потом с начала; нет свободных — null
   // (тогда следующее «Применить» перезапишет последнюю точку).
@@ -1876,10 +1888,16 @@ async function _ensureCatalogSection(sectionId) {
     const tag = (typeof SECTION_TAGS !== 'undefined') ? SECTION_TAGS[sectionId] : null;
     // Наборы из SECTION_TAG_ONLY (мебель) тянем ТОЛЬКО по тегу: их товары лежат в
     // разных разделах, section_id отрезал бы часть выдачи.
-    const tagOnly = (typeof SECTION_TAG_ONLY !== 'undefined') && SECTION_TAG_ONLY.has(sectionId) && tag;
+    // Наборы из SECTION_MERGE показываются одним списком (доска ДПК + МПК): берём их
+    // МУЛЬТИТЕГОМ и без section_id — он отрезал бы вторую половину выдачи.
+    const merge = ((typeof SECTION_MERGE !== 'undefined') && SECTION_MERGE[sectionId]) || [];
+    const tags = tag ? [tag, ...merge.map(id => SECTION_TAGS[id]).filter(Boolean)] : [];
+    const tagOnly = tags.length > 1
+      || ((typeof SECTION_TAG_ONLY !== 'undefined') && SECTION_TAG_ONLY.has(sectionId) && tag);
     const filters = tagOnly ? [] : [new Filter(FilterType.SECTION_ID, sectionId)];
-    if (tag) filters.push(new Filter(FilterType.TAGS, [tag]));
-    filters.push(new Filter(FilterType.LIMIT, 50));
+    if (tags.length) filters.push(new Filter(FilterType.TAGS, tags));
+    // Объединённому набору лимит вдвое: 50 позиций делились бы между двумя тегами.
+    filters.push(new Filter(FilterType.LIMIT, tags.length > 1 ? 100 : 50));
     const res = await rm.getResources(...filters);
     // res === null → ошибка запроса → null (повторяемо); иначе массив (возможно пустой).
     let products = res ? (res.products || []) : null;
@@ -1887,7 +1905,7 @@ async function _ensureCatalogSection(sectionId) {
     // с мебелью, из-за чего появился SECTION_TAG_ONLY). Перезапрашиваем только по
     // тегу: лучше показать товары из соседнего раздела, чем пустой список и заглушки.
     if (tag && !tagOnly && products && products.length === 0) {
-      const byTag = await rm.getResources(new Filter(FilterType.TAGS, [tag]),
+      const byTag = await rm.getResources(new Filter(FilterType.TAGS, tags),
                                           new Filter(FilterType.LIMIT, 50));
       const alt = byTag ? (byTag.products || []) : [];
       if (alt.length) {
@@ -1897,7 +1915,8 @@ async function _ensureCatalogSection(sectionId) {
     }
     // На стенде должно быть видно, что именно приехало по разделу: пустой раздел
     // и ошибка запроса выглядят в интерфейсе одинаково («товаров нет»).
-    console.info('[catalog] раздел', sectionId, tag ? `(тег «${tag}»)` : '(без тега)',
+    console.info('[catalog] раздел', sectionId,
+                 tags.length ? `(тег${tags.length > 1 ? 'и' : ''} «${tags.join(', ')}»)` : '(без тега)',
                  '→', products === null ? 'ошибка запроса' : products.length + ' товар(ов)');
     _catalogCache[sectionId] = products;
     if (products === null) _catalogNoteFail(sectionId);
