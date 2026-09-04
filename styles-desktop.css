@@ -64,9 +64,9 @@ button, input, select, textarea { font-family: inherit; }
    ═══════════════════════════════════════════ */
 /* «СМЕТА» — во всю ширину внизу правой панели (была плавающей в углу экрана). */
 .d-fab-summary {
-  width: 100%; height: 48px; background: var(--accent); color: #fff;
+  width: 100%; height: 40px; background: var(--accent); color: #fff;
   border: none; border-radius: var(--r);
-  font-size: 36px; font-weight: 600; line-height: 1; cursor: pointer;
+  font-size: 22px; font-weight: 600; line-height: 1; cursor: pointer;
   transition: background .15s;
 }
 .d-fab-summary:hover { background: var(--accent-hover); }
@@ -217,11 +217,16 @@ button, input, select, textarea { font-family: inherit; }
    ═══════════════════════════════════════════ */
 .d-params-layout { flex: 1; display: flex; background: var(--bg); }
 .d-params-left {
-  width: var(--sidebar-w); padding: 16px 32px 28px; border-right: 1px solid #e0e0e0;
+  width: var(--sidebar-w); padding: 12px 20px 14px; border-right: 1px solid #e0e0e0;
   display: flex; flex-direction: column; gap: 0;
   overflow: hidden;
 }
-.d-params-title { font-size: 36px; font-weight: 400; margin-bottom: 24px; flex: none; }
+/* Заголовки левой панели — тем же кеглем, что заголовок правой (--panel-title-fz),
+   его подбирает _dSyncSidebarWidth (правка 2026-09-03). */
+.d-params-title {
+  font-size: var(--panel-title-fz, 25px); font-weight: 400;
+  margin-bottom: 12px; flex: none;
+}
 /* Заголовок и кнопки «Назад/Дальше» приколочены; скроллится только этот блок. */
 /* Отступ сверху — чтобы первый слайдер не упирался в кромку скролла и не
    срезался; по бокам 2px с компенсацией margin’ом: тень бегунка в крайних
@@ -234,8 +239,8 @@ button, input, select, textarea { font-family: inherit; }
    По макету: подпись слева, поле значения 44×44 справа, ниже дорожка 2px с
    оранжевой заливкой слева от бегунка, под ней — границы диапазона.
    Используется и в параметрах дома, и в настройках элементов в редакторах. */
-.d-param-group { margin-bottom: 20px; }
-.d-floor-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
+.d-param-group { margin-bottom: 14px; }
+.d-floor-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
 .d-param-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
@@ -304,13 +309,13 @@ button, input, select, textarea { font-family: inherit; }
 .d-hm-sw.active { border-color: #000; box-shadow: 0 0 0 2px #000 inset; }
 
 .d-params-actions {
-  display: flex; gap: 12px; flex: none; padding-top: 24px;
+  display: flex; gap: 8px; flex: none; padding-top: 14px;
 }
 /* Обводку задаёт вариант кнопки (.d-btn-back / .d-btn-next), поэтому здесь
    border не сбрасываем — иначе он перебивает вариант по специфичности. */
 .d-params-actions .d-btn {
-  flex: 1; height: 48px; border-radius: var(--r);
-  font-size: 18px; cursor: pointer; transition: background .15s, box-shadow .2s;
+  flex: 1; height: 38px; border-radius: var(--r);
+  font-size: 15px; cursor: pointer; transition: background .15s, box-shadow .2s;
 }
 /* Второстепенная кнопка: белая, обводка 2px, надпись Semibold. */
 .d-btn-back {
@@ -344,10 +349,10 @@ button, input, select, textarea { font-family: inherit; }
   width: var(--sidebar-w); border-right: 1px solid #e0e0e0;
   display: flex; flex-direction: column; overflow: hidden;
 }
-/* Заголовки экранов — 36px обычного веса, как «Выберите тип дома» на первом. */
+/* Заголовки экранов — единый кегль с заголовком правой панели (--panel-title-fz). */
 .d-sidebar-title {
-  font-size: 36px; font-weight: 400; color: var(--text);
-  padding: 16px 32px 12px;   /* по этим 32px считается ширина панели */
+  font-size: var(--panel-title-fz, 25px); font-weight: 400; color: var(--text);
+  padding: 12px 20px 8px;    /* по этим 20px (SIDEBAR_PAD) считается ширина панели */
 }
 .d-sidebar-list {
   flex: 1; min-height: 0; overflow-y: auto;
@@ -357,11 +362,11 @@ button, input, select, textarea { font-family: inherit; }
    по её верхнему краю (в аккордеоне под кнопкой раскрываются настройки). */
 .d-sb-row { display: flex; gap: 2px; align-items: flex-start; }
 .d-sb-btn {
-  width: 100%; height: 48px; background: var(--bg); border: 2px solid var(--btn-border);
-  border-radius: var(--r); font-size: 18px; font-weight: 600; cursor: pointer;
+  width: 100%; height: 38px; background: var(--bg); border: 2px solid var(--btn-border);
+  border-radius: var(--r); font-size: 15px; font-weight: 600; cursor: pointer;
   /* Подпись строго в одну строку (TODO п.5): ширину панели под самую длинную
      («Ограждения террасы») считает _dSyncSidebarWidth. */
-  text-align: left; padding: 0 14px; white-space: nowrap;
+  text-align: left; padding: 0 12px; white-space: nowrap;
   transition: border-color .2s, box-shadow .2s, background .15s;
   user-select: none;
 }
@@ -388,9 +393,9 @@ button, input, select, textarea { font-family: inherit; }
    (TODO.md, этап 2 п.2). Квадратов с иконками правки и удаления больше нет:
    сброс раздела делает кнопка «Удалить всё» внутри самого редактора. */
 .d-sb-edit {
-  height: 48px; flex-shrink: 0; padding: 0 16px; background: var(--accent);
+  height: 38px; flex-shrink: 0; padding: 0 12px; background: var(--accent);
   border: none; border-radius: var(--r); cursor: pointer;
-  color: #fff; font-size: 16px; font-weight: 600; white-space: nowrap;
+  color: #fff; font-size: 14px; font-weight: 600; white-space: nowrap;
   transition: background .15s;
 }
 .d-sb-edit:hover:not(:disabled) { background: var(--accent-hover); }
@@ -440,13 +445,13 @@ button, input, select, textarea { font-family: inherit; }
 .d-sb-accordion:empty { display: none; }
 /* Кнопки действий — во всю ширину панели, столбиком под кнопкой раздела. */
 .d-sb-actions { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; padding-top: 2px; }
-.d-sb-actions .d-canvas-btn { width: 100%; height: 48px; white-space: nowrap; }
-.d-sidebar-actions { display: flex; gap: 12px; padding: 12px 20px; flex-shrink: 0; }
-.d-sidebar-actions .d-btn { flex: 1; height: 48px; font-size: 18px; }
+.d-sb-actions .d-canvas-btn { width: 100%; height: 38px; white-space: nowrap; }
+.d-sidebar-actions { display: flex; gap: 8px; padding: 10px 12px; flex-shrink: 0; }
+.d-sidebar-actions .d-btn { flex: 1; height: 38px; font-size: 15px; }
 .d-sidebar-actions .d-btn.hidden { display: none; }
 .d-sb-next { flex: 1; display: flex; }
 .d-sb-next.hidden { display: none; }
-.d-sb-next .d-canvas-btn { flex: 1; height: 48px; font-size: 18px; }
+.d-sb-next .d-canvas-btn { flex: 1; height: 38px; font-size: 15px; }
 /* Пока управление в панели, футер редактора пуст — убираем его совсем. */
 .d-canvas-footer.moved { display: none; }
 
