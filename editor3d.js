@@ -36,7 +36,6 @@ const E3D_GRID_STEP  = 1.0;    // шаг ВИДИМОЙ сетки на земл
 const E3D_PICK_R     = 0.45;   // радиус попадания по точке линии / мебели, м
 const E3D_HANDLE_HIT = 0.40;   // радиус попадания по ручке, м
 const E3D_HANDLE_R   = 0.20;   // радиус кружка ручки, м
-const E3D_ROT_OUT    = 0.55;   // вынос ручки поворота за габарит объекта, м
 const E3D_GLUE_R     = 0.45;   // клик ближе этого к существующей точке — склейка, м
 // Все маркеры, контуры и ручки лежат НА ЗЕМЛЕ, на одной отметке. Раньше высота
 // бралась лучом вниз, по поверхности под точкой, и угол террасы, попавший под
@@ -182,16 +181,8 @@ function _e3dStepsHandles(s) {
        { handle: 'sw', np: { x: s.x + s.w / 2, y: s.y + s.h } }];
 }
 
-// Ручка поворота грядки — сбоку от неё; мебели — по направлению «переда».
-function _e3dBedRotHandle(b) {
-  return { handle: 'rot', np: { x: b.x + b.w + E3D_ROT_OUT / GRID, y: b.y + b.h / 2 } };
-}
-
-function _e3dFurnRotHandle(p) {
-  const a = p.rot || 0;
-  return { handle: 'rot', np: { x: p.x + Math.cos(a) * E3D_ROT_OUT / GRID,
-                                y: p.y + Math.sin(a) * E3D_ROT_OUT / GRID } };
-}
+// Грядка и мебель поворачиваются на 90° КЛИКОМ по себе — отдельной ручки у них
+// нет: объекты мелкие, и ручка рядом с ними только мешала прицелиться.
 
 function _e3dHitHandles(list, np) {
   const r = E3D_HANDLE_HIT / GRID;
@@ -246,11 +237,10 @@ function e3dHitTest(np, object) {
                : (S.beds || []);
     const act = kind === 'rect' ? secActiveIdx(sec)
               : kind === 'steps' ? S.activeSteps : S.activeBed;
-    const cur = (act !== null && act !== undefined) ? list[act] : null;
+    // Ручки есть только у прямоугольников и лестницы — у грядки её нет.
+    const cur = (act !== null && act !== undefined && kind !== 'beds') ? list[act] : null;
     if (cur) {
-      const handles = kind === 'rect'  ? _e3dRectHandles(cur)
-                    : kind === 'steps' ? _e3dStepsHandles(cur)
-                    : [_e3dBedRotHandle(cur)];
+      const handles = kind === 'rect' ? _e3dRectHandles(cur) : _e3dStepsHandles(cur);
       const h = _e3dHitHandles(handles, np);
       if (h) return { kind, idx: act, handle: h };
     }
@@ -259,13 +249,7 @@ function e3dHitTest(np, object) {
   }
 
   if (kind === 'point') {
-    const list = S.furniture || [];
-    const act = S.activeFurniture;
-    if (act !== null && list[act]) {
-      const h = _e3dHitHandles([_e3dFurnRotHandle(list[act])], np);
-      if (h) return { kind, idx: act, handle: h };
-    }
-    const i = _e3dHitPoints(list, np);
+    const i = _e3dHitPoints(S.furniture || [], np);
     return i === null ? null : { kind, idx: i, handle: 'move' };
   }
 
@@ -442,22 +426,15 @@ function e3dSync() {
       if (!r || !(r.w > 0) || !(r.h > 0)) return;
       g.add(_e3dOutline(_e3dRectPts(r), i === sel ? E3D_COL_SEL : E3D_COL_IDLE, true));
     });
-    const cur = (sel !== null && sel !== undefined) ? list[sel] : null;
+    const cur = (sel !== null && sel !== undefined && kind !== 'beds') ? list[sel] : null;
     if (cur && cur.w > 0 && cur.h > 0) {
-      const handles = kind === 'rect'  ? _e3dRectHandles(cur)
-                    : kind === 'steps' ? _e3dStepsHandles(cur)
-                    : [_e3dBedRotHandle(cur)];
+      const handles = kind === 'rect' ? _e3dRectHandles(cur) : _e3dStepsHandles(cur);
       for (const h of handles) g.add(_e3dHandle(h.np));
     }
   } else if (kind === 'point') {
     (S.furniture || []).forEach((p, i) => {
       g.add(_e3dMarker(p, i === sel ? E3D_COL_SEL : E3D_COL_IDLE, 0.22));
     });
-    if (sel !== null && (S.furniture || [])[sel]) {
-      const h = _e3dFurnRotHandle(S.furniture[sel]);
-      g.add(_e3dOutline([S.furniture[sel], h.np], E3D_COL_SEL, false));
-      g.add(_e3dHandle(h.np));
-    }
   } else if (kind === 'railing') {
     // Ограждение считается по периметру террасы — рисуем только маркеры входа.
     if (typeof railingEntryPointsNorm === 'function') {
@@ -642,8 +619,7 @@ function _e3dDragMove(np) {
     else if (sec === 'fence' && typeof _fenceTooClose === 'function' && _fenceTooClose(q)) return;
     pt.x = q.x; pt.y = q.y;
   }
-  e3dSync();
-  if (typeof onParamChange === 'function') onParamChange();   // сборка 3D дебаунсится
+  e3dSync();   // сцену НЕ пересобираем: тяжёлая сборка идёт один раз, на отпускании
 }
 
 // ── Рисование дорожек и забора отрезками ─────────────────────────────────
@@ -752,8 +728,7 @@ function _e3dOnDown(ev) {
   // Попали в свой объект — орбиту на время жеста выключаем: ЛКМ тянет объект.
   // Промах — орбита работает как обычно.
   if (hit) {
-    E3D.drag = (hit.handle === 'rot' || hit.handle === 'toggle')
-             ? null : _e3dDragStart(hit, p.norm);
+    E3D.drag = (hit.handle === 'toggle') ? null : _e3dDragStart(hit, p.norm);
     if (E3D.drag) threeState.controls.enabled = false;
   }
 }
@@ -790,8 +765,10 @@ function _e3dOnUp(ev) {
   }
 
   if (pr.hit) {
-    if (pr.hit.handle === 'rot') { _e3dRotate(pr.hit); return; }
     e3dSelect(pr.hit);
+    // Грядка и мебель поворачиваются на 90° тем же кликом, которым выбираются
+    // (как было на плане): отдельной ручки у них нет.
+    if (pr.hit.kind === 'beds' || pr.hit.kind === 'point') { _e3dRotate(pr.hit); return; }
     // В линиях клик по точке ещё и начинает отрезок от неё — так соседний
     // отрезок приклеивается к существующей ломаной (ТЗ: «клик по существующей
     // точке — склейка»).
@@ -803,7 +780,7 @@ function _e3dOnUp(ev) {
   else e3dSelect(null);
 }
 
-// Ручка поворота: шаг 90° (ТЗ). У грядки это обмен сторон, у мебели — угол rot.
+// Поворот на 90° (ТЗ): у грядки это обмен сторон, у мебели — угол rot.
 function _e3dRotate(hit) {
   if (hit.kind === 'beds' && typeof rotateActiveBed === 'function') rotateActiveBed();
   else if (hit.kind === 'point' && typeof rotateActiveFurniture === 'function') rotateActiveFurniture(1);
