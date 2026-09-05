@@ -2274,23 +2274,70 @@ function _defaultRect(secId) {
                     'terrace', 'xy');
 }
 
-// Добавляет новый rect рядом с активным (или в центре, если нет активного).
+// Стороны дома, к которым пристраивается терраса: прямоугольник СНАРУЖИ стены,
+// длинной стороной вдоль неё, по центру фасада. Порядок — от главного фасада
+// по кругу. axis — вдоль какой оси двигать блок, если место занято.
+function _houseSideRects(len, dep) {
+  const hp = (typeof getHousePolygonNorm === 'function' && !isEmptyLot())
+    ? getHousePolygonNorm() : null;
+  const b = hp && hp.bboxNorm;
+  if (!b) return [];
+  const cx = b.nx + b.nw / 2, cy = b.ny + b.nh / 2;
+  const cl = (v, size) => Math.max(0, Math.min(1 - size, v));
+  return [
+    { side: 'S', axis: 'x', rect: { x: snapNorm(cl(cx - len / 2, len)), y: b.ny + b.nh, w: len, h: dep } },
+    { side: 'E', axis: 'y', rect: { x: b.nx + b.nw,      y: snapNorm(cl(cy - len / 2, len)), w: dep, h: len } },
+    { side: 'W', axis: 'y', rect: { x: cl(b.nx - dep, dep), y: snapNorm(cl(cy - len / 2, len)), w: dep, h: len } },
+    { side: 'N', axis: 'x', rect: { x: snapNorm(cl(cx - len / 2, len)), y: cl(b.ny - dep, dep), w: len, h: dep } },
+  ];
+}
+
+// Сторона уже занята террасой? Достаточно, чтобы блок стоял вплотную к этой
+// стене и перекрывался с ней вдоль фасада.
+function _houseSideTaken(secId, cand) {
+  const tol = 0.35 / GRID;                       // 35 см — «вплотную»
+  for (const r of secRects(secId)) {
+    if (!r || r.w <= 0 || r.h <= 0) continue;
+    const overX = Math.min(r.x + r.w, cand.x + cand.w) - Math.max(r.x, cand.x);
+    const overY = Math.min(r.y + r.h, cand.y + cand.h) - Math.max(r.y, cand.y);
+    if (overX > tol && overY > tol) return true; // блок стоит на этой стороне
+  }
+  return false;
+}
+
+// Добавляет новый блок. Терраса идёт к СВОБОДНОЙ стене дома: раньше блок вставал
+// вплотную справа от активного, на той же стене, и в 3D сливался с ним в общий
+// настил — пользователь не видел, что что-то добавилось. Отдельно стоящая секция
+// (терраса у бассейна) и участок без дома — по-прежнему рядом с активным блоком.
 function addRect(secId) {
   const rects = secRects(secId);
   const mn = SNAP / GRID;
   const w0 = snapNorm(3 / GRID), h0 = snapNorm(2 / GRID);
   const act = secActiveIdx(secId);
-  let nx, ny;
-  if (act !== null && rects[act]) {
-    const a = rects[act];
-    nx = snapNorm(a.x + a.w + mn);  // справа от активного
-    ny = a.y;
-    if (nx + w0 > 1) { nx = snapNorm(Math.max(0, a.x - w0 - mn)); }
-  } else {
-    const d = _defaultRect(secId);
-    nx = d.x; ny = d.y;
+  let nr = null;
+
+  if (secId === 'terrace' && rects.length) {
+    for (const s of _houseSideRects(snapNorm(4 / GRID), h0)) {
+      if (_houseSideTaken(secId, s.rect)) continue;
+      nr = _placeFree({ ...s.rect }, secId, s.axis);
+      break;
+    }
   }
-  rects.push({ x: nx, y: ny, w: w0, h: h0 });
+  if (!nr) {
+    let nx, ny;
+    if (act !== null && rects[act]) {
+      const a = rects[act];
+      nx = snapNorm(a.x + a.w + mn);  // справа от активного
+      ny = a.y;
+      if (nx + w0 > 1) { nx = snapNorm(Math.max(0, a.x - w0 - mn)); }
+    } else {
+      const d = _defaultRect(secId);
+      nx = d.x; ny = d.y;
+    }
+    nr = _placeFree({ x: nx, y: ny, w: w0, h: h0 }, secId, 'xy');
+  }
+
+  rects.push(nr);
   setSecActiveIdx(secId, rects.length - 1);
   drawRectCanvas(secId);
 }
