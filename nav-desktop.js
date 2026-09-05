@@ -18,7 +18,7 @@ const D_SIDEBAR_ITEMS = [
   { id: 'steps',         lbl: 'Ступени',             hasEditor: true  },
   { id: 'paths',         lbl: 'Дорожки',             hasEditor: true  },
   { id: 'fence',         lbl: 'Забор',               hasEditor: true  },
-  { id: 'facade',        lbl: 'Отделка фасада',      hasEditor: true, hidden: true },
+  { id: 'facade',        lbl: 'Отделка фасада',      hasEditor: true },
   { id: 'beds',          lbl: 'Грядки',              hasEditor: true  },
   { id: 'furniture',     lbl: 'Садовая мебель',      hasEditor: true  },
   { id: 'pool_terrace',  lbl: 'Терраса у бассейна',  hasEditor: true  },
@@ -953,35 +953,17 @@ function _dRenderSidebar() {
 }
 
 // ══════════════════════════════════════════════
-// ОТДЕЛКА ФАСАДА — выбор ведётся ТОЛЬКО на плане (редактор d-canvas-facade,
-// initFacadeCanvas в canvas.js). 3D-пикинг и плавающий тулбар над сценой убраны:
-// в 3D видно результат (панели), выбор — на плане. Кнопки ниже вызываются из
-// футера план-редактора.
+// ОТДЕЛКА ФАСАДА — выбор кликом по самим стенам в 3D (editor3d.js, kind
+// 'facade'): мультивыбор, повторный клик снимает, доступны все этажи. Раньше
+// выбор шёл на плане и только по первому этажу. Кнопки «выбрать всё» нет —
+// по ТЗ она не нужна.
 // ══════════════════════════════════════════════
 
-// Перерисовать план-редактор фасада, если он сейчас открыт.
-function _dRedrawFacadePlan() {
-  if (typeof drawFacadeCanvas === 'function'
-      && document.getElementById('d-canvas-facade')?.classList.contains('active')) {
-    drawFacadeCanvas();
-  }
-}
-
-function dFacadeSelectAll() {
-  // Выбираем то, что показано на плане (элементы 1-го этажа) — иначе выбор
-  // содержал бы недоступные для снятия сегменты верхних этажей.
-  const T = (typeof _houseWorldTransform === 'function') ? _houseWorldTransform() : null;
-  if (T) for (const e of T.layout.edges) for (const it of e.items) {
-    if (it.segId) S.wallZones[it.segId] = true;
-  }
-  if (typeof _applyFacadeSelection === 'function') _applyFacadeSelection();
-  _dRedrawFacadePlan();
-}
-
+// «Сбросить» — снять отделку со всех сегментов.
 function dFacadeClear() {
   S.wallZones = {};
   if (typeof _applyFacadeSelection === 'function') _applyFacadeSelection();
-  _dRedrawFacadePlan();
+  if (typeof e3dSync === 'function') e3dSync();
 }
 
 // ── Delete (×) button — сбросить настройки конкретной позиции ──
@@ -1618,8 +1600,9 @@ function _applySampleToActive(sample) {
     if (dActiveItem === 'terrace') _syncDefaultStepsProduct();
     if (typeof buildScene3d === 'function') buildScene3d();
   } else if (dActiveItem === 'furniture') {
-    // Мебель: товар назначается ТОЧКЕ плана — выбранной, иначе первой свободной
-    // «по порядку номеров». Модель встаёт в эту точку при пересборке сцены.
+    // Мебель СТАВИТСЯ выбором товара (ТЗ п. 10): предмет появляется перед
+    // камерой на ближайшем свободном месте, повторный клик по карточке ставит
+    // ещё один. Точек размещения больше нет.
     _assignFurnitureProduct(sample);
   } else if (dActiveItem === 'facade') {
     // Фасад: материал панелей ложится на выбранные сегменты (S.wallZones) без
@@ -1641,41 +1624,96 @@ function _applySampleToActive(sample) {
 // бы на одно место. Явный выбор точки кликом на плане при этом сохраняет смысл
 // «заменить товар в этой точке».
 // Возвращает индекс точки или -1, если точек нет.
-function _assignFurnitureProduct(sample) {
-  const pts = S.furniture || [];
-  if (!pts.length) {
-    alert('Сначала поставьте точку на плане: «Садовая мебель» → карандаш ✏ → клик по плану.');
-    return -1;
+// Точка перед камерой в координатах плана: цель орбиты — это то, на что
+// пользователь сейчас смотрит.
+function _furnitureCameraSpot() {
+  if (typeof threeState === 'undefined' || !threeState || typeof worldToCanvas !== 'function') {
+    return { x: 0.5, y: 0.5 };
   }
-  // Активная точка годится, только если она СВОБОДНА. После правки плана активной
-  // остаётся та, которую двигали, и она обычно уже с товаром — «Применить» перезаписывал
-  // её, хотя рядом стояли пустые точки (баг 2026-09-01). Свободные всегда в приоритете:
-  // сначала ближайшая свободная после активной, потом с начала списка.
-  const act = (S.activeFurniture !== null && pts[S.activeFurniture]) ? S.activeFurniture : -1;
-  let idx = (act >= 0 && !pts[act].product) ? act : -1;
-  if (idx < 0 && act >= 0) {
-    for (let k = 1; k <= pts.length; k++) {
-      const j = (act + k) % pts.length;
-      if (!pts[j].product) { idx = j; break; }
+  const t = threeState.controls.target;
+  const sz = lastHouseSize();
+  const p = worldToCanvas([{ x: t.x, z: t.z }], sz.L, sz.W)[0];
+  return { x: Math.max(0, Math.min(1, p.x)), y: Math.max(0, Math.min(1, p.y)) };
+}
+
+const FURN_SPOT_M = 1.5;      // место под предмет мебели, м
+
+// Что мебели мешает: дом, грядки, лестницы, бассейн и уже стоящая мебель.
+// Террасы и дорожки в список НЕ идут — на настил мебель ставить как раз можно.
+function _furnitureBlockers() {
+  const out = [];
+  const add = (x, y, w, h) => { if (w > 0 && h > 0) out.push({ x, y, w, h }); };
+  if (typeof isEmptyLot !== 'function' || !isEmptyLot()) {
+    const hp = getHousePolygonNorm();
+    if (hp && hp.bboxNorm) add(hp.bboxNorm.nx, hp.bboxNorm.ny, hp.bboxNorm.nw, hp.bboxNorm.nh);
+  }
+  for (const b of (S.beds || [])) add(b.x, b.y, b.w, b.h);
+  if (S.sections.includes('steps')) {
+    for (const st of (typeof stepsAll === 'function' ? stepsAll() : [S.steps])) {
+      if (st) add(st.x, st.y, st.w, st.h);
     }
   }
-  if (idx < 0) idx = pts.findIndex(p => !p.product);
-  // Свободных нет вовсе — перезаписываем активную (явный выбор), иначе последнюю.
-  if (idx < 0) idx = (act >= 0) ? act : pts.length - 1;
-  pts[idx].product = { id: sample.id, name: sample.name, modelUrl: sample.modelUrl || '' };
-  // Следующая свободная — сначала после текущей, потом с начала; нет свободных — null
-  // (тогда следующее «Применить» перезапишет последнюю точку).
-  let next = -1;
-  for (let k = 1; k <= pts.length; k++) {
-    const j = (idx + k) % pts.length;
-    if (!pts[j].product) { next = j; break; }
+  if (S.pool) add(S.pool.x, S.pool.y, S.pool.w, S.pool.h);
+  const s = FURN_SPOT_M / GRID;
+  for (const f of (S.furniture || [])) add(f.x - s / 2, f.y - s / 2, s, s);
+  return out;
+}
+
+// Ближайшее свободное место к желаемой точке: если там занято, расходимся
+// кольцами по сетке снапа. Не нашли за 40 колец — ставим как есть (лучше
+// поставить внахлёст, чем не поставить вовсе).
+function _furnitureFreeSpot(near) {
+  const half = FURN_SPOT_M / 2 / GRID;
+  const blockers = _furnitureBlockers();
+  const gap = 0.2 / GRID;
+  const free = (x, y) => {
+    if (x - half < 0 || y - half < 0 || x + half > 1 || y + half > 1) return false;
+    const r = { x: x - half, y: y - half, w: half * 2, h: half * 2 };
+    return !blockers.some(o => _rectsOverlap(r, o, gap));
+  };
+  const x0 = snapNorm(near.x), y0 = snapNorm(near.y);
+  if (free(x0, y0)) return { x: x0, y: y0 };
+  const step = SNAP / GRID;
+  for (let k = 1; k <= 40; k++) {
+    for (let a = 0; a < 12; a++) {                 // кольцо: 12 направлений
+      const ang = a * Math.PI / 6;
+      const x = snapNorm(x0 + Math.cos(ang) * k * step);
+      const y = snapNorm(y0 + Math.sin(ang) * k * step);
+      if (free(x, y)) return { x, y };
+    }
   }
-  S.activeFurniture = (next >= 0) ? next : null;
+  return { x: x0, y: y0 };
+}
+
+// Разворот «лицом к камере», округлённый до 90°: ручка поворота крутит теми же
+// шагами, и свободный угол из неё было бы не вернуть.
+function _furnitureFacingRot(spot) {
+  if (typeof threeState === 'undefined' || !threeState) return 0;
+  const sz = lastHouseSize();
+  const c = worldToCanvas([{ x: threeState.camera.position.x, z: threeState.camera.position.z }],
+                          sz.L, sz.W)[0];
+  const a = Math.atan2(c.y - spot.y, c.x - spot.x);
+  const q = Math.round(a / (Math.PI / 2)) * (Math.PI / 2);
+  return ((q % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+}
+
+// Выбор товара в каталоге СТАВИТ предмет мебели (ТЗ п. 10): точек размещения
+// больше нет, «Ещё одна» не нужна — повторный клик по карточке ставит второй
+// экземпляр. Место — перед камерой, ближайшее свободное.
+function _assignFurnitureProduct(sample) {
+  if (!Array.isArray(S.furniture)) S.furniture = [];
+  const spot = _furnitureFreeSpot(_furnitureCameraSpot());
+  S.furniture.push({
+    x: spot.x, y: spot.y, rot: _furnitureFacingRot(spot),
+    product: { id: sample.id, name: sample.name, modelUrl: sample.modelUrl || '' },
+  });
+  const idx = S.furniture.length - 1;
+  S.activeFurniture = idx;
+  if (!S.sections.includes('furniture')) S.sections.push('furniture');
+  dConfigured.add('furniture');
   if (typeof buildScene3d === 'function') buildScene3d();
-  if (typeof drawFurnitureCanvas === 'function'
-      && document.getElementById('d-canvas-furniture')?.classList.contains('active')) {
-    drawFurnitureCanvas();
-  }
+  if (typeof e3dSync === 'function') e3dSync();
+  _dSyncSectionActions();
   return idx;
 }
 

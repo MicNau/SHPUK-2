@@ -51,6 +51,7 @@ const E3D_KIND = {
   paths:        'line',
   fence:        'line',
   railing:      'railing',   // строится по террасе — таскаются только маркеры входа
+  facade:       'facade',    // выбор сегментов стен кликом по самим мешам
 };
 
 const E3D = {
@@ -104,16 +105,16 @@ function _e3dPointAt(ev) {
   _e3dNdc.y = -((ev.clientY - r.top)  / r.height) * 2 + 1;
   _e3dRay.setFromCamera(_e3dNdc, threeState.camera);
 
-  let world = null;
+  let world = null, object = null;
   const hits = _e3dRay.intersectObjects(_e3dPickTargets(), true);
-  if (hits.length) world = hits[0].point;
+  if (hits.length) { world = hits[0].point; object = hits[0].object; }
   else {
     // Мимо всей геометрии — считаем пересечение с плоскостью земли.
     const p = new THREE.Vector3();
     if (!_e3dRay.ray.intersectPlane(_e3dGroundPlane, p)) return null;
     world = p;
   }
-  return { world, norm: _e3dToNorm(world.x, world.z) };
+  return { world, object, norm: _e3dToNorm(world.x, world.z) };
 }
 
 // Высота поверхности под точкой плана (для подсветки): луч сверху вниз.
@@ -218,13 +219,28 @@ function _e3dHitEntry(np) {
   return hit;
 }
 
+// Элемент фасада под объектом, в который попал луч: id стоит на группе-модуле,
+// а луч приходит в её меш, поэтому поднимаемся по родителям.
+function _e3dFacadeIdOf(obj) {
+  for (let o = obj; o; o = o.parent) {
+    if (o.userData && o.userData.segId) return o.userData.segId;
+  }
+  return null;
+}
+
 // Что под курсором в АКТИВНОМ разделе? → {kind, idx, handle} или null.
 // Ручки выбранного объекта имеют приоритет над телом — иначе за угол не
 // ухватиться, клик всегда попадал бы в прямоугольник.
-function e3dHitTest(np) {
+function e3dHitTest(np, object) {
   const sec = E3D.sec;
-  if (!sec || !np) return null;
+  if (!sec) return null;
   const kind = E3D_KIND[sec];
+
+  if (kind === 'facade') {
+    const id = object ? _e3dFacadeIdOf(object) : null;
+    return id ? { kind, idx: id, handle: 'toggle' } : null;
+  }
+  if (!np) return null;
 
   if (kind === 'rect' || kind === 'steps' || kind === 'beds') {
     const list = kind === 'rect' ? secRects(sec)
@@ -274,6 +290,16 @@ function e3dSelect(hit) {
   if (!sec) return;
   const idx = hit ? hit.idx : null;
   const kind = E3D_KIND[sec];
+  if (kind === 'facade') {
+    // Мультивыбор: повторный клик снимает. Клик мимо стены не трогает выбранное —
+    // иначе один промах сбрасывал бы всю отделку.
+    if (idx === null) return;
+    if (S.wallZones[idx]) delete S.wallZones[idx];
+    else S.wallZones[idx] = true;
+    if (typeof _applyFacadeSelection === 'function') _applyFacadeSelection();
+    e3dSync();
+    return;
+  }
   if (kind === 'rect')       setSecActiveIdx(sec, idx);
   else if (kind === 'steps') { if (idx !== null) S.activeSteps = idx; }
   else if (kind === 'beds')  S.activeBed = idx;
@@ -294,6 +320,7 @@ function e3dSelectedIdx() {
   if (kind === 'point') return S.activeFurniture;
   if (kind === 'line')  return (_lineSel.name === sec) ? _lineSel.idx : null;
   if (kind === 'railing') return null;   // отдельных объектов нет — только вход
+  if (kind === 'facade')  return null;   // выбор мультиэлементный, в S.wallZones
   return null;
 }
 
@@ -403,7 +430,7 @@ function e3dSync() {
   const g = _e3dClearGroup();
   if (!g) return;
   const sec = E3D.sec;
-  _e3dSyncGrid(!!sec);
+  _e3dSyncGrid(!!sec && E3D_KIND[sec] !== 'facade');
   if (!sec) { _e3dSyncOverlay(); return; }
 
   const kind = E3D_KIND[sec];
@@ -441,6 +468,15 @@ function e3dSync() {
         g.add(_e3dHandle(e.a));
         g.add(_e3dHandle(e.b));
       }
+    }
+  } else if (kind === 'facade') {
+    for (const seg of (threeState.facadeSegs || [])) {
+      if (!S.wallZones[seg.userData.segId]) continue;
+      const box = new THREE.Box3().setFromObject(seg);
+      const h = new THREE.Box3Helper(box, E3D_COL_SEL);
+      h.material.depthTest = false;
+      h.renderOrder = 999;
+      g.add(h);
     }
   } else if (kind === 'line') {
     const pts = S.pts[sec] || [];
@@ -713,13 +749,14 @@ function _e3dDrawClick(np) {
 function _e3dOnDown(ev) {
   if (ev.button !== 0 || !E3D.sec || !threeState) return;
   const p = _e3dPointAt(ev);
-  const hit = p ? e3dHitTest(p.norm) : null;
+  const hit = p ? e3dHitTest(p.norm, p.object) : null;
   E3D.press = { x: ev.clientX, y: ev.clientY, hit, np: p ? p.norm : null, moved: false };
   // Попали в свой объект — орбиту на время жеста выключаем: ЛКМ тянет объект.
   // Промах — орбита работает как обычно.
   if (hit) {
-    threeState.controls.enabled = false;
-    E3D.drag = (hit.handle === 'rot') ? null : _e3dDragStart(hit, p.norm);
+    E3D.drag = (hit.handle === 'rot' || hit.handle === 'toggle')
+             ? null : _e3dDragStart(hit, p.norm);
+    if (E3D.drag) threeState.controls.enabled = false;
   }
 }
 
@@ -780,7 +817,7 @@ function _e3dRotate(hit) {
 function _e3dOnHover(ev) {
   if (!E3D.sec || !threeState || E3D.press) return;
   const p = _e3dPointAt(ev);
-  const hit = p ? e3dHitTest(p.norm) : null;
+  const hit = p ? e3dHitTest(p.norm, p.object) : null;
   threeState.renderer.domElement.style.cursor =
     hit ? (hit.handle === 'move' ? 'move' : 'pointer')
         : (E3D_KIND[E3D.sec] === 'line' ? 'crosshair' : '');
