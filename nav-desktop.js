@@ -6,7 +6,6 @@
 // ══════════════════════════════════════════════
 let dStep = 1;
 let dActiveItem = null;     // currently selected sidebar item id
-let dEditorOpen = false;    // true when canvas editor is open (locks UI)
 const dConfigured = new Set(); // items that completed configuration
 
 // All sidebar items.
@@ -26,19 +25,6 @@ const D_SIDEBAR_ITEMS = [
 ];
 // Пункты, реально попадающие в меню (и в замер ширины левой панели).
 const D_MENU_ITEMS = D_SIDEBAR_ITEMS.filter(i => !i.hidden);
-
-// Canvas init functions map
-const D_CANVAS_INIT = {
-  terrace:      () => { initRectCanvas('terrace'); _dSyncTerraceHeight(); },
-  steps:        () => initStepsCanvas(),
-  pool_terrace: () => initRectCanvas('pool_terrace'),
-  paths:        () => initPathsCanvas(),
-  fence:        () => { initSnapCanvas('fence'); _dSyncFenceHeight(); },
-  railing:      () => initRailingCanvas(),
-  beds:         () => initBedsCanvas(),
-  facade:       () => initFacadeCanvas(),
-  furniture:    () => initFurnitureCanvas(),
-};
 
 // ══════════════════════════════════════════════
 // SCREEN NAVIGATION
@@ -337,11 +323,9 @@ function _dResetAllConfigurations() {
   S.curSec = 0;
   dConfigured.clear();
   dActiveItem = null;
-  dEditorOpen = false;
-  // Возвращаем toggle'ы (террасы / крыльца) к дефолтным значениям из HTML
-  // (initial-class "on" → ON). Сбрасываем все .tg в их HTML-дефолт + зеркало S.toggles.
-  // Селектор без привязки к .d-center-canvas: пока редактор открыт, переключатели
-  // перенесены в левую панель (_dMountEditorControls).
+  // Тумблеры разделов возвращаем к значениям по умолчанию. Разметка панели
+  // раздела рисуется динамически, поэтому DOM может быть пуст — источником
+  // служит S.toggles (см. state.js).
   document.querySelectorAll('.tg').forEach(tg => {
     const isInitiallyOn = tg.dataset.initialOn === '1';
     tg.classList.toggle('on', isInitiallyOn);
@@ -720,8 +704,7 @@ function _dInitWorkspace() {
   _dParamsSig = sig;
 
   dActiveItem = null;
-  dEditorOpen = false;
-  _dCloseAllCanvases();
+  if (typeof e3dSetSection === 'function') e3dSetSection(null);
   _dRenderSidebar();
   _dSetPanelLocked(true); // Panel locked until an item is selected
 
@@ -732,56 +715,142 @@ function _dInitWorkspace() {
   }, 80);
 }
 
-// ── SIDEBAR ──
+// ── ПАНЕЛЬ АКТИВНОГО РАЗДЕЛА (версия 3D-UI) ──
 //
-// Управление редактором собрано в левой панели (аккордеон): настройки открытого
-// элемента раскрываются ПОД его кнопкой, остальные кнопки меню съезжают вниз,
-// «Добавить/Удалить» встают справа от кнопки, «Дальше» — внизу панели.
+// 2D-редактор убран: разметка идёт прямо в сцене (editor3d.js), а под кнопкой
+// активного раздела раскрываются его параметры и действия. Кнопок «Изменить» и
+// «Дальше» больше нет — раздел активен, значит его можно одновременно
+// редактировать в сцене и назначать ему товар в правой панели.
 //
-// Сами контролы не дублируются: DOM-узлы из футера редактора переносятся в
-// панель и возвращаются обратно при закрытии. Так сохраняются все onclick’и и
-// состояние полей — переписывать десять редакторов не нужно.
-let _dMovedControls = [];   // [{node, home}] — что вынесено в панель
+// Раньше DOM-узлы переносились из футера канвас-редактора и возвращались
+// обратно; теперь разметка описана здесь одной таблицей.
+//   params  — HTML параметров (слайдеры, тумблеры). Идентификаторы полей
+//             сохранены: на них завязаны _dSyncTerraceHeight, dOnPathWidth, tgOn.
+//   actions — кнопки под параметрами; sel:true — кнопка работает только когда
+//             в сцене что-то выбрано (её включает _dSyncSectionActions).
 
-function _dUnmountEditorControls() {
-  // В обратном порядке и перед запомненным соседом — иначе узлы вернутся
-  // в футер в другой последовательности.
-  for (let i = _dMovedControls.length - 1; i >= 0; i--) {
-    const { node, home, before } = _dMovedControls[i];
-    if (!home) continue;
-    home.insertBefore(node, (before && before.parentNode === home) ? before : null);
-  }
-  _dMovedControls = [];
-  document.querySelectorAll('.d-canvas-footer.moved')
-    .forEach(f => f.classList.remove('moved'));
+const D_TERRACE_H_PARAM = `
+  <div class="d-param-group">
+    <div class="d-param-head">
+      <span class="d-param-label">Высота настила, см.</span>
+      <input class="d-param-input" type="number" id="v-terrace-h" min="15" step="5"
+             oninput="dSetTerraceHeight(this.value)">
+    </div>
+    <input class="d-param-range" type="range" id="r-terrace-h" min="15" step="5"
+           oninput="dSetTerraceHeight(this.value)">
+    <div class="d-param-unit" id="d-terrace-h-hint"><span>15 см</span><span>80 см</span></div>
+  </div>`;
+
+const D_SECTION_UI = {
+  terrace: {
+    params: D_TERRACE_H_PARAM,
+    actions: [
+      { lbl: 'Ещё одна',          fn: "addRect('terrace')" },
+      { lbl: 'Удалить выбранную', fn: 'dDeleteSelected()', sel: true },
+      { lbl: 'Удалить всё',       fn: "dResetSection('terrace')" },
+    ],
+  },
+  pool_terrace: {
+    actions: [
+      { lbl: 'Ещё одна',          fn: "addRect('pool_terrace')" },
+      { lbl: 'Бассейн ▭',         fn: "dSetPool('rect')" },
+      { lbl: 'Бассейн ○',         fn: "dSetPool('round')" },
+      { lbl: 'Удалить выбранную', fn: 'dDeleteSelected()', sel: true },
+      { lbl: 'Удалить всё',       fn: "dResetSection('pool_terrace')" },
+    ],
+  },
+  steps: {
+    params: `<div class="tg" onclick="ttg(this)" data-id="steps-railing"><span class="tg-txt">Перила лестницы</span><div class="tg-ind"></div></div>`,
+    actions: [
+      { lbl: 'Ещё одна',          fn: 'addSteps()' },
+      { lbl: 'Удалить выбранную', fn: 'dDeleteSelected()', sel: true },
+      { lbl: 'Удалить всё',       fn: "dResetSection('steps')" },
+    ],
+  },
+  beds: {
+    actions: [
+      { lbl: 'Ещё одна',          fn: 'addBed()' },
+      { lbl: 'Удалить выбранную', fn: 'dDeleteSelected()', sel: true },
+      { lbl: 'Удалить всё',       fn: "dResetSection('beds')" },
+    ],
+  },
+  paths: {
+    params: `
+      <div class="d-param-group">
+        <div class="d-param-head">
+          <span class="d-param-label">Ширина дорожки, см.</span>
+          <input class="d-param-input" type="number" id="v-paths-width" value="120" min="60" max="300"
+                 oninput="dOnPathWidth()">
+        </div>
+        <input class="d-param-range" type="range" id="r-paths-width" value="120" min="60" max="300" step="10"
+               oninput="document.getElementById('v-paths-width').value=this.value; dOnPathWidth()">
+        <div class="d-param-unit"><span>60 см</span><span>300 см</span></div>
+      </div>`,
+    actions: [
+      { lbl: 'Удалить точку', fn: 'dDeleteSelected()', sel: true },
+      { lbl: 'Удалить всё',   fn: "dResetSection('paths')" },
+    ],
+  },
+  fence: {
+    // Высота полотна одна — 1920 мм (правка 2026-08-30), подпись справочная.
+    params: `<div class="d-param-note">Высота забора: 1920 мм</div>`,
+    actions: [
+      { lbl: 'Калитка',       fn: 'dFenceGate()' },
+      { lbl: 'Удалить точку', fn: 'dDeleteSelected()', sel: true },
+      { lbl: 'Удалить всё',   fn: "dResetSection('fence')" },
+    ],
+  },
+  railing: {
+    actions: [
+      { lbl: 'Обозначить вход', fn: 'dRailingEntry()' },
+      { lbl: 'Удалить всё',     fn: "dResetSection('railing')" },
+    ],
+  },
+  furniture: {
+    actions: [
+      { lbl: 'Удалить выбранную', fn: 'dDeleteSelected()', sel: true },
+      { lbl: 'Удалить всё',       fn: "dResetSection('furniture')" },
+    ],
+  },
+  facade: {
+    actions: [
+      { lbl: 'Сбросить',    fn: 'dFacadeClear()' },
+      { lbl: 'Удалить всё', fn: "dResetSection('facade')" },
+    ],
+  },
+};
+
+function _dSectionUiHtml(secId) {
+  const cfg = D_SECTION_UI[secId];
+  if (!cfg) return '';
+  const params = cfg.params || '';
+  const actions = (cfg.actions || []).map(a =>
+    `<button class="d-canvas-btn${a.sel ? ' needs-sel' : ''}" onclick="${a.fn}">${a.lbl}</button>`).join('');
+  return `<div class="d-sb-accordion" id="d-sb-accordion">${params}
+            <div class="d-canvas-actions">${actions}</div>
+          </div>`;
 }
 
-function _dMountEditorControls(secId) {
-  const cv = document.getElementById('d-canvas-' + secId);
-  const footer = cv && cv.querySelector('.d-canvas-footer');
-  const accordion = document.getElementById('d-sb-accordion');
-  const actions = document.getElementById('d-sb-actions');
-  const nextSlot = document.getElementById('d-sb-next');
-  if (!footer || !accordion) return;
+// Кнопки «Удалить выбранную / Удалить точку» имеют смысл только при выборе в
+// сцене. Дёргается из editor3d при каждом выборе — перерисовывать всю панель
+// ради одного состояния кнопки незачем.
+function _dSyncSectionActions() {
+  const has = (typeof e3dSelectedIdx === 'function') && e3dSelectedIdx() !== null;
+  document.querySelectorAll('#d-sb-accordion .needs-sel').forEach(b => { b.disabled = !has; });
+}
 
-  const move = (node, target) => {
-    if (!node || !target) return;
-    _dMovedControls.push({ node, home: node.parentNode, before: node.nextSibling });
-    target.appendChild(node);
-  };
-
-  // «Готово» уходит вниз панели (там оно читается как «Дальше»), остальные
-  // кнопки действий — справа от кнопки элемента.
-  footer.querySelectorAll('.d-canvas-btn').forEach(btn => {
-    move(btn, btn.classList.contains('confirm') ? nextSlot : actions);
-  });
-  // Всё остальное из футера (высота настила, переключатели) — под кнопку.
-  [...footer.children].forEach(node => {
-    if (node.classList.contains('d-canvas-actions')) return;   // опустела выше
-    move(node, accordion);
-  });
-  footer.classList.add('moved');
-  _dSyncAllRangeFills();
+// Удалить выбранный в сцене объект активного раздела. Одна кнопка на все
+// разделы: что именно удалять, знает сам раздел.
+function dDeleteSelected() {
+  const sec = dActiveItem;
+  if (!sec) return;
+  if (sec === 'terrace' || sec === 'pool_terrace') delActiveRect(sec);
+  else if (sec === 'steps')     delActiveSteps();
+  else if (sec === 'beds')      delActiveBed();
+  else if (sec === 'furniture') delActiveFurniture();
+  else if (S.pts && S.pts[sec]) delLinePoint(sec);
+  if (typeof e3dSync === 'function') e3dSync();
+  _dSyncSectionActions();
 }
 
 // Раздел, который нельзя открыть, пока не сделано что-то другое. Возвращает
@@ -798,102 +867,64 @@ function _dSectionBlockedBy(secId) {
 
 function _dRenderSidebar() {
   const list = document.getElementById('d-sidebar-list');
-  // Вернуть перенесённые узлы до перерисовки — innerHTML их бы уничтожил.
-  _dUnmountEditorControls();
   list.innerHTML = D_MENU_ITEMS.map(item => {
     const isActive = dActiveItem === item.id;
     const isCfg = dConfigured.has(item.id);
     // Раздел без выполненного условия (ограждение без террасы) не открывается.
     const needs = _dSectionBlockedBy(item.id);
-    const isLocked = (dEditorOpen && dActiveItem !== item.id) || !!needs;
-    const isEditing = dEditorOpen && isActive;
-    // Пока какой-то раздел раскрыт, остальные приглушаем — так открытый заметнее
-    // (TODO п.3). От `locked` отличается тем, что кнопка остаётся кликабельной.
-    const isDimmed = !!dActiveItem && !isActive && !isLocked;
+    // Пока какой-то раздел открыт, остальные приглушаем — так открытый заметнее.
+    // Кликабельными они остаются: переключаться между разделами можно свободно,
+    // подтверждать («Дальше») больше нечего.
+    const isDimmed = !!dActiveItem && !isActive && !needs;
     return `
       <div class="d-sb-row">
         <div class="d-sb-main">
-          <button class="d-sb-btn ${isActive ? 'active' : ''} ${isCfg ? 'configured' : ''} ${isLocked ? 'locked' : ''} ${isDimmed ? 'dimmed' : ''}"
+          <button class="d-sb-btn ${isActive ? 'active' : ''} ${isCfg ? 'configured' : ''} ${needs ? 'locked' : ''} ${isDimmed ? 'dimmed' : ''}"
                   data-id="${item.id}"
                   onclick="dClickItem('${item.id}')"
                   ${needs ? `title="${needs}"` : ''}
-                  ${isLocked ? 'disabled' : ''}>
+                  ${needs ? 'disabled' : ''}>
             ${item.lbl}
           </button>
-          ${isEditing ? '<div class="d-sb-actions" id="d-sb-actions"></div>' : ''}
-          ${isEditing ? '<div class="d-sb-accordion" id="d-sb-accordion"></div>' : ''}
-          ${(isActive && !isEditing) ? `
-          <div class="d-sb-filters" id="d-sb-filters">
-            <div class="d-color-section" id="d-color-section">
-              <div class="d-color-title">Цвет:</div>
-              <div class="d-color-grid" id="d-color-grid"></div>
-            </div>
-            <div class="d-color-section" id="d-price-section">
-              <div class="d-color-title">Цена:</div>
-              <div class="d-price-grid" id="d-price-grid"></div>
-            </div>
-            ${item.id === 'beds' ? `
-            <div class="d-color-section">
-              <div class="d-color-title">Высота борта:</div>
-              <div class="d-price-grid" id="d-bed-h-grid"></div>
-            </div>
-            <div class="d-color-section">
-              <div class="d-color-title">Крепёж:</div>
-              <div class="d-price-grid" id="d-bed-mount-grid"></div>
-            </div>` : ''}
-            ${item.id === 'railing' ? `
-            <div class="d-color-section">
-              <div class="d-color-title">Крышка столба:</div>
-              <div class="d-price-grid" id="d-rail-cap-grid"></div>
-            </div>
-            <div class="d-color-section">
-              <div class="d-color-title">Сечение столба:</div>
-              <div class="d-price-grid" id="d-rail-post-grid"></div>
-            </div>` : ''}
-          </div>` : ''}
+          ${isActive ? _dSectionUiHtml(item.id) : ''}
         </div>
-        ${!isEditing && isCfg && item.hasEditor ? `<button class="d-sb-edit ${isLocked ? 'locked' : ''}"
-            onclick="dEditItem('${item.id}')" ${isLocked ? 'disabled' : ''}>Изменить</button>` : ''}
       </div>`;
   }).join('');
 
-  // Фильтры каталога живут в ряду активного раздела — их надо наполнить сразу
-  // после перерисовки списка (разметку выше создаёт этот же шаблон).
-  if (document.getElementById('d-sb-filters')) {
-    _dRenderColorGrid();
-    _dRenderPriceGrid();
-    _dRenderRailFilters();
-    _dRenderBedFilters();
+  _dSyncSectionActions();
+  _dSyncAllRangeFills();
+  // Поля параметров рисуются заново — вернуть в них значения из состояния.
+  if (dActiveItem === 'terrace') _dSyncTerraceHeight();
+  if (dActiveItem === 'paths') {
+    const v = document.getElementById('v-paths-width'), r = document.getElementById('r-paths-width');
+    if (v) v.value = S.pathWidth;
+    if (r) { r.value = S.pathWidth; _dSyncRangeFill(r); }
   }
+  // Тумблеры рисуются из S.toggles: DOM здесь вторичен (см. tgOn).
+  document.querySelectorAll('#d-sb-accordion .tg').forEach(tg => {
+    if (tg.dataset.id) tg.classList.toggle('on', !!S.toggles[tg.dataset.id]);
+  });
 
-  // Кнопка «Дальше» внизу панели живёт только пока открыт редактор.
-  const nextSlot = document.getElementById('d-sb-next');
-  if (nextSlot) nextSlot.classList.toggle('hidden', !dEditorOpen);
-
-  // «Назад» (TODO пп.8, 9): пока раздел не раскрыт — это выход к параметрам дома,
-  // так и подписываем. В раскрытом разделе кнопку убираем совсем: выход оттуда —
-  // «Дальше» (Готово), а «Назад» рядом с ним читалось как шаг мастера.
+  // «Назад» — выход к параметрам дома. Подтверждать разделы больше не нужно,
+  // поэтому кнопка видна всегда.
   const backBtn = document.querySelector('.d-sidebar-actions .d-btn-back');
   if (backBtn) {
-    backBtn.classList.toggle('hidden', dEditorOpen);
+    backBtn.classList.remove('hidden');
     backBtn.textContent = '← К параметрам дома';
   }
-
-  if (dEditorOpen && dActiveItem) _dMountEditorControls(dActiveItem);
 
   // Правую панель материалов показываем только когда выбран элемент проекта.
   const panel = document.getElementById('d-panel');
   if (panel) panel.classList.toggle('hidden', !dActiveItem);
 
-  // Раскрытый раздел «всплывает» (TODO.md, этап 2 п.15): вместе с фильтрами ряд
-  // становится высоким и у нижних пунктов уезжает за край панели. Прокручиваем
-  // список так, чтобы ряд был виден целиком.
+  // Открытый раздел «всплывает»: вместе с параметрами ряд становится высоким и
+  // у нижних пунктов уезжает за край панели. Прокручиваем список так, чтобы ряд
+  // был виден целиком.
   if (dActiveItem) {
     const row = list.querySelector('.d-sb-btn[data-id="' + dActiveItem + '"]');
     const box = row && row.closest('.d-sb-row');
     if (box) requestAnimationFrame(() => box.scrollIntoView({ block: 'nearest' }));
   }
-
 }
 
 // ══════════════════════════════════════════════
@@ -930,7 +961,6 @@ function dFacadeClear() {
 
 // ── Delete (×) button — сбросить настройки конкретной позиции ──
 function dDeleteItem(secId) {
-  if (dEditorOpen) return;
   const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
   const label = item ? item.lbl : secId;
   if (!window.confirm(`Удалить настройки «${label}»?`)) return;
@@ -1244,9 +1274,10 @@ function dResetSection(secId) {
   // Раздел больше не настроен: закрываем редактор, убираем его из проекта.
   S.sections = S.sections.filter(s => s !== secId);
   dConfigured.delete(secId);
-  dEditorOpen = false;
-  _dCloseAllCanvases();
-  if (dActiveItem === secId) dActiveItem = null;
+  if (dActiveItem === secId) {
+    dActiveItem = null;
+    if (typeof e3dSetSection === 'function') e3dSetSection(null);
+  }
 
   _dRenderSidebar();
   _dSetPanelLocked(!dActiveItem);
@@ -1254,43 +1285,28 @@ function dResetSection(secId) {
   if (typeof buildScene3d === 'function') setTimeout(() => init3dCanvas('d-slot-workspace'), 50);
 }
 
-// ── Click on sidebar button ──
+// ── Клик по кнопке раздела ──
+// Кнопок «Изменить» и «Дальше» больше нет: клик делает раздел активным, и он
+// сразу и редактируется в сцене, и получает товары из каталога справа.
 function dClickItem(secId) {
-  if (dEditorOpen) return; // locked
-
   const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
   if (!item) return;
   // Раздел с невыполненным условием (ограждение без террасы) не открываем.
   const blocked = _dSectionBlockedBy(secId);
   if (blocked) { dToast(blocked); return; }
-
-  // If has editor and NOT yet configured → open editor
-  if (item.hasEditor && !dConfigured.has(secId)) {
-    _dOpenEditor(secId);
-    return;
-  }
-
-  // Otherwise → select item, show catalog
+  if (dActiveItem === secId) return;
   _dSelectItem(secId);
 }
 
-// ── Edit (pencil) button ──
-function dEditItem(secId) {
-  if (dEditorOpen) return;
-  _dOpenEditor(secId);
-}
-
-// ── Select item (no editor) ──
+// ── Сделать раздел активным ──
 function _dSelectItem(secId) {
   dActiveItem = secId;
-  dEditorOpen = false;
 
-  // For non-editor items, add to sections on first click
-  const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
-  if (item && !item.hasEditor && !dConfigured.has(secId)) {
-    dConfigured.add(secId);
-    if (!S.sections.includes(secId)) S.sections.push(secId);
-  }
+  if (!S.sections.includes(secId)) S.sections.push(secId);
+  _dSeedSection(secId);
+  // Раздел считается настроенным, как только в нём есть объекты: подтверждать
+  // («Дальше») больше нечего.
+  if (_dSectionHasContent(secId)) dConfigured.add(secId);
 
   // Map active item to curSec for material application
   const secIdx = SECS.findIndex(s => s.id === secId);
@@ -1299,6 +1315,8 @@ function _dSelectItem(secId) {
   _dRenderSidebar();
   _dSetPanelLocked(false);
   _dRenderPanelContent();
+  if (typeof e3dSetSection === 'function') e3dSetSection(secId);
+  _dShowEditorHint(secId);
 
   // Rebuild 3D
   if (typeof buildScene3d === 'function') {
@@ -1308,16 +1326,59 @@ function _dSelectItem(secId) {
   }
 }
 
-// ── Open editor ──
-// Разделы, для которых инструкцию в этой сессии уже показывали (TODO.md, этап 1 п.15).
+// В разделе есть хоть один объект? От этого зависит отметка «настроен» —
+// раньше её ставила кнопка «Дальше».
+function _dSectionHasContent(secId) {
+  if (RECT_SECTIONS[secId]) return secRects(secId).length > 0;
+  if (secId === 'steps')     return (S.stepsList || []).length > 0;
+  if (secId === 'beds')      return (S.beds || []).length > 0;
+  if (secId === 'furniture') return (S.furniture || []).length > 0;
+  if (secId === 'facade')    return Object.keys(S.wallZones || {}).length > 0;
+  if (S.pts && S.pts[secId]) return S.pts[secId].length > 0;
+  return true;
+}
+
+// Стартовая разметка раздела при первом открытии. Раньше её создавали
+// init*Canvas редакторов (initRectCanvas, initBedsCanvas, initSnapCanvas);
+// редакторы убраны, а заготовка нужна — иначе в сцене нечего выбирать.
+function _dSeedSection(secId) {
+  if (RECT_SECTIONS[secId]) {
+    const rects = secRects(secId);
+    if (rects.length === 0) { rects.push(_defaultRect(secId)); setSecActiveIdx(secId, 0); }
+    else if (secActiveIdx(secId) === null) setSecActiveIdx(secId, 0);
+    return;
+  }
+  if (secId === 'beds') {
+    if (!S.beds || S.beds.length === 0) { S.beds = [_defaultBed()]; S.activeBed = 0; }
+    return;
+  }
+  if (secId === 'steps') { _stepsNormalize(); return; }
+  if (secId === 'railing') { _railingSync(); return; }
+  // Дорожки и забор: линия-заготовка перед фасадом, как было в редакторе.
+  if (secId === 'paths' || secId === 'fence') _lineEnsureDefault(secId);
+}
+
+// ── Подсказка при первом открытии раздела ──
+// Разделы, для которых инструкцию в этой сессии уже показывали.
 const _dHintShown = new Set();
 
-// Всплывающая инструкция при ПЕРВОМ заходе в редактор раздела. Текст берём из самой
-// подсказки редактора — один источник, расходиться нечему. Помним в рамках сессии.
+// Текст жил в разметке канвас-редактора; редакторы убраны, и подсказки теперь
+// описывают работу в сцене.
+const D_SECTION_HINTS = {
+  terrace: 'Тяните террасу за угловые маркеры. «ЕЩЁ ОДНА» добавляет ещё один блок, «УДАЛИТЬ ВЫБРАННУЮ» убирает выбранный.',
+  pool_terrace: 'Отдельно стоящая терраса: тяните за углы. «БАССЕЙН ▭» и «БАССЕЙН ○» ставят бассейн — в настиле на его месте будет вырез; повторное нажатие убирает.',
+  steps: 'Лестницу двигают за середину, ширину меняют маркерами по краям. Разворачивается к террасе автоматически, количество ступеней считается от высоты.',
+  beds: 'Грядку перетаскивайте мышью, ручка сбоку разворачивает её. «ЕЩЁ ОДНА» добавляет грядку.',
+  paths: 'Кликами по земле ставьте точки дорожки. Клик по уже поставленной точке замыкает контур.',
+  fence: 'Кликами по земле ставьте точки забора. Ближе 3 м к дому и террасе забор не ставится. «КАЛИТКА» делает проём 1 м.',
+  railing: 'Ограждение строится по периметру террасы само и разрывается под лестницей. Нужен разрыв без лестницы — «ОБОЗНАЧИТЬ ВХОД».',
+  furniture: 'Мебель появляется в сцене при выборе товара в каталоге. Перетаскивайте её мышью; на террасе она встаёт на настил.',
+  facade: 'Кликайте по стенам дома, отмечая места под отделку. Повторный клик снимает выбор.',
+};
+
 function _dShowEditorHint(secId) {
   if (_dHintShown.has(secId)) return;
-  const src = document.querySelector('#d-canvas-' + secId + ' .d-canvas-hint');
-  const text = src ? src.textContent.trim() : '';
+  const text = D_SECTION_HINTS[secId];
   if (!text) return;
   _dHintShown.add(secId);
   const ov = document.getElementById('d-hint-overlay');
@@ -1336,9 +1397,9 @@ function dHideEditorHint() {
 }
 
 // ── Подсказка по управлению 3D — всплывающим окном при ПЕРВОМ запуске ──
-// Раньше висела постоянной плашкой в углу вида; теперь показывается один раз тем
-// же окном, что и инструкции редакторов, и больше не занимает угол (TODO п.1).
-const HINT_3D_TEXT = 'Левая кнопка мыши — вращение.\n'
+// ЛКМ по объекту своего раздела — выбор и перетаскивание, по пустому месту —
+// вращение камеры (см. editor3d.js).
+const HINT_3D_TEXT = 'Левая кнопка мыши — вращение, а на объекте раздела — выбор и перетаскивание.\n'
                    + 'Правая кнопка — перемещение.\n'
                    + 'Колесико — масштаб.';
 let _d3dHintShown = false;
@@ -1355,78 +1416,9 @@ function dShow3dHint() {
   ov.classList.add('active');
 }
 
-function _dOpenEditor(secId) {
-  dActiveItem = secId;
-  dEditorOpen = true;
-
-  // Add to sections if not yet
-  if (!S.sections.includes(secId)) S.sections.push(secId);
-
-  _dRenderSidebar();
-  _dSetPanelLocked(true);
-
-  // Show canvas
-  _dCloseAllCanvases();
-  const canvasEl = document.getElementById('d-canvas-' + secId);
-  if (canvasEl) canvasEl.classList.add('active');
-
-  // Подсказка по управлению 3D видна только на 3D-виде (TODO.md, этап 1 п.17):
-  // поверх плана она просвечивала сквозь редактор.
-  document.body.classList.add('d-editor-open');
-
-  const initFn = D_CANVAS_INIT[secId];
-  if (initFn) setTimeout(() => initFn(), 80);
-  _dShowEditorHint(secId);
-}
-
 // ── Назад (кнопка внизу сайдбара) ──
-// Открытый редактор закрывается ОТМЕНОЙ: пользователь, передумавший делать террасу,
-// раньше мог выйти только через «Готово», то есть согласившись её создать.
 function dBack() {
-  if (dEditorOpen) { dCancelCanvas(); return; }
   dGoTo(2);
-}
-
-// Выход из редактора без подтверждения. Элемент, который до этого не был настроен,
-// из проекта убирается — разметка остаётся в S, но в сцену не попадает.
-function dCancelCanvas() {
-  const secId = dActiveItem;
-  dEditorOpen = false;
-  _dCloseAllCanvases();
-  if (secId && !dConfigured.has(secId)) {
-    S.sections = S.sections.filter(x => x !== secId);
-    dActiveItem = null;
-  }
-  _dRenderSidebar();
-  _dSetPanelLocked(!dActiveItem);
-  if (dActiveItem) _dRenderPanelContent();
-  if (typeof buildScene3d === 'function') buildScene3d();
-}
-
-// ── Confirm editor (Готово) ──
-function dConfirmCanvas(secId) {
-  dConfigured.add(secId);
-  dEditorOpen = false;
-  _dCloseAllCanvases();
-
-  dActiveItem = secId;
-  S.curSec = 0;
-
-  _dRenderSidebar();
-  _dSetPanelLocked(false);
-  _dRenderPanelContent();
-
-  // Rebuild 3D
-  setTimeout(() => {
-    init3dCanvas('d-slot-workspace');
-  }, 100);
-}
-
-// ── Canvas helpers ──
-function _dCloseAllCanvases() {
-  document.querySelectorAll('.d-center-canvas').forEach(el => el.classList.remove('active'));
-  // Редактор закрыт — снова показываем подсказку по управлению 3D (см. п.17).
-  document.body.classList.remove('d-editor-open');
 }
 
 // ── Panel lock/unlock ──
@@ -1473,8 +1465,58 @@ function _dRenderPanelContent() {
   const _f = catFilter(secId);
   _f.colors = new Set([..._f.colors].filter(n => _palette.has(n)));
 
+  _dRenderFilters(secId);
+
   // Auto-show catalog results (селектор раздела и блок образцов убраны из UI)
   dShowResults();
+}
+
+// ── ФИЛЬТРЫ КАТАЛОГА (правая панель) ──
+// Цвет и цена — у всех разделов; специфические (крышка и сечение столба,
+// высота борта и крепёж грядки) добавляются своему разделу. Блок свёрнут по
+// умолчанию: развёрнутый он занимает половину панели и оттесняет карточки.
+let _dFiltersOpen = false;
+
+function _dRenderFilters(secId) {
+  const spec = document.getElementById('d-spec-filters');
+  if (spec) {
+    spec.innerHTML =
+      secId === 'beds' ? `
+        <div class="d-color-section">
+          <div class="d-color-title">Высота борта:</div>
+          <div class="d-price-grid" id="d-bed-h-grid"></div>
+        </div>
+        <div class="d-color-section">
+          <div class="d-color-title">Крепёж:</div>
+          <div class="d-price-grid" id="d-bed-mount-grid"></div>
+        </div>` :
+      secId === 'railing' ? `
+        <div class="d-color-section">
+          <div class="d-color-title">Крышка столба:</div>
+          <div class="d-price-grid" id="d-rail-cap-grid"></div>
+        </div>
+        <div class="d-color-section">
+          <div class="d-color-title">Сечение столба:</div>
+          <div class="d-price-grid" id="d-rail-post-grid"></div>
+        </div>` : '';
+  }
+  _dRenderColorGrid();
+  _dRenderPriceGrid();
+  _dRenderRailFilters();
+  _dRenderBedFilters();
+  _dSyncFiltersBox();
+}
+
+function _dSyncFiltersBox() {
+  const box = document.getElementById('d-filters-box');
+  const btn = document.getElementById('d-filters-toggle');
+  if (box) box.classList.toggle('open', _dFiltersOpen);
+  if (btn) btn.classList.toggle('open', _dFiltersOpen);
+}
+
+function dToggleFilters() {
+  _dFiltersOpen = !_dFiltersOpen;
+  _dSyncFiltersBox();
 }
 
 

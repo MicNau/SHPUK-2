@@ -345,10 +345,13 @@ const S = {
   catSection: null,    // выбранный раздел каталога (bitrix_id) или null = дефолт по элементу
   catShowResults: false,
   estimate: {},        // elementId -> { id, name, price } — выбранный в смету товар по элементу
-  // Тумблеры canvas-редакторов (id из data-id → bool): 'steps-railing',
-  // 'porch-canopy'… Зеркалируются из DOM
-  // в ttg/_dCacheToggleDefaults — 3D-слой читает ТОЛЬКО отсюда (tgOn), не DOM.
-  toggles: {},
+  // Тумблеры разделов (id из data-id → bool): 'steps-railing', 'porch-canopy'…
+  // Зеркалируются из DOM в ttg/_dCacheToggleDefaults — 3D-слой читает ТОЛЬКО
+  // отсюда (tgOn), не DOM.
+  // Значения по умолчанию заданы ЗДЕСЬ, а не разметкой: панель раздела рисуется
+  // динамически (версия 3D-UI), и на старте тумблера в DOM ещё нет —
+  // _dCacheToggleDefaults его не увидит.
+  toggles: { 'steps-railing': true },
   pathWidth: 120,      // ширина дорожки, см (инпут v-paths-width зеркалится сюда)
   // Садовая мебель: точки размещения на плане. Индекс+1 = номер точки на плане.
   // { x, y } — нормализованные 0..1 (как остальная разметка);
