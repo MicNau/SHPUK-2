@@ -429,31 +429,21 @@ button, input, select, textarea { font-family: inherit; }
    СПРАВА и укорачивали кнопку раздела, а слайдеры зажимались в остаток ширины
    (TODO пп.4, 5). */
 .d-sb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* Панель активного раздела: параметры (слайдеры, тумблеры), под ними кнопки
+   действий — столбиком во всю ширину, чтобы подписи не переносились. */
 .d-sb-accordion { padding: 10px 2px 4px; }
-/* Фильтры каталога под кнопкой выбранного раздела (TODO.md, этап 2 п.1).
-   Отступ слева — как у надписи на кнопке раздела, чтобы блок читался как её
-   продолжение. Цена в ОДНУ колонку: панель уже правой, в два столбца подписи
-   тиров ломались на три строки. */
-.d-sb-filters { padding: 12px 14px 6px; }
-.d-sb-filters .d-color-section { margin-bottom: 14px; }
-.d-sb-filters .d-color-section:last-child { margin-bottom: 0; }
-.d-sb-filters .d-color-grid { grid-template-columns: repeat(8, 1fr); }
-.d-sb-filters .d-price-grid { grid-template-columns: 1fr; gap: 6px; margin-bottom: 0; }
 .d-sb-accordion:empty { display: none; }
 .d-sb-accordion .d-param-group:last-child { margin-bottom: 0; }
 .d-sb-accordion .tg:last-child { margin-bottom: 0; }
-.d-sb-accordion:empty { display: none; }
-/* Кнопки действий — во всю ширину панели, столбиком под кнопкой раздела. */
-.d-sb-actions { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; padding-top: 2px; }
-.d-sb-actions .d-canvas-btn { width: 100%; height: 38px; white-space: nowrap; }
+.d-sb-accordion .d-canvas-actions {
+  display: flex; flex-direction: column; gap: 4px; padding-top: 6px;
+}
+.d-sb-accordion .d-canvas-btn { width: 100%; height: 38px; font-size: 15px; white-space: nowrap; }
+/* Справочная строка раздела (например «Высота забора: 1920 мм»). */
+.d-param-note { font-size: 14px; color: var(--muted, #666); padding: 2px 2px 6px; }
 .d-sidebar-actions { display: flex; gap: 8px; padding: 10px 12px; flex-shrink: 0; }
 .d-sidebar-actions .d-btn { flex: 1; height: 38px; font-size: 15px; }
 .d-sidebar-actions .d-btn.hidden { display: none; }
-.d-sb-next { flex: 1; display: flex; }
-.d-sb-next.hidden { display: none; }
-.d-sb-next .d-canvas-btn { flex: 1; height: 38px; font-size: 15px; }
-/* Пока управление в панели, футер редактора пуст — убираем его совсем. */
-.d-canvas-footer.moved { display: none; }
 
 /* CENTER — 3D / Canvas editor */
 .d-center {
@@ -465,6 +455,15 @@ button, input, select, textarea { font-family: inherit; }
 }
 .d-center-3d {
   position: absolute; inset: 0; cursor: grab; touch-action: none;
+}
+/* Оверлей размеров и площадей: HTML-плашки поверх сцены, позиции пересчитывает
+   editor3d.js каждый кадр. Кликов не ловит — иначе перекрывал бы выбор объектов. */
+.d-3d-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 20; }
+.d-3d-dim {
+  position: absolute; transform: translate(-50%, -50%);
+  padding: 2px 7px; background: rgba(255,255,255,.92);
+  border: 1px solid rgba(0,0,0,.12); border-radius: 3px;
+  font-size: 13px; font-weight: 600; color: #333; white-space: nowrap;
 }
 /* Индикатор загрузки 3D-моделей (мебель из каталога — файлы 4–12 МБ).
    Поверх 3D-вида и открытого редактора; показывается через d3dLoadingSet(). */
@@ -619,7 +618,25 @@ button, input, select, textarea { font-family: inherit; }
   flex: 1; min-height: 0; overflow: hidden; padding: 16px 20px 0;
   display: flex; flex-direction: column;
 }
+/* Фильтры каталога в правой панели: закреплены над списком товаров и свёрнуты
+   по умолчанию — развёрнутый блок занимает половину панели и оттесняет карточки
+   (версия 3D-UI; раньше фильтры жили в левой панели). */
 .d-panel-filters { flex-shrink: 0; }
+.d-filters-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; height: 34px; padding: 0 12px; margin-bottom: 8px;
+  background: var(--bg); border: 2px solid var(--btn-border); border-radius: var(--r);
+  font-size: 14px; font-weight: 600; color: var(--text); cursor: pointer;
+}
+.d-filters-toggle:hover { box-shadow: var(--hover-shadow); }
+.d-filters-caret { transition: transform .15s; }
+.d-filters-toggle.open .d-filters-caret { transform: rotate(180deg); }
+.d-filters-box { display: none; padding: 0 2px 8px; }
+.d-filters-box.open { display: block; }
+.d-filters-box .d-color-section { margin-bottom: 12px; }
+.d-filters-box .d-color-section:last-child { margin-bottom: 0; }
+.d-filters-box .d-color-grid { grid-template-columns: repeat(8, 1fr); }
+.d-filters-box .d-price-grid { grid-template-columns: 1fr; gap: 6px; margin-bottom: 0; }
 .d-panel-footer { flex-shrink: 0; padding: 12px 20px; }
 .d-panel-footer.hidden { display: none; }
 

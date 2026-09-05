@@ -254,9 +254,16 @@ function init3dCanvas(targetSlotId) {
     const t = clock.getElapsedTime();
     controls.update();
     if (typeof _onAnimFrame === 'function') _onAnimFrame(t);
+    // Подписи размеров — HTML поверх канваса, их позиции надо пересчитывать
+    // каждый кадр, иначе они отстают от вращения камеры (editor3d.js).
+    if (typeof e3dOnFrame === 'function') e3dOnFrame();
     renderer.render(scene, camera);
   }
   animate();
+
+  // Слой редактирования в 3D (выбор объектов, сетка, подписи) — слушатели
+  // навешиваются на канвас рендерера один раз, он переезжает между шагами целиком.
+  if (typeof e3dAttach === 'function') e3dAttach();
 
   buildScene3d();
 
@@ -1523,6 +1530,11 @@ function buildScene3d() {
     controls.target.set(cx, cy, cz);
     controls.update();
   }
+
+  // Слой редактирования (подсветка выбранного, маркеры точек, сетка, подписи)
+  // перерисовывается ПОСЛЕ сцены: он кладётся на поверхности, которых до сборки
+  // ещё нет (editor3d.js).
+  if (typeof e3dSync === 'function') e3dSync();
 }
 
 // Разрешить сцене снова выставить камеру (смена типа дома — новая геометрия,
