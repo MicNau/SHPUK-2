@@ -1327,6 +1327,7 @@ function _dSelectItem(secId) {
   _dRenderPanelContent();
   if (typeof e3dSetSection === 'function') e3dSetSection(secId);
   _dSyncSectionHint();
+  _dShowEditorHint(secId);
 
   // Rebuild 3D
   if (typeof buildScene3d === 'function') {
@@ -1383,6 +1384,26 @@ const D_SECTION_HINTS = {
   furniture: 'Мебель появляется в сцене при выборе товара в каталоге. Перетаскивайте её мышью, клик разворачивает на 90°; на террасе она встаёт на настил.',
   facade: 'Кликайте по стенам дома, отмечая места под отделку. Повторный клик снимает выбор. Простенок делится по границам окна на три части.',
 };
+
+// Всплывающее окно при ПЕРВОМ заходе в раздел — в дополнение к плашке в углу:
+// смену текста в углу легко не заметить, а первый заход требует прочитать жесты.
+// Помним показанные разделы в рамках сессии.
+const _dHintShown = new Set();
+
+function _dShowEditorHint(secId) {
+  if (_dHintShown.has(secId)) return;
+  const text = D_SECTION_HINTS[secId];
+  if (!text) return;
+  _dHintShown.add(secId);
+  const ov = document.getElementById('d-hint-overlay');
+  const body = document.getElementById('d-hint-text');
+  const title = document.getElementById('d-hint-title');
+  if (!ov || !body) return;
+  const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
+  if (title) title.textContent = item ? item.lbl : '';
+  body.textContent = text;
+  ov.classList.add('active');
+}
 
 function _dSyncSectionHint() {
   const el = document.getElementById('d-3d-hint');

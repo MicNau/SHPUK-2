@@ -432,9 +432,14 @@ function e3dSync() {
       for (const h of handles) g.add(_e3dHandle(h.np));
     }
   } else if (kind === 'point') {
-    (S.furniture || []).forEach((p, i) => {
-      g.add(_e3dMarker(p, i === sel ? E3D_COL_SEL : E3D_COL_IDLE, 0.22));
-    });
+    // Маркер у мебели нужен ТОЛЬКО пока её тащат: слой лежит на земле, и у
+    // предмета, стоящего на террасе, кружок оказывается далеко под ним и сбивает
+    // с толку. В покое предмет виден сам по себе, а при протяжке кружок
+    // показывает точку на земле, куда он встанет.
+    const d = E3D.drag;
+    if (d && d.kind === 'point' && (S.furniture || [])[d.idx]) {
+      g.add(_e3dMarker(S.furniture[d.idx], E3D_COL_SEL, 0.22));
+    }
   } else if (kind === 'railing') {
     // Ограждение считается по периметру террасы — рисуем только маркеры входа.
     if (typeof railingEntryPointsNorm === 'function') {
@@ -601,14 +606,17 @@ function _e3dDragMove(np) {
     if (!p || d.handle !== 'move') return;
     p.x = Math.max(0, Math.min(1, snapNorm(d.start.x + dx)));
     p.y = Math.max(0, Math.min(1, snapNorm(d.start.y + dy)));
+    // Сама модель едет за курсором сразу: маркера под мебелью больше нет, и без
+    // этого во время протяжки не было бы никакой обратной связи. Отметку по
+    // высоте (настил террасы или земля) досчитает сборка на отпускании.
+    const obj = (threeState.furnitureMeshes || [])[d.idx];
+    if (obj) { const w = _e3dToWorld(p); obj.position.x = w.x; obj.position.z = w.z; }
   } else if (d.kind === 'entry') {
     if (typeof railingEntryDrag === 'function') railingEntryDrag(d.idx, d.handle, np);
+  } else if (d.kind === 'line' && d.idx === 'gate') {
+    const q = _fenceProjectToLine(np);      // калитка не сходит с линии забора
+    if (q) S.fenceGate = q;
   } else if (d.kind === 'line') {
-    if (d.idx === 'gate') {
-      const q = _fenceProjectToLine(np);    // калитка не сходит с линии забора
-      if (q) S.fenceGate = q;
-      return;
-    }
     const pts = S.pts[sec] || [];
     const pt = pts[d.idx];
     if (!pt) return;
