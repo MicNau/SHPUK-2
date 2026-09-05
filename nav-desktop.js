@@ -42,6 +42,7 @@ function dGoTo(s) {
 
   // Хедер убран; «СМЕТА» — плавающая кнопка (см. _dSyncSummaryBtn).
   _dSyncSummaryBtn();
+  _dSyncSectionHint();          // подсказка раздела живёт только на шаге 3
 
   if (s === 1) { _dInitHouseGrid(); _dSyncSelectNext(); }
   else if (s === 2) _dInitParamsView();
@@ -705,6 +706,7 @@ function _dInitWorkspace() {
 
   dActiveItem = null;
   if (typeof e3dSetSection === 'function') e3dSetSection(null);
+  _dSyncSectionHint();
   _dRenderSidebar();
   _dSetPanelLocked(true); // Panel locked until an item is selected
 
@@ -1284,6 +1286,7 @@ function dResetSection(secId) {
   if (dActiveItem === secId) {
     dActiveItem = null;
     if (typeof e3dSetSection === 'function') e3dSetSection(null);
+    _dSyncSectionHint();
   }
 
   _dRenderSidebar();
@@ -1323,7 +1326,7 @@ function _dSelectItem(secId) {
   _dSetPanelLocked(false);
   _dRenderPanelContent();
   if (typeof e3dSetSection === 'function') e3dSetSection(secId);
-  _dShowEditorHint(secId);
+  _dSyncSectionHint();
 
   // Rebuild 3D
   if (typeof buildScene3d === 'function') {
@@ -1365,37 +1368,27 @@ function _dSeedSection(secId) {
   // (клик — начало отрезка, второй клик — конец), см. editor3d.js.
 }
 
-// ── Подсказка при первом открытии раздела ──
-// Разделы, для которых инструкцию в этой сессии уже показывали.
-const _dHintShown = new Set();
-
-// Текст жил в разметке канвас-редактора; редакторы убраны, и подсказки теперь
-// описывают работу в сцене.
+// ── Подсказка активного раздела ──
+// Висит постоянной плашкой в углу вида, пока раздел открыт (как раньше над
+// планом): всплывающее окно «один раз за сессию» пользователь не мог вернуть,
+// а работа в сцене без напоминания о жестах неочевидна.
 const D_SECTION_HINTS = {
-  terrace: 'Тяните террасу за угловые маркеры. «ЕЩЁ ОДНА» добавляет ещё один блок, «УДАЛИТЬ ВЫБРАННУЮ» убирает выбранный.',
-  pool_terrace: 'Отдельно стоящая терраса: тяните за углы. «БАССЕЙН ▭» и «БАССЕЙН ○» ставят бассейн — в настиле на его месте будет вырез; повторное нажатие убирает.',
+  terrace: 'Тяните террасу за угловые маркеры или за тело. «ЕЩЁ ОДНА» добавляет блок, «УДАЛИТЬ ВЫБРАННУЮ» убирает выбранный.',
+  pool_terrace: 'Отдельно стоящая терраса: тяните за углы или за тело. «БАССЕЙН ▭» и «БАССЕЙН ○» ставят бассейн — в настиле на его месте будет вырез; повторное нажатие убирает.',
   steps: 'Лестницу двигают за середину, ширину меняют маркерами по краям. Разворачивается к террасе автоматически, количество ступеней считается от высоты.',
-  beds: 'Грядку перетаскивайте мышью, ручка сбоку разворачивает её. «ЕЩЁ ОДНА» добавляет грядку.',
-  paths: 'Дорожка рисуется отрезками: клик — начало, второй клик — конец. Следующий отрезок — снова клик. Клик по уже поставленной точке склеивает отрезки. Esc отменяет начатый.',
-  fence: 'Забор рисуется отрезками: клик — начало, второй клик — конец. Клик по уже поставленной точке склеивает отрезки. Ближе 3 м к дому и террасе забор не ставится. «КАЛИТКА» делает проём 1 м.',
+  beds: 'Грядку перетаскивайте мышью; клик по ней разворачивает на 90°.',
+  paths: 'Дорожка рисуется отрезками: клик — начало, второй клик — конец. Следующий отрезок — снова клик. Клик по уже поставленной точке склеивает отрезки, Esc отменяет начатый.',
+  fence: 'Забор рисуется отрезками: клик — начало, второй клик — конец. Клик по уже поставленной точке склеивает. Ближе 3 м к дому и террасе забор не ставится. «КАЛИТКА» делает проём 1 м.',
   railing: 'Ограждение строится по периметру террасы само и разрывается под лестницей. Нужен разрыв без лестницы — «ОБОЗНАЧИТЬ ВХОД», затем тяните маркеры разрыва по периметру.',
-  furniture: 'Мебель появляется в сцене при выборе товара в каталоге. Перетаскивайте её мышью; на террасе она встаёт на настил.',
-  facade: 'Кликайте по стенам дома, отмечая места под отделку. Повторный клик снимает выбор.',
+  furniture: 'Мебель появляется в сцене при выборе товара в каталоге. Перетаскивайте её мышью, клик разворачивает на 90°; на террасе она встаёт на настил.',
+  facade: 'Кликайте по стенам дома, отмечая места под отделку. Повторный клик снимает выбор. Простенок делится по границам окна на три части.',
 };
 
-function _dShowEditorHint(secId) {
-  if (_dHintShown.has(secId)) return;
-  const text = D_SECTION_HINTS[secId];
-  if (!text) return;
-  _dHintShown.add(secId);
-  const ov = document.getElementById('d-hint-overlay');
-  const body = document.getElementById('d-hint-text');
-  const title = document.getElementById('d-hint-title');
-  if (!ov || !body) return;
-  const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
-  if (title) title.textContent = item ? item.lbl : '';
-  body.textContent = text;
-  ov.classList.add('active');
+function _dSyncSectionHint() {
+  const el = document.getElementById('d-3d-hint');
+  if (!el) return;
+  el.textContent = (dStep === 3 && dActiveItem && D_SECTION_HINTS[dActiveItem])
+    ? D_SECTION_HINTS[dActiveItem] : '';
 }
 
 function dHideEditorHint() {

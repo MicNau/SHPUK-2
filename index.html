@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=43">
+<link rel="stylesheet" href="styles-desktop.css?v=44">
 </head>
 <body>
 
@@ -111,6 +111,10 @@
     <div class="d-center">
       <div class="d-center-view">
         <div class="d-center-3d" id="d-slot-workspace"></div>
+
+        <!-- Подсказка активного раздела — постоянной плашкой в углу вида, как
+             было над планом. Текст ставит _dSyncSectionHint. -->
+        <div class="d-3d-hint" id="d-3d-hint"></div>
 
         <!-- Оверлей размеров и площадей: HTML-плашки поверх 3D, позиции
              считает editor3d.js (e3dOnFrame) — 2D-план убран, размеры
@@ -234,8 +238,8 @@
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Редактирование прямо в 3D (версия 3D-UI): выбор объектов, сетка, подписи.
      Идёт после viewer3d-*, потому что опирается на threeState и worldToCanvas. -->
-<script src="editor3d.js?v=4"></script>
+<script src="editor3d.js?v=5"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=118"></script>
+<script src="nav-desktop.js?v=119"></script>
 </body>
 </html>
