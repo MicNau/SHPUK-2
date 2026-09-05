@@ -768,6 +768,17 @@ const D_SECTION_UI = {
     ],
   },
   beds: {
+    // Специфические фильтры каталога живут в панели раздела, рядом с его
+    // настройками (ТЗ п. 8); цвет и цена — в правой панели (п. 7).
+    params: `
+      <div class="d-color-section">
+        <div class="d-color-title">Высота борта:</div>
+        <div class="d-price-grid" id="d-bed-h-grid"></div>
+      </div>
+      <div class="d-color-section">
+        <div class="d-color-title">Крепёж:</div>
+        <div class="d-price-grid" id="d-bed-mount-grid"></div>
+      </div>`,
     actions: [
       { lbl: 'Ещё одна',          fn: 'addBed()' },
       { lbl: 'Удалить выбранную', fn: 'dDeleteSelected()', sel: true },
@@ -801,6 +812,15 @@ const D_SECTION_UI = {
     ],
   },
   railing: {
+    params: `
+      <div class="d-color-section">
+        <div class="d-color-title">Крышка столба:</div>
+        <div class="d-price-grid" id="d-rail-cap-grid"></div>
+      </div>
+      <div class="d-color-section">
+        <div class="d-color-title">Сечение столба:</div>
+        <div class="d-price-grid" id="d-rail-post-grid"></div>
+      </div>`,
     actions: [
       { lbl: 'Обозначить вход', fn: 'dRailingEntry()' },
       { lbl: 'Удалить всё',     fn: "dResetSection('railing')" },
@@ -849,6 +869,7 @@ function dDeleteSelected() {
   else if (sec === 'beds')      delActiveBed();
   else if (sec === 'furniture') delActiveFurniture();
   else if (S.pts && S.pts[sec]) delLinePoint(sec);
+  if (typeof onParamChange === 'function') onParamChange();   // delActiveBed сцену не трогает
   if (typeof e3dSync === 'function') e3dSync();
   _dSyncSectionActions();
 }
@@ -893,6 +914,10 @@ function _dRenderSidebar() {
 
   _dSyncSectionActions();
   _dSyncAllRangeFills();
+  // Специфические фильтры живут в блоке раздела — наполняем сразу после того,
+  // как разметка панели создана заново.
+  _dRenderRailFilters();
+  _dRenderBedFilters();
   // Поля параметров рисуются заново — вернуть в них значения из состояния.
   if (dActiveItem === 'terrace') _dSyncTerraceHeight();
   if (dActiveItem === 'paths') {
@@ -1354,8 +1379,8 @@ function _dSeedSection(secId) {
   }
   if (secId === 'steps') { _stepsNormalize(); return; }
   if (secId === 'railing') { _railingSync(); return; }
-  // Дорожки и забор: линия-заготовка перед фасадом, как было в редакторе.
-  if (secId === 'paths' || secId === 'fence') _lineEnsureDefault(secId);
+  // Дорожки и забор заготовки НЕ получают: линия рисуется кликами по земле
+  // (клик — начало отрезка, второй клик — конец), см. editor3d.js.
 }
 
 // ── Подсказка при первом открытии раздела ──
@@ -1369,9 +1394,9 @@ const D_SECTION_HINTS = {
   pool_terrace: 'Отдельно стоящая терраса: тяните за углы. «БАССЕЙН ▭» и «БАССЕЙН ○» ставят бассейн — в настиле на его месте будет вырез; повторное нажатие убирает.',
   steps: 'Лестницу двигают за середину, ширину меняют маркерами по краям. Разворачивается к террасе автоматически, количество ступеней считается от высоты.',
   beds: 'Грядку перетаскивайте мышью, ручка сбоку разворачивает её. «ЕЩЁ ОДНА» добавляет грядку.',
-  paths: 'Кликами по земле ставьте точки дорожки. Клик по уже поставленной точке замыкает контур.',
-  fence: 'Кликами по земле ставьте точки забора. Ближе 3 м к дому и террасе забор не ставится. «КАЛИТКА» делает проём 1 м.',
-  railing: 'Ограждение строится по периметру террасы само и разрывается под лестницей. Нужен разрыв без лестницы — «ОБОЗНАЧИТЬ ВХОД».',
+  paths: 'Дорожка рисуется отрезками: клик — начало, второй клик — конец. Следующий отрезок — снова клик. Клик по уже поставленной точке склеивает отрезки. Esc отменяет начатый.',
+  fence: 'Забор рисуется отрезками: клик — начало, второй клик — конец. Клик по уже поставленной точке склеивает отрезки. Ближе 3 м к дому и террасе забор не ставится. «КАЛИТКА» делает проём 1 м.',
+  railing: 'Ограждение строится по периметру террасы само и разрывается под лестницей. Нужен разрыв без лестницы — «ОБОЗНАЧИТЬ ВХОД», затем тяните маркеры разрыва по периметру.',
   furniture: 'Мебель появляется в сцене при выборе товара в каталоге. Перетаскивайте её мышью; на террасе она встаёт на настил.',
   facade: 'Кликайте по стенам дома, отмечая места под отделку. Повторный клик снимает выбор.',
 };
@@ -1465,7 +1490,7 @@ function _dRenderPanelContent() {
   const _f = catFilter(secId);
   _f.colors = new Set([..._f.colors].filter(n => _palette.has(n)));
 
-  _dRenderFilters(secId);
+  _dRenderFilters();
 
   // Auto-show catalog results (селектор раздела и блок образцов убраны из UI)
   dShowResults();
@@ -1477,33 +1502,9 @@ function _dRenderPanelContent() {
 // умолчанию: развёрнутый он занимает половину панели и оттесняет карточки.
 let _dFiltersOpen = false;
 
-function _dRenderFilters(secId) {
-  const spec = document.getElementById('d-spec-filters');
-  if (spec) {
-    spec.innerHTML =
-      secId === 'beds' ? `
-        <div class="d-color-section">
-          <div class="d-color-title">Высота борта:</div>
-          <div class="d-price-grid" id="d-bed-h-grid"></div>
-        </div>
-        <div class="d-color-section">
-          <div class="d-color-title">Крепёж:</div>
-          <div class="d-price-grid" id="d-bed-mount-grid"></div>
-        </div>` :
-      secId === 'railing' ? `
-        <div class="d-color-section">
-          <div class="d-color-title">Крышка столба:</div>
-          <div class="d-price-grid" id="d-rail-cap-grid"></div>
-        </div>
-        <div class="d-color-section">
-          <div class="d-color-title">Сечение столба:</div>
-          <div class="d-price-grid" id="d-rail-post-grid"></div>
-        </div>` : '';
-  }
+function _dRenderFilters() {
   _dRenderColorGrid();
   _dRenderPriceGrid();
-  _dRenderRailFilters();
-  _dRenderBedFilters();
   _dSyncFiltersBox();
 }
 
