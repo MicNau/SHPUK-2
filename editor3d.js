@@ -38,7 +38,13 @@ const E3D_HANDLE_HIT = 0.40;   // радиус попадания по ручк�
 const E3D_HANDLE_R   = 0.20;   // радиус кружка ручки, м
 const E3D_ROT_OUT    = 0.55;   // вынос ручки поворота за габарит объекта, м
 const E3D_GLUE_R     = 0.45;   // клик ближе этого к существующей точке — склейка, м
-const E3D_LIFT       = 0.03;   // подъём подсветки над поверхностью, м
+// Все маркеры, контуры и ручки лежат НА ЗЕМЛЕ, на одной отметке. Раньше высота
+// бралась лучом вниз, по поверхности под точкой, и угол террасы, попавший под
+// свес крыши, получал отметку КРОВЛИ — маркер улетал на крышу, а контур тянулся
+// к ней через весь дом. Разметка и так плоская, поэтому единый уровень и
+// нагляднее, и не зависит от того, что под точкой. Глубину слой не проверяет
+// (depthTest: false), так что маркеры под настилом остаются видимыми.
+const E3D_LIFT       = 0.03;   // подъём слоя редактора над землёй, м
 const E3D_MOVE_TOL   = 4;      // px: дальше этого — это протяжка, а не клик
 
 // Разделы по типу разметки. От типа зависит и хит-тест, и вид подсветки.
@@ -115,14 +121,6 @@ function _e3dPointAt(ev) {
     world = p;
   }
   return { world, object, norm: _e3dToNorm(world.x, world.z) };
-}
-
-// Высота поверхности под точкой плана (для подсветки): луч сверху вниз.
-function _e3dSurfaceY(np) {
-  const w = _e3dToWorld(np);
-  _e3dRay.set(new THREE.Vector3(w.x, 60, w.z), new THREE.Vector3(0, -1, 0));
-  const hits = _e3dRay.intersectObjects(_e3dPickTargets(), true);
-  return hits.length ? hits[0].point.y : 0;
 }
 
 // ── Хит-тесты в координатах плана (0..1) ─────────────────────────────────
@@ -361,7 +359,7 @@ function _e3dLineMat(color, width) {
 function _e3dOutline(pts, color, closed) {
   const v = pts.map(p => {
     const w = _e3dToWorld(p);
-    return new THREE.Vector3(w.x, _e3dSurfaceY(p) + E3D_LIFT, w.z);
+    return new THREE.Vector3(w.x, E3D_LIFT, w.z);
   });
   if (closed && v.length) v.push(v[0].clone());
   const geo = new THREE.BufferGeometry().setFromPoints(v);
@@ -373,7 +371,7 @@ function _e3dOutline(pts, color, closed) {
 // Маркер точки: кружок на поверхности.
 function _e3dMarker(np, color, radius) {
   const w = _e3dToWorld(np);
-  const y = _e3dSurfaceY(np) + E3D_LIFT;
+  const y = E3D_LIFT;
   const geo = new THREE.CircleGeometry(radius || 0.18, 20);
   const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
     color, depthTest: false, transparent: true, opacity: 0.9, side: THREE.DoubleSide,
@@ -567,7 +565,7 @@ function _e3dPlaceLabels() {
     const node = host.children[i];
     if (!node) return;
     const w = _e3dToWorld(l.np);
-    _e3dProj.set(w.x, (l.y3 !== undefined ? l.y3 : 0.05), w.z).project(threeState.camera);
+    _e3dProj.set(w.x, E3D_LIFT, w.z).project(threeState.camera);   // подписи на той же отметке, что маркеры
     if (_e3dProj.z > 1) { node.style.display = 'none'; return; }
     node.style.display = '';
     node.style.left = ((_e3dProj.x * 0.5 + 0.5) * W) + 'px';
