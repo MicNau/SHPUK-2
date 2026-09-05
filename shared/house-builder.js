@@ -623,17 +623,52 @@ function buildBasePillar(parent, modules, item, baseH, ps, overhang) {
   parent.add(p);
 }
 
+// Горизонтальные членения простенка: границы проходят по низу и верху окна на
+// ЭТОМ ребре, поэтому простенок делится на три части — ниже окна, по высоте окна
+// и выше окна. Так отделку можно назначить поясом, а не всей стеной сразу.
+// Ребро без окон членить нечем — там одна полоса во всю высоту.
+// Берётся первое окно ребра: окна одного этажа сажают на общую отметку, а дверь
+// стоит на полу, её низ дал бы вырожденную нижнюю полосу.
+const WALL_BAND_MIN = 0.15;   // полосу ниже этого не выделяем — щель, не пояс
+
+function wallBands(fills, wallH) {
+  let win = null;
+  for (const f of fills) {
+    if (f.type === 'window' && f.params && f.params.h > 0) { win = f; break; }
+  }
+  if (!win) return [{ y0: 0, y1: wallH }];
+  const a = Math.max(0, Math.min(wallH, win.params.y || 0));          // низ окна
+  const b = Math.max(a, Math.min(wallH, a + win.params.h));           // верх окна
+  // Режем стену снизу вверх, пропуская отметки, которые слишком близко к
+  // предыдущей: полосы обязаны покрывать стену целиком, поэтому «тонкий» кусок
+  // не выбрасывается, а прирастает к соседнему. Верх последней полосы — всегда
+  // верх стены, иначе под карнизом осталась бы дыра.
+  const cuts = [0];
+  for (const v of [a, b, wallH]) if (v - cuts[cuts.length - 1] > WALL_BAND_MIN) cuts.push(v);
+  cuts[cuts.length - 1] = wallH;
+  const out = [];
+  for (let i = 1; i < cuts.length; i++) out.push({ y0: cuts[i - 1], y1: cuts[i] });
+  return out.length ? out : [{ y0: 0, y1: wallH }];
+}
+
 // segPrefix (опционально) — стабильный префикс `f{floor}:e{edge}` для элементов
 // фасада, выбираемых под декоративную отделку (S.wallZones):
-//   • полноростовой wall-сегмент → userData.segId = `{prefix}:s{n}`;
-//   • ОКОННАЯ КОЛОНКА (стена над окном/дверью + стена под окном) → ОБЩИЙ
-//     userData.segId = `{prefix}:o{n}` на перемычке и подоконной части —
-//     выбираются и красятся как одно целое.
-// segW/segH — размеры КАЖДОГО меша (перемычка и подоконник дают свои высоты) —
-// площадь в смету суммируется по мешам без задвоения. Id детерминированы для
-// фиксированных дескриптора и площади (смена площади сбрасывает проект).
+//   • простенок → userData.segId = `{prefix}:s{n}` (ребро без окон) либо
+//     `{prefix}:s{n}b{k}` на каждую горизонтальную полосу (см. wallBands);
+//   • стена НАД проёмом → `{prefix}:o{n}t`, стена ПОД окном → `{prefix}:o{n}b`.
+//     Раньше у них был общий id, и пояс над окном нельзя было отделать отдельно
+//     от подоконного.
+// segW/segH — размеры КАЖДОГО меша: площадь в смету суммируется по мешам без
+// задвоения. Id детерминированы для фиксированных дескриптора и площади (смена
+// площади сбрасывает проект).
+//
+// ВНИМАНИЕ: getHouseFacadeLayout ниже повторяет НУМЕРАЦИЮ проёмов и простенков
+// для плана, но членение сюда не переносится — плана больше нет, выбор идёт
+// кликом по самим мешам в 3D (editor3d.js), а раскладка нужна только для
+// направления главной двери.
 function buildEdgeWall(parent, modules, modulesDef, edge, wallH, yOffset, wt, ps, segPrefix) {
   const fills = resolveFills(edge, modulesDef);
+  const bands = wallBands(fills, wallH);
   const startX = edge.x + edge.dx * edge.startOffset;
   const startZ = edge.z + edge.dz * edge.startOffset;
   const ry = edgeRotation(edge.dx, edge.dz);
@@ -645,22 +680,31 @@ function buildEdgeWall(parent, modules, modulesDef, edge, wallH, yOffset, wt, ps
     const endZ = startZ + edge.dz * (cursor + fill.width);
     const sillY = (fill.params && fill.params.y) || 0;
     if (fill.type === 'wall') {
-      const seg = cloneModule(modules, 'wall_segment');
-      if (seg) {
-        seg.scale.set(fill.width, wallH, wt / 0.2);
-        seg.position.set(endX, yOffset, endZ);
+      // Простенок собирается полосами (ниже окна / по окну / выше окна): каждая
+      // выбирается под отделку отдельно.
+      bands.forEach((band, bi) => {
+        const bh = band.y1 - band.y0;
+        if (bh <= 0.01) return;
+        const seg = cloneModule(modules, 'wall_segment');
+        if (!seg) return;
+        seg.scale.set(fill.width, bh, wt / 0.2);
+        seg.position.set(endX, yOffset + band.y0, endZ);
         seg.rotation.y = ry;
         if (segPrefix) {
-          seg.userData.segId = `${segPrefix}:s${segIdx}`;
+          seg.userData.segId = (bands.length > 1)
+            ? `${segPrefix}:s${segIdx}b${bi}`
+            : `${segPrefix}:s${segIdx}`;
           seg.userData.segW = fill.width;
-          seg.userData.segH = wallH;
+          seg.userData.segH = bh;
         }
         setupShadows(seg);
         parent.add(seg);
-      }
+      });
       segIdx++;
     } else if (fill.type === 'window' || fill.type === 'door') {
-      const openId = segPrefix ? `${segPrefix}:o${openIdx}` : null;
+      // Перемычка и подоконная часть — РАЗНЫЕ элементы выбора (см. шапку).
+      const openTopId = segPrefix ? `${segPrefix}:o${openIdx}t` : null;
+      const openBotId = segPrefix ? `${segPrefix}:o${openIdx}b` : null;
       const mod = cloneModule(modules, fill.model);
       if (mod) {
         transformParametricModule(mod, fill.params, fill.model);
@@ -675,8 +719,8 @@ function buildEdgeWall(parent, modules, modulesDef, edge, wallH, yOffset, wt, ps
             lintel.scale.set(fill.width, topH, wt / 0.2);
             lintel.position.set(endX, yOffset + sillY + fill.params.h, endZ);
             lintel.rotation.y = ry;
-            if (openId) {
-              lintel.userData.segId = openId;
+            if (openTopId) {
+              lintel.userData.segId = openTopId;
               lintel.userData.segW = fill.width;
               lintel.userData.segH = topH;
             }
@@ -690,8 +734,8 @@ function buildEdgeWall(parent, modules, modulesDef, edge, wallH, yOffset, wt, ps
             sub.scale.set(fill.width, sillY, wt / 0.2);
             sub.position.set(endX, yOffset, endZ);
             sub.rotation.y = ry;
-            if (openId) {
-              sub.userData.segId = openId;
+            if (openBotId) {
+              sub.userData.segId = openBotId;
               sub.userData.segW = fill.width;
               sub.userData.segH = sillY;
             }
