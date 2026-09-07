@@ -2305,6 +2305,18 @@ function _houseSideTaken(secId, cand) {
   return false;
 }
 
+// Разметка раздела изменилась: перерисовать слой редактора и пересобрать сцену.
+// Раньше сцену пересобирала кнопка «Дальше» в конце редактора — её больше нет
+// (версия 3D-UI), и каждая правка обязана сообщать о себе сама. Иначе новый блок
+// лежал в S, но в 3D не появлялся, пока что-нибудь другое не вызывало сборку.
+function _secChanged(secId) {
+  if (typeof drawRectCanvas === 'function' && RECT_SECTIONS[secId]) drawRectCanvas(secId);
+  if (typeof e3dSync === 'function') e3dSync();
+  // Выбранным становится новый блок — «Удалить выбранную» должна ожить сразу.
+  if (typeof _dSyncSectionActions === 'function') _dSyncSectionActions();
+  if (typeof onParamChange === 'function') onParamChange();
+}
+
 // Добавляет новый блок. Терраса идёт к СВОБОДНОЙ стене дома: раньше блок вставал
 // вплотную справа от активного, на той же стене, и в 3D сливался с ним в общий
 // настил — пользователь не видел, что что-то добавилось. Отдельно стоящая секция
@@ -2339,7 +2351,7 @@ function addRect(secId) {
 
   rects.push(nr);
   setSecActiveIdx(secId, rects.length - 1);
-  drawRectCanvas(secId);
+  _secChanged(secId);
 }
 
 function delActiveRect(secId) {
@@ -2348,7 +2360,7 @@ function delActiveRect(secId) {
   if (act === null || !rects.length) return;
   rects.splice(act, 1);
   setSecActiveIdx(secId, rects.length ? Math.min(act, rects.length - 1) : null);
-  drawRectCanvas(secId);
+  _secChanged(secId);
 }
 
 // Определяет, по какому элементу попал клик: индекс rect и тип взаимодействия.
@@ -2818,14 +2830,14 @@ function addBed() {
   const c = _placeFree({ x: c0.x, y: c0.y, w: d.w, h: d.h }, 'beds', 'xy');
   S.beds.push({ x: c.x, y: c.y, w: d.w, h: d.h });
   S.activeBed = S.beds.length - 1;
-  drawBedsCanvas();
+  _secChanged('beds');
 }
 
 function delActiveBed() {
   if (!S.beds || S.activeBed === null) return;
   S.beds.splice(S.activeBed, 1);
   S.activeBed = S.beds.length ? Math.min(S.activeBed, S.beds.length - 1) : null;
-  drawBedsCanvas();
+  _secChanged('beds');
 }
 
 // Поворот активной грядки на 90° вокруг её центра (swap w↔h).
@@ -2836,7 +2848,7 @@ function rotateActiveBed() {
   const nw = b.h, nh = b.w;
   const c = _clampBedPos(snapNorm(cx - nw / 2), snapNorm(cy - nh / 2), nw, nh);
   b.w = nw; b.h = nh; b.x = c.x; b.y = c.y;
-  drawBedsCanvas();
+  _secChanged('beds');
 }
 
 function hitBeds(wx, wy, W) {
