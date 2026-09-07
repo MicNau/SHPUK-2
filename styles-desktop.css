@@ -50,6 +50,7 @@
   --sidebar-w: 364px;
   --panel-w: 364px;          /* правая панель той же ширины, что левая */
   --panel-title-fz: 28px;    /* кегль заголовка раздела: подбирается под ширину */
+  --header-h: 48px;          /* высота хедера; на неё опущены все экраны */
 }
 /* Шрифт интерфейса — Segoe UI (как в макетах Figma). Roboto оставлен запасным
    вариантом для систем без Segoe UI. Подписи на canvas используют UI_FONT
@@ -60,7 +61,7 @@ body { font-family:'Segoe UI',system-ui,Roboto,sans-serif; background:#e0e0e0; m
 button, input, select, textarea { font-family: inherit; }
 
 /* ═══════════════════════════════════════════
-   FLOATING "ИТОГ" BUTTON (правый нижний угол; хедер убран)
+   КНОПКА «СМЕТА» (низ правой панели)
    ═══════════════════════════════════════════ */
 /* «СМЕТА» — во всю ширину внизу правой панели (была плавающей в углу экрана). */
 .d-fab-summary {
@@ -72,9 +73,31 @@ button, input, select, textarea { font-family: inherit; }
 .d-fab-summary:hover { background: var(--accent-hover); }
 
 /* ═══════════════════════════════════════════
+   ХЕДЕР — общий для всех экранов
+   ═══════════════════════════════════════════ */
+/* Заголовок приложения на два пункта крупнее заголовка панели («Благоустройство»,
+   --panel-title-fz). Кнопка «На главную» — как второстепенные кнопки левой панели:
+   белая с серой обводкой. Ссылка открывается в новой вкладке, чтобы не потерять
+   настроенный проект. */
+.d-header {
+  position: fixed; top: 0; left: 0; right: 0; height: var(--header-h);
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 0 20px; z-index: 50;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+}
+.d-header-title {
+  font-size: calc(var(--panel-title-fz, 25px) + 2px); font-weight: 400;
+  color: var(--text); white-space: nowrap;
+}
+.d-header-home {
+  flex: 0 0 auto; height: 34px; padding: 0 16px; font-size: 15px;
+  display: inline-flex; align-items: center; text-decoration: none;
+}
+
+/* ═══════════════════════════════════════════
    SCREENS SYSTEM
    ═══════════════════════════════════════════ */
-.d-screen { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; }
+.d-screen { display: none; position: fixed; top: var(--header-h); left: 0; right: 0; bottom: 0; }
 .d-screen.active { display: flex; animation: dIn .25s ease; }
 @keyframes dIn { from{opacity:0} to{opacity:1} }
 
