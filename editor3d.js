@@ -847,6 +847,10 @@ function e3dSetSection(secId) {
     threeState.renderer.domElement.style.cursor = '';
   }
   e3dSync();
+  // Панель раздела рисуется РАНЬШЕ этого вызова, и состояние кнопки «Удалить
+  // выбранную» там считалось по ещё не обновлённому разделу: при первом открытии
+  // выбранный блок уже был, а кнопка оставалась неактивной.
+  if (typeof _dSyncSectionActions === 'function') _dSyncSectionActions();
 }
 
 // Кадровый хук: подписи следуют за камерой. Вызывается из animate (см. _onAnimFrame).

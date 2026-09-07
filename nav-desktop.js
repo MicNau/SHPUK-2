@@ -871,7 +871,6 @@ function dDeleteSelected() {
   else if (sec === 'beds')      delActiveBed();
   else if (sec === 'furniture') delActiveFurniture();
   else if (S.pts && S.pts[sec]) delLinePoint(sec);
-  if (typeof onParamChange === 'function') onParamChange();   // delActiveBed сцену не трогает
   if (typeof e3dSync === 'function') e3dSync();
   _dSyncSectionActions();
 }
