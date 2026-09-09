@@ -1055,6 +1055,13 @@ function _bedMountMatches(product, mount) {
   return mount.re.test((product.name || '') + ' ' + (product.previewText || ''));
 }
 
+// Тип крепежа выбранного товара → id из BED_MOUNTS ('plastic_hinge',
+// 'plastic_angle', 'metal_angle') или null, если определить нечем.
+function _bedMountFromProduct(product) {
+  for (const m of BED_MOUNTS) if (_bedMountMatches(product, m)) return m.id;
+  return null;
+}
+
 // Отбор товаров грядок по фильтрам: высота борта и тип крепежа. При мультивыборе
 // товар подходит, если совпало ЛЮБОЕ из выбранных значений.
 function _bedFilterProducts(products) {
@@ -1605,6 +1612,9 @@ function _applySampleToActive(sample) {
     if (dActiveItem === 'beds') {
       const h = _bedHeightFromProduct(sample);
       if (h) S.bedH = h;
+      // Крепёж грядки тоже свойство ТОВАРА: у грядок с УГЛОМ (металлическим или
+      // пластиковым) своя модель — в ней есть уголок, у шарнирной его нет.
+      S.bedMount = _bedMountFromProduct(sample);
     }
     // Ограждение: сечение столба (100/125 мм) — тоже свойство товара, фильтр
     // раздела только отбирает каталог (TODO п.1).
