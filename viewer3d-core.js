@@ -1582,16 +1582,40 @@ function clearGroup(group, disposeMaterials) {
 // Оконные колонки (стена над/под проёмом) — два меша с ОБЩИМ segId (`:o{n}`).
 // Угловые столбы (userData.facadePillar) не выбираются сами — отделываются
 // АВТОМАТИЧЕСКИ «под ближайшую вставку»: если любой примыкающий (bbox-касание)
-// элемент фасада выбран под панели, столб красится вместе с ним.
-// Фронтоны/мансардные стены segId не имеют и под отделку не выбираются.
+// элемент фасада выбран под панели, столб красится вместе с ним. Так же ведёт
+// себя пояс по линии карниза мансарды (userData.facadeFollow, buildKneeWall):
+// он следует за простенком под ним или за фронтоном над ним, но смежность у него
+// считается ТОЛЬКО по вертикали — иначе один простенок красил бы карниз вдоль
+// всей стены.
+// Фронтон выбирается как элемент фасада: 'gable:{side}', а если во фронтоне есть
+// окно — кусками 'gable:{side}:s0|o0b|o0t|s1' (членение по границам окна).
 // ══════════════════════════════════════════════
+
+// Стоит ли сегмент прямо НАД поясом карниза или прямо ПОД ним? Раздувать бокс
+// пояса нельзя: допуск по горизонтали цепляет соседние простенки той же стены,
+// и один выбранный простенок покрасил бы карниз вдоль всего дома. Поэтому оси
+// проверяются порознь: по горизонтали нужно РЕАЛЬНОЕ перекрытие (у соседа сбоку
+// оно нулевое), кроме оси, по которой сегмент вырожден — фронтон это плоскость
+// на наружной грани стены; по вертикали хватает касания.
+const FACADE_STACK_GAP = 0.08;
+
+function _facadeStackedOn(kneeBox, segBox) {
+  const over = (a0, a1, b0, b1) => Math.min(a1, b1) - Math.max(a0, b0);
+  const axis = (a0, a1, b0, b1) => {
+    const flat = Math.min(a1 - a0, b1 - b0) < 0.02;   // плоскость (фронтон)
+    return over(a0, a1, b0, b1) > (flat ? -0.02 : 0.02);
+  };
+  return axis(kneeBox.min.x, kneeBox.max.x, segBox.min.x, segBox.max.x)
+      && axis(kneeBox.min.z, kneeBox.max.z, segBox.min.z, segBox.max.z)
+      && over(kneeBox.min.y, kneeBox.max.y, segBox.min.y, segBox.max.y) > -FACADE_STACK_GAP;
+}
 
 function _collectFacadeSegments(root) {
   const segs = [], pillars = [];
   root.traverse(o => {
     if (!o.userData) return;
     if (o.userData.segId) segs.push(o);
-    else if (o.userData.facadePillar) pillars.push(o);
+    else if (o.userData.facadePillar || o.userData.facadeFollow) pillars.push(o);
   });
   threeState.facadeSegs = segs;
   threeState.facadePillars = pillars;
@@ -1601,9 +1625,14 @@ function _collectFacadeSegments(root) {
     root.updateMatrixWorld(true);
     const segBoxes = segs.map(s => ({ id: s.userData.segId, box: new THREE.Box3().setFromObject(s) }));
     for (const p of pillars) {
-      const pb = new THREE.Box3().setFromObject(p).expandByScalar(0.08);
+      const follow = !!p.userData.facadeFollow;
+      const pb = new THREE.Box3().setFromObject(p);
+      if (!follow) pb.expandByScalar(0.08);
       const adj = new Set();
-      for (const sb of segBoxes) if (pb.intersectsBox(sb.box)) adj.add(sb.id);
+      for (const sb of segBoxes) {
+        const hit = follow ? _facadeStackedOn(pb, sb.box) : pb.intersectsBox(sb.box);
+        if (hit) adj.add(sb.id);
+      }
       p.userData._adjIds = [...adj];
     }
   } else {

@@ -750,7 +750,11 @@ function planterModelUrl() {
 
 // Кэш и промис — на КАЖДЫЙ файл: при смене товара модель другая, и общий кэш
 // отдал бы прежнюю геометрию.
-const _planterCacheBy = {};       // url → { woodGeo, soilGeo }
+// Модель разбирается по МАТЕРИАЛАМ, а не «один меш = доски»: в грядке с углом
+// три меша (земля, доски, уголок), и запись их всех в одну переменную оставляла
+// от грядки только уголок. Уголок (mat_planter_metal) идёт своей деталью и
+// сохраняет родной материал файла — деревом он не красится.
+const _planterCacheBy = {};       // url → { woodGeos, soilGeo, trims }
 const _planterLoadBy = {};        // url → Promise
 let _planterCache = null;         // геометрии ТЕКУЩЕЙ модели (её читает buildBeds3d)
 
@@ -764,16 +768,23 @@ function ensurePlanterLoaded() {
     loader.load(
       url,
       gltf => {
-        let woodGeo = null, soilGeo = null;
+        const woodGeos = [], trims = [];
+        let soilGeo = null;
         gltf.scene.traverse(o => {
           if (!o.isMesh || !o.geometry) return;
           o.updateWorldMatrix(true, false);
           const g = o.geometry.clone();
           g.applyMatrix4(o.matrixWorld); // запекаем трансформ узла (у модуля — единичный)
-          if ((o.name || '').toLowerCase().includes('soil')) soilGeo = g;
-          else woodGeo = g;
+          const m = Array.isArray(o.material) ? o.material[0] : o.material;
+          const mName = (m && m.name) || '';
+          if ((o.name || '').toLowerCase().includes('soil') || mName === 'mat_planter_soil') soilGeo = g;
+          else if (mName && mName !== 'mat_planter_wood') trims.push({ geo: g, mat: m ? m.clone() : null });
+          else woodGeos.push(g);
         });
-        _planterCacheBy[url] = { woodGeo, soilGeo };
+        // Материалов с другими именами в модели быть не должно, но если досок
+        // так и не нашлось — единственную оставшуюся деталь считаем ими.
+        if (!woodGeos.length && trims.length === 1) woodGeos.push(trims.pop().geo);
+        _planterCacheBy[url] = { woodGeos, soilGeo, trims };
         _planterCache = _planterCacheBy[url];
         resolve(_planterCache);
       },
@@ -1150,7 +1161,7 @@ function buildBeds3d(parent, M, beds, bedH, houseL, houseW) {
   if (!chosen) { _buildBedPlaceholders(parent, beds, houseL, houseW); return; }
   // Крепёж мог смениться вместе с товаром — переключаем кэш на нужный файл.
   _planterCache = _planterCacheBy[planterModelUrl()] || null;
-  if (!_planterCache || !_planterCache.woodGeo) {
+  if (!_planterCache || !_planterCache.woodGeos.length) {
     // Товар выбран, но GLB ещё не загружен: грузим и до готовности показываем места.
     ensurePlanterLoaded().then(c => { if (c && threeState) buildScene3d(); });
     _buildBedPlaceholders(parent, beds, houseL, houseW);
@@ -1169,15 +1180,28 @@ function buildBeds3d(parent, M, beds, bedH, houseL, houseW) {
     const mat4 = _planterMatrix(minX, maxX, minZ, maxZ, rot, sy);
 
     // Дерево: deck-материал + кубический мировой UV (масштаб как терраса/дорожки).
-    const woodGeo = _planterCache.woodGeo.clone();
-    woodGeo.applyMatrix4(mat4);
-    const wood = new THREE.Mesh(woodGeo, M.deck);
-    wood.castShadow = wood.receiveShadow = true;
-    _applyBoxUV(wood, DECK_TILE); // mesh.position=0 → локальные коорд. = мировые
-    parent.add(wood);
-    threeState.bedMeshes.push(wood);
-    // Дерево = deck-материал → перекрашивается вместе с террасой/дорожками.
-    threeState.deckMeshes.push(wood);
+    for (const src of _planterCache.woodGeos) {
+      const woodGeo = src.clone();
+      woodGeo.applyMatrix4(mat4);
+      const wood = new THREE.Mesh(woodGeo, M.deck);
+      wood.castShadow = wood.receiveShadow = true;
+      _applyBoxUV(wood, DECK_TILE); // mesh.position=0 → локальные коорд. = мировые
+      parent.add(wood);
+      threeState.bedMeshes.push(wood);
+      // Дерево = deck-материал → перекрашивается вместе с террасой/дорожками.
+      threeState.deckMeshes.push(wood);
+    }
+
+    // Уголки и прочие детали со своим материалом — как в файле, без перекраски.
+    for (const t of _planterCache.trims) {
+      if (!t.mat) continue;
+      const geo = t.geo.clone();
+      geo.applyMatrix4(mat4);
+      const part = new THREE.Mesh(geo, t.mat);
+      part.castShadow = part.receiveShadow = true;
+      parent.add(part);
+      threeState.bedMeshes.push(part);
+    }
 
     // Земля: свой материал, верх — у борта.
     if (_planterCache.soilGeo) {

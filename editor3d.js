@@ -102,6 +102,13 @@ function _e3dPickTargets() {
 }
 
 // Экранные координаты события → {norm:{x,y}, world:{x,y,z}} или null.
+// norm ВСЕГДА считается по плоскости земли: там же лежит весь слой редактора
+// (контуры и маркеры, E3D_LIFT), поэтому курсор и маркер совпадают. Раньше norm
+// брался с первой попавшейся геометрии, и над настилом террасы точка плана
+// уезжала на высоту настила: ручка размера бассейна, нарисованная на земле, не
+// бралась «сквозь» настил, а перетаскивание прыгало при сходе с настила.
+// object/world — то, во что реально попал луч: нужны там, где выбор идёт по
+// самой модели (отделка фасада, садовая мебель).
 function _e3dPointAt(ev) {
   if (!threeState || !threeState.renderer) return null;
   const el = threeState.renderer.domElement;
@@ -110,16 +117,14 @@ function _e3dPointAt(ev) {
   _e3dNdc.y = -((ev.clientY - r.top)  / r.height) * 2 + 1;
   _e3dRay.setFromCamera(_e3dNdc, threeState.camera);
 
-  let world = null, object = null;
+  const gp = new THREE.Vector3();
+  const onGround = !!_e3dRay.ray.intersectPlane(_e3dGroundPlane, gp);
   const hits = _e3dRay.intersectObjects(_e3dPickTargets(), true);
-  if (hits.length) { world = hits[0].point; object = hits[0].object; }
-  else {
-    // Мимо всей геометрии — считаем пересечение с плоскостью земли.
-    const p = new THREE.Vector3();
-    if (!_e3dRay.ray.intersectPlane(_e3dGroundPlane, p)) return null;
-    world = p;
-  }
-  return { world, object, norm: _e3dToNorm(world.x, world.z) };
+  const object = hits.length ? hits[0].object : null;
+  const world = hits.length ? hits[0].point : (onGround ? gp : null);
+  if (!world) return null;                      // луч в небо мимо всей геометрии
+  const n = onGround ? gp : world;              // взгляд снизу вверх — берём саму геометрию
+  return { world, object, norm: _e3dToNorm(n.x, n.z) };
 }
 
 // ── Хит-тесты в координатах плана (0..1) ─────────────────────────────────

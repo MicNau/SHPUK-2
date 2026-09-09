@@ -1541,6 +1541,60 @@ function getGableTriangle(bbox, longAxisX, ridgeY, baseY, side, roofType, mansar
   return frame;
 }
 
+// Отсечение выпуклого контура полуплоскостью f(p) ≥ 0 (Сазерленд–Ходжмен).
+// Контуры фронтона выпуклы (треугольник / пятиугольник), поэтому результат —
+// один выпуклый кусок; им режем фронтон по границам окна.
+function clipPoly2(poly, f) {
+  const out = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const fa = f(a), fb = f(b);
+    if (fa >= -SS_EPS) out.push(a);
+    if ((fa > SS_EPS && fb < -SS_EPS) || (fa < -SS_EPS && fb > SS_EPS)) {
+      const t = fa / (fa - fb);
+      out.push(new THREE.Vector2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t));
+    }
+  }
+  // Схлопнувшиеся стороны (рез прошёл по вершине) дали бы вырожденные треугольники.
+  const clean = [];
+  for (const p of out) {
+    const q = clean[clean.length - 1];
+    if (!q || Math.abs(q.x - p.x) > SS_EPS || Math.abs(q.y - p.y) > SS_EPS) clean.push(p);
+  }
+  if (clean.length > 2) {
+    const f0 = clean[0], fl = clean[clean.length - 1];
+    if (Math.abs(f0.x - fl.x) < SS_EPS && Math.abs(f0.y - fl.y) < SS_EPS) clean.pop();
+  }
+  return clean;
+}
+
+function polyArea2(poly) {
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return Math.abs(a) / 2;
+}
+
+// Членение фронтона по границам окна — тот же принцип, что у простенка
+// (см. wallBands): вертикальные резы по краям окна дают левую и правую части,
+// средняя колонка режется по низу и верху окна на подоконную и надоконную.
+// Куски покрывают фронтон целиком, поэтому площадь в смете не меняется.
+const GABLE_PIECE_MIN = 0.05;   // м² — кусок меньше этого не выделяем
+
+function gablePieces(points2D, u0, u1, v0, v1) {
+  const cutX = (poly, c, sign) => clipPoly2(poly, p => sign * (p.x - c));
+  const cutY = (poly, c, sign) => clipPoly2(poly, p => sign * (p.y - c));
+  const mid = cutX(cutX(points2D, u0, +1), u1, -1);
+  return [
+    { suffix: 's0',  poly: cutX(points2D, u0, -1) },
+    { suffix: 'o0b', poly: cutY(mid, v0, -1) },
+    { suffix: 'o0t', poly: cutY(mid, v1, +1) },
+    { suffix: 's1',  poly: cutX(points2D, u1, +1) },
+  ].filter(p => p.poly.length >= 3 && polyArea2(p.poly) > GABLE_PIECE_MIN);
+}
+
 // Строит один gable/mansard front: полигон + опционально прямоугольное окно-дырка + window GLB.
 function buildOneGable(parent, frame, cfg, sharedWallMat, glbModules, modulesDef) {
   const points2D = frame.points2D; // 3 точки (gable) или 5 (mansard)
@@ -1581,14 +1635,25 @@ function buildOneGable(parent, frame, cfg, sharedWallMat, glbModules, modulesDef
     return;
   }
 
-  const hole = [
-    new THREE.Vector2(u0, v0),
-    new THREE.Vector2(u1, v0),
-    new THREE.Vector2(u1, v1),
-    new THREE.Vector2(u0, v1),
-  ];
-  const triangles = THREE.ShapeUtils.triangulateShape(points2D, [hole]);
-  addGableMesh(parent, frame, points2D, [hole], triangles, sharedWallMat);
+  // Фронтон с окном собирается кусками (левый, подоконный, надоконный, правый):
+  // каждый выбирается под отделку отдельно, окно остаётся между ними без выреза.
+  const pieces = gablePieces(points2D, u0, u1, v0, v1);
+  if (pieces.length > 1) {
+    for (const piece of pieces) {
+      const tris = THREE.ShapeUtils.triangulateShape(piece.poly, []);
+      if (!tris.length) continue;
+      addGableMesh(parent, frame, piece.poly, [], tris, sharedWallMat, piece.suffix);
+    }
+  } else {
+    const hole = [
+      new THREE.Vector2(u0, v0),
+      new THREE.Vector2(u1, v0),
+      new THREE.Vector2(u1, v1),
+      new THREE.Vector2(u0, v1),
+    ];
+    const triangles = THREE.ShapeUtils.triangulateShape(points2D, [hole]);
+    addGableMesh(parent, frame, points2D, [hole], triangles, sharedWallMat);
+  }
 
   // Window GLB поверх
   if (glbModules && modulesDef) {
@@ -1626,7 +1691,8 @@ function buildOneGable(parent, frame, cfg, sharedWallMat, glbModules, modulesDef
 // ФРОНТОН как элемент отделки фасада. Фронтон — не прямоугольный сегмент стены,
 // поэтому вместо segW×segH ему пишется segArea: сумма площадей его треугольников.
 // Вырез под окно в триангуляцию не входит, значит и в площадь не попадает.
-// segId вида 'gable:west' — стороны фронтона всего две и они стабильны.
+// segId вида 'gable:west' — стороны фронтона всего две и они стабильны; у фронтона
+// с окном к нему добавляется суффикс куска ('gable:west:s0', ':o0b', ':o0t', ':s1').
 function gableTriAreaM2(positions, indices) {
   let a = 0;
   for (let i = 0; i < indices.length; i += 3) {
@@ -1638,13 +1704,13 @@ function gableTriAreaM2(positions, indices) {
   return a;
 }
 
-function markGableSegment(mesh, side, positions, indices) {
+function markGableSegment(mesh, side, positions, indices, suffix) {
   if (!side) return;
-  mesh.userData.segId = 'gable:' + side;
+  mesh.userData.segId = 'gable:' + side + (suffix ? ':' + suffix : '');
   mesh.userData.segArea = gableTriAreaM2(positions, indices);
 }
 
-function addGableMesh(parent, frame, points2D, holes, triangles, sharedWallMat) {
+function addGableMesh(parent, frame, points2D, holes, triangles, sharedWallMat, segSuffix) {
   // Сборка всех вершин: shape (N), затем дырки (последовательно).
   const allPts = [...points2D];
   for (const h of holes) allPts.push(...h);
@@ -1672,7 +1738,7 @@ function addGableMesh(parent, frame, points2D, holes, triangles, sharedWallMat) 
   }
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true; mesh.receiveShadow = true;
-  markGableSegment(mesh, frame.side, positions, indices);
+  markGableSegment(mesh, frame.side, positions, indices, segSuffix);
   parent.add(mesh);
 }
 
@@ -2285,7 +2351,10 @@ const GABLE_SLOPE_THICKNESS = 0.15;
 //   На карнизе виден торец (низ свеса = верх стены, низ свеса опущен ниже на thickness*cosA).
 //   На rake (фронтонной стороне) тоже виден торец как декоративная доска.
 //   Фронтон строится строго на линии стены дома (без eave), верх до ridge.
-function buildGableRoof(parent, baseY, bbox, angleDeg, eave, sharedWallMat, skipGableSides, noRakeOverhang) {
+// sideTag — суффикс стороны для segId ('gable:west#1'): у cross-gable фронтоны
+// строятся на каждом блоке дома, и одна пара сторон повторяется. Главный блок
+// идёт без суффикса, чтобы его id совпадал с фронтоном обычной двускатной крыши.
+function buildGableRoof(parent, baseY, bbox, angleDeg, eave, sharedWallMat, skipGableSides, noRakeOverhang, sideTag) {
   const thickness = GABLE_SLOPE_THICKNESS;
   // skipGableSides: Set строк ('east'|'west'|'north'|'south') — для этих сторон фронтон
   // НЕ строится в buildGableRoof (его построит buildGableWindows с прямоугольным вырезом + window GLB).
@@ -2478,6 +2547,9 @@ function buildGableRoof(parent, baseY, bbox, angleDeg, eave, sharedWallMat, skip
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, gableMat);
     mesh.castShadow = true; mesh.receiveShadow = true;
+    // Фронтон без окна — цельный элемент отделки (с окном его строит
+    // buildGableWindows и режет на куски по границам окна).
+    markGableSegment(mesh, entry.side + (sideTag || ''), positions, indices);
     parent.add(mesh);
   }
 
@@ -2825,9 +2897,15 @@ function buildBrokenMansardRoof(parent, baseY, bbox, eave, mansardSpec, sharedWa
   log(`[roof] mansard thick: lower=${lowerAngle}°/${lowerHeight}m, upper=${upperAngle}°, ridge_h=${(ridgeY - baseY).toFixed(2)}m, thickness=${thickness}m`, 'dim');
 }
 
-// Knee wall — низкая вертикальная стенка по периметру outline (для мансарды).
+// Knee wall — низкая вертикальная стенка по периметру outline (для мансарды),
+// пояс по линии карниза между верхом этажа и началом ската.
 // Использует GLB-модули `wall_segment` и `pillar` (без окон/дверей).
-function buildKneeWall(parent, modules, outline, baseY, kneeHeight, wt, ps) {
+// Пояс сам не выбирается, а отделывается ВСЛЕД за тем, что к нему примыкает
+// (userData.facadeFollow, см. _collectFacadeSegments в viewer3d-core.js): выбрали
+// простенок этажа под ним или фронтон над ним — покрасился и пояс. Поэтому он
+// режется на куски по тем же проёмам, что и стена этажа: иначе один выбранный
+// простенок красил бы карниз вдоль всей стены.
+function buildKneeWall(parent, modules, modulesDef, outline, baseY, kneeHeight, wt, ps) {
   if (kneeHeight <= 0.01) return;
   for (const item of outline.items) {
     if (item.type === 'pillar') {
@@ -2836,22 +2914,34 @@ function buildKneeWall(parent, modules, outline, baseY, kneeHeight, wt, ps) {
       p.scale.set(ps, kneeHeight, ps);
       const pos = pillarPosition(item, ps);
       p.position.set(pos.x, baseY, pos.z);
+      p.userData.facadePillar = true;   // угловой кусок пояса — как столб этажа
+      p.userData.segW = 2 * ps;
+      p.userData.segH = kneeHeight;
       setupShadows(p);
       parent.add(p);
     } else if (item.type === 'wall') {
       const wallLength = item.wallLength;
       if (wallLength <= 0.01) continue;
-      const seg = cloneModule(modules, 'wall_segment');
-      if (!seg) continue;
-      seg.scale.set(wallLength, kneeHeight, wt / 0.2);
       const startX = item.x + item.dx * item.startOffset;
       const startZ = item.z + item.dz * item.startOffset;
-      const endX = startX + item.dx * wallLength;
-      const endZ = startZ + item.dz * wallLength;
-      seg.position.set(endX, baseY, endZ);
-      seg.rotation.y = edgeRotation(item.dx, item.dz);
-      setupShadows(seg);
-      parent.add(seg);
+      const ry = edgeRotation(item.dx, item.dz);
+      const fills = modulesDef ? resolveFills(item, modulesDef) : [{ type: 'wall', width: wallLength }];
+      let cursor = 0;
+      for (const fill of fills) {
+        const seg = cloneModule(modules, 'wall_segment');
+        if (!seg) { cursor += fill.width; continue; }
+        seg.scale.set(fill.width, kneeHeight, wt / 0.2);
+        seg.position.set(startX + item.dx * (cursor + fill.width),
+                         baseY,
+                         startZ + item.dz * (cursor + fill.width));
+        seg.rotation.y = ry;
+        seg.userData.facadeFollow = true;
+        seg.userData.segW = fill.width;
+        seg.userData.segH = kneeHeight;
+        setupShadows(seg);
+        parent.add(seg);
+        cursor += fill.width;
+      }
     }
   }
   log(`[roof] knee wall: h=${kneeHeight.toFixed(2)}m`, 'dim');
@@ -2938,7 +3028,7 @@ function buildRoof(parent, baseY, bbox, outline, roofType, angleDeg, eave, optio
     const mansardSpec = options.mansardSpec || {};
     const kneeHeight = (mansardSpec.knee_height !== undefined) ? mansardSpec.knee_height : 0;
     if (kneeHeight > 0 && options.modules) {
-      buildKneeWall(parent, options.modules, outline, baseY, kneeHeight, options.wt || 0.2, options.ps || 0.2);
+      buildKneeWall(parent, options.modules, options.modulesDef, outline, baseY, kneeHeight, options.wt || 0.2, options.ps || 0.2);
     }
     const roofBaseY = baseY + kneeHeight;
     const rects = decomposeOrthoPolygonIntoRectangles(outline);
@@ -2976,7 +3066,8 @@ function buildRoof(parent, baseY, bbox, outline, roofType, angleDeg, eave, optio
       for (let i = 0; i < rects.length; i++) {
         const r = rects[i];
         const rectBbox = { minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ };
-        buildGableRoof(parent, baseY + i * 0.001, rectBbox, angleDeg, eave, options.sharedWallMat, options.skipGableSides, options.noRakeOverhang);
+        buildGableRoof(parent, baseY + i * 0.001, rectBbox, angleDeg, eave, options.sharedWallMat,
+                       options.skipGableSides, options.noRakeOverhang, i ? '#' + i : '');
       }
     } else {
       log(`[roof] gable: ${rects.length} rect (1 gable main + ${rects.length - 1} hip)`, 'dim');
@@ -3593,7 +3684,8 @@ function buildHouseFromDescriptor(houseGroup, desc, modules, params, options = {
     const skipGableSides = new Set(gableWindowsList.map(g => g.side).filter(Boolean));
     const noRakeOverhang = !!(desc.features && desc.features.no_rake_overhang);
     buildRoof(houseGroup, yOffset, lastOutline.bbox, lastOutline, roofType, angleDeg, ROOF_EAVE, {
-      mansardSpec: desc.mansard, modules, wt, ps, sharedWallMat, skipGableSides, noRakeOverhang,
+      mansardSpec: desc.mansard, modules, modulesDef: desc.modules, wt, ps, sharedWallMat,
+      skipGableSides, noRakeOverhang,
     });
     // Декор (cornice) идёт по верху стен НЕПОСРЕДСТВЕННО под крышей. Для мансарды это
     // верх knee wall (= roofBaseY), для остальных roof_type — yOffset.
