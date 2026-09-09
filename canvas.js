@@ -577,6 +577,11 @@ function _fenceProjectToLine(p) {
 
 // Калитка: ставится в середину самого длинного отрезка забора (или в выбранную
 // точку, если она есть). Хранится в координатах плана; проём вычитается в 3D.
+// Калитка ставится на САМЫЙ ДЛИННЫЙ пролёт, но НЕ в его середину: там же стоит
+// подпись длины пролёта, и маркер калитки под ней не разглядеть. Смещаем на
+// треть длины — место всё ещё удобное, а подпись не перекрывает.
+const FENCE_GATE_T = 1 / 3;
+
 function fenceGateDefault() {
   const segs = splitAtBreaks(S.pts.fence || []);
   let best = null, bestL = 0;
@@ -584,7 +589,10 @@ function fenceGateDefault() {
     for (let i = 0; i < seg.length - 1; i++) {
       const a = seg[i], b = seg[i + 1];
       const L = Math.hypot(b.x - a.x, b.y - a.y) * GRID;
-      if (L > bestL) { bestL = L; best = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+      if (L > bestL) {
+        bestL = L;
+        best = { x: a.x + (b.x - a.x) * FENCE_GATE_T, y: a.y + (b.y - a.y) * FENCE_GATE_T };
+      }
     }
   }
   return (bestL > FENCE_GATE_W + 0.4) ? best : null;

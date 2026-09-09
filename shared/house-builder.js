@@ -1510,7 +1510,7 @@ function getGableTriangle(bbox, longAxisX, ridgeY, baseY, side, roofType, mansar
   const wallW = lr.distanceTo(ll);
   const topU = top.clone().sub(ll).dot(uAxis);
   const topV = top.y - ll.y;
-  const frame = { ll, lr, top, uAxis, exterior, wallW, topU, topV, roofType };
+  const frame = { ll, lr, top, uAxis, exterior, wallW, topU, topV, roofType, side };
 
   if (roofType === 'mansard' && mansardSpec) {
     const lowerHeight = (mansardSpec.lower_height !== undefined) ? mansardSpec.lower_height : 2.0;
@@ -1623,6 +1623,27 @@ function buildOneGable(parent, frame, cfg, sharedWallMat, glbModules, modulesDef
   }
 }
 
+// ФРОНТОН как элемент отделки фасада. Фронтон — не прямоугольный сегмент стены,
+// поэтому вместо segW×segH ему пишется segArea: сумма площадей его треугольников.
+// Вырез под окно в триангуляцию не входит, значит и в площадь не попадает.
+// segId вида 'gable:west' — стороны фронтона всего две и они стабильны.
+function gableTriAreaM2(positions, indices) {
+  let a = 0;
+  for (let i = 0; i < indices.length; i += 3) {
+    const p = k => new THREE.Vector3(positions[indices[i + k] * 3],
+                                     positions[indices[i + k] * 3 + 1],
+                                     positions[indices[i + k] * 3 + 2]);
+    a += p(1).sub(p(0)).cross(p(2).sub(p(0))).length() / 2;
+  }
+  return a;
+}
+
+function markGableSegment(mesh, side, positions, indices) {
+  if (!side) return;
+  mesh.userData.segId = 'gable:' + side;
+  mesh.userData.segArea = gableTriAreaM2(positions, indices);
+}
+
 function addGableMesh(parent, frame, points2D, holes, triangles, sharedWallMat) {
   // Сборка всех вершин: shape (N), затем дырки (последовательно).
   const allPts = [...points2D];
@@ -1651,6 +1672,7 @@ function addGableMesh(parent, frame, points2D, holes, triangles, sharedWallMat) 
   }
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true; mesh.receiveShadow = true;
+  markGableSegment(mesh, frame.side, positions, indices);
   parent.add(mesh);
 }
 
@@ -2796,6 +2818,7 @@ function buildBrokenMansardRoof(parent, baseY, bbox, eave, mansardSpec, sharedWa
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true; mesh.receiveShadow = true;
+    markGableSegment(mesh, sides[pi], positions, indices);
     parent.add(mesh);
   }
 

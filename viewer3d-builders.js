@@ -733,17 +733,36 @@ function buildConstructionPad(parent, minX, maxX, minZ, maxZ, offset) {
 const PLANTER_NATIVE_H   = 0.1566;  // родная высота борта (верх дерева), м
 const PLANTER_SOIL_TOP   = 0.0908;  // родная высота верха земли, м
 const PLANTER_SOIL_GAP   = PLANTER_NATIVE_H - PLANTER_SOIL_TOP; // отступ земли от борта (~65 мм)
-let _planterCache = null;       // { woodGeo, soilGeo } — клоны геометрий в родном базисе
-let _planterLoadPromise = null; // защита от повторной загрузки
+// Модель грядки зависит от КРЕПЕЖА выбранного товара: у грядки с углом
+// (металлическим или пластиковым) свой файл — в нём есть уголок, отдельным
+// материалом. У шарнирной грядки уголка нет. Крепёж кладёт в S.bedMount
+// «Применить» из каталога (_bedMountFromProduct в nav-desktop.js).
+const PLANTER_MODELS = {
+  hinge: 'assets/houses/modules/site/mod_planter_a.glb?v=1',
+  angle: 'assets/houses/modules/site/mod_planter_b.glb?v=1',
+};
+
+function planterModelUrl() {
+  const m = (typeof S !== 'undefined') ? S.bedMount : null;
+  return (m === 'metal_angle' || m === 'plastic_angle')
+    ? PLANTER_MODELS.angle : PLANTER_MODELS.hinge;
+}
+
+// Кэш и промис — на КАЖДЫЙ файл: при смене товара модель другая, и общий кэш
+// отдал бы прежнюю геометрию.
+const _planterCacheBy = {};       // url → { woodGeo, soilGeo }
+const _planterLoadBy = {};        // url → Promise
+let _planterCache = null;         // геометрии ТЕКУЩЕЙ модели (её читает buildBeds3d)
 
 function ensurePlanterLoaded() {
-  if (_planterCache) return Promise.resolve(_planterCache);
-  if (_planterLoadPromise) return _planterLoadPromise;
-  _planterLoadPromise = new Promise(resolve => {
+  const url = planterModelUrl();
+  if (_planterCacheBy[url]) { _planterCache = _planterCacheBy[url]; return Promise.resolve(_planterCache); }
+  if (_planterLoadBy[url]) return _planterLoadBy[url];
+  _planterLoadBy[url] = new Promise(resolve => {
     if (typeof THREE === 'undefined' || !THREE.GLTFLoader) { resolve(null); return; }
     const loader = new THREE.GLTFLoader();
     loader.load(
-      'assets/houses/modules/site/mod_planter_a.glb?v=1',
+      url,
       gltf => {
         let woodGeo = null, soilGeo = null;
         gltf.scene.traverse(o => {
@@ -754,14 +773,15 @@ function ensurePlanterLoaded() {
           if ((o.name || '').toLowerCase().includes('soil')) soilGeo = g;
           else woodGeo = g;
         });
-        _planterCache = { woodGeo, soilGeo };
+        _planterCacheBy[url] = { woodGeo, soilGeo };
+        _planterCache = _planterCacheBy[url];
         resolve(_planterCache);
       },
       undefined,
-      err => { console.warn('[planter] не удалось загрузить GLB:', err); resolve(null); }
+      err => { console.warn('[planter] не удалось загрузить GLB:', url, err); resolve(null); }
     );
   });
-  return _planterLoadPromise;
+  return _planterLoadBy[url];
 }
 
 // ══════════════════════════════════════════════
@@ -851,6 +871,7 @@ function buildFurniture3d(parent, M, points, houseL, houseW, surfaceYAt) {
       const g = _furnitureMarker();
       g.position.set(w.x, y, w.z);
       g.rotation.y = rot;
+      g.userData.furnIdx = i;                 // по нему редактор ловит клик (editor3d)
       parent.add(g); threeState.furnitureMeshes.push(g);
     };
     if (!pt.product) { marker(); return; }
@@ -879,6 +900,9 @@ function buildFurniture3d(parent, M, points, houseL, houseW, surfaceYAt) {
     pivot.add(obj);
     pivot.position.set(w.x, y, w.z);           // точка плана + отметка поверхности
     pivot.rotation.y = rot;
+    // Индекс точки на пивоте: редактор ищет предмет по МОДЕЛИ, а не по кружку
+    // вокруг точки — у составных комплектов он покрывал лишь малую их часть.
+    pivot.userData.furnIdx = i;
     parent.add(pivot); threeState.furnitureMeshes.push(pivot);
   });
 }
@@ -1124,6 +1148,8 @@ function buildBeds3d(parent, M, beds, bedH, houseL, houseW) {
   const chosen = (typeof S !== 'undefined' && S.elementMat && S.elementMat.beds
                   && S.elementMat.beds.productId);
   if (!chosen) { _buildBedPlaceholders(parent, beds, houseL, houseW); return; }
+  // Крепёж мог смениться вместе с товаром — переключаем кэш на нужный файл.
+  _planterCache = _planterCacheBy[planterModelUrl()] || null;
   if (!_planterCache || !_planterCache.woodGeo) {
     // Товар выбран, но GLB ещё не загружен: грузим и до готовности показываем места.
     ensurePlanterLoaded().then(c => { if (c && threeState) buildScene3d(); });

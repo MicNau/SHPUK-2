@@ -184,6 +184,37 @@ function _e3dStepsHandles(s) {
 // Грядка и мебель поворачиваются на 90° КЛИКОМ по себе — отдельной ручки у них
 // нет: объекты мелкие, и ручка рядом с ними только мешала прицелиться.
 
+// Бассейн лежит ПОВЕРХ настила и в редакторе не отзывался вовсе: у раздела
+// проверялись только прямоугольники террасы. Тянется за тело, размер — за
+// нижний правый угол; у круглого бассейна габарит остаётся квадратным.
+const E3D_POOL_MIN = 1.0;   // минимальный габарит бассейна, м
+
+function _e3dHitPool(np) {
+  const p = S.pool;
+  if (!p) return null;
+  const r = E3D_HANDLE_HIT / GRID;
+  if (Math.hypot(np.x - (p.x + p.w), np.y - (p.y + p.h)) < r) return { kind: 'pool', idx: 0, handle: 'resize' };
+  if (p.kind === 'round') {
+    const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
+    return (Math.hypot(np.x - cx, np.y - cy) <= p.w / 2) ? { kind: 'pool', idx: 0, handle: 'move' } : null;
+  }
+  return (np.x >= p.x && np.x <= p.x + p.w && np.y >= p.y && np.y <= p.y + p.h)
+    ? { kind: 'pool', idx: 0, handle: 'move' } : null;
+}
+
+// Контур бассейна в координатах плана: прямоугольник как есть, круглый —
+// многоугольником (в 3D он тоже строится многоугольником).
+function _e3dPoolOutline(p) {
+  if (p.kind !== 'round') return _e3dRectPts(p);
+  const cx = p.x + p.w / 2, cy = p.y + p.h / 2, R = p.w / 2;
+  const out = [];
+  for (let i = 0; i < 32; i++) {
+    const a = i / 32 * Math.PI * 2;
+    out.push({ x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R });
+  }
+  return out;
+}
+
 function _e3dHitHandles(list, np) {
   const r = E3D_HANDLE_HIT / GRID;
   let best = r, hit = null;
@@ -206,6 +237,15 @@ function _e3dHitEntry(np) {
     }
   }
   return hit;
+}
+
+// Индекс предмета мебели под объектом, в который попал луч: модель лежит в
+// пивоте, помеченном furnIdx (buildFurniture3d), а луч приходит в её меш.
+function _e3dFurnIdxOf(obj) {
+  for (let o = obj; o; o = o.parent) {
+    if (o.userData && typeof o.userData.furnIdx === 'number') return o.userData.furnIdx;
+  }
+  return null;
 }
 
 // Элемент фасада под объектом, в который попал луч: id стоит на группе-модуле,
@@ -231,6 +271,12 @@ function e3dHitTest(np, object) {
   }
   if (!np) return null;
 
+  // Бассейн проверяем ПЕРВЫМ: он лежит поверх настила своей террасы.
+  if (sec === 'pool_terrace') {
+    const hit = _e3dHitPool(np);
+    if (hit) return hit;
+  }
+
   if (kind === 'rect' || kind === 'steps' || kind === 'beds') {
     const list = kind === 'rect' ? secRects(sec)
                : kind === 'steps' ? (S.stepsList || [])
@@ -249,6 +295,12 @@ function e3dHitTest(np, object) {
   }
 
   if (kind === 'point') {
+    // Сначала — по самой модели: у составных комплектов (стол со стульями)
+    // кружок вокруг точки покрывал лишь малую часть предмета, и попасть по
+    // стулу было нельзя. Радиус вокруг точки остаётся запасным вариантом —
+    // он ловит клик, пока модель ещё грузится.
+    const byMesh = object ? _e3dFurnIdxOf(object) : null;
+    if (byMesh !== null) return { kind, idx: byMesh, handle: 'move' };
     const i = _e3dHitPoints(S.furniture || [], np);
     return i === null ? null : { kind, idx: i, handle: 'move' };
   }
@@ -426,6 +478,10 @@ function e3dSync() {
       if (!r || !(r.w > 0) || !(r.h > 0)) return;
       g.add(_e3dOutline(_e3dRectPts(r), i === sel ? E3D_COL_SEL : E3D_COL_IDLE, true));
     });
+    if (sec === 'pool_terrace' && S.pool) {
+      g.add(_e3dOutline(_e3dPoolOutline(S.pool), E3D_COL_SEL, true));
+      g.add(_e3dHandle({ x: S.pool.x + S.pool.w, y: S.pool.y + S.pool.h }));
+    }
     const cur = (sel !== null && sel !== undefined && kind !== 'beds') ? list[sel] : null;
     if (cur && cur.w > 0 && cur.h > 0) {
       const handles = kind === 'rect' ? _e3dRectHandles(cur) : _e3dStepsHandles(cur);
@@ -450,7 +506,10 @@ function e3dSync() {
       }
     }
   } else if (kind === 'facade') {
-    for (const seg of (threeState.facadeSegs || [])) {
+    // Рамки выбора нужны, пока отделка НЕ назначена: без них не видно, что
+    // отмечено. Как только товар выбран, панели видны сами, и разметка только
+    // мешает — прячем. Снимут отделку («Удалить всё») — рамки вернутся.
+    for (const seg of (S.elementMat && S.elementMat.facade) ? [] : (threeState.facadeSegs || [])) {
       if (!S.wallZones[seg.userData.segId]) continue;
       const box = new THREE.Box3().setFromObject(seg);
       const h = new THREE.Box3Helper(box, E3D_COL_SEL);
@@ -573,6 +632,9 @@ function _e3dDragStart(hit, np) {
     const p = (S.furniture || [])[hit.idx];
     return p ? { ...hit, from: { ...np }, start: { x: p.x, y: p.y } } : null;
   }
+  if (kind === 'pool') {
+    return S.pool ? { ...hit, from: { ...np }, start: { ...S.pool } } : null;
+  }
   if (kind === 'entry') return { ...hit, from: { ...np } };
   if (kind === 'line') return { ...hit, from: { ...np } };
   return null;
@@ -611,6 +673,18 @@ function _e3dDragMove(np) {
     // высоте (настил террасы или земля) досчитает сборка на отпускании.
     const obj = (threeState.furnitureMeshes || [])[d.idx];
     if (obj) { const w = _e3dToWorld(p); obj.position.x = w.x; obj.position.z = w.z; }
+  } else if (d.kind === 'pool') {
+    if (!S.pool) return;
+    const MIN = E3D_POOL_MIN / GRID;
+    if (d.handle === 'move') {
+      S.pool.x = snapNorm(d.start.x + dx);
+      S.pool.y = snapNorm(d.start.y + dy);
+    } else {
+      let w = Math.max(MIN, snapNorm(d.start.w + dx));
+      let h = Math.max(MIN, snapNorm(d.start.h + dy));
+      if (S.pool.kind === 'round') { const sq = Math.max(w, h); w = sq; h = sq; }
+      S.pool.w = w; S.pool.h = h;
+    }
   } else if (d.kind === 'entry') {
     if (typeof railingEntryDrag === 'function') railingEntryDrag(d.idx, d.handle, np);
   } else if (d.kind === 'line' && d.idx === 'gate') {

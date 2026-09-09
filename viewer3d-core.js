@@ -1268,13 +1268,17 @@ function buildScene3d() {
         // перекрытия, и для встык, и для обёртки вокруг выпуклого угла дома).
         const ovX = Math.min(W.maxX, Tt.maxX) - Math.max(W.minX, Tt.minX);
         const ovZ = Math.min(W.maxZ, Tt.maxZ) - Math.max(W.minZ, Tt.minZ);
-        // Угол достраивается ТОЛЬКО у крыльев, которые реально перекрываются —
-        // по ОБЕИМ осям. Блоки, лежащие встык или задевающие друг друга краем
-        // (перекрытие есть лишь по одной оси, по другой — ноль), считаются РАЗНЫМИ
-        // террасами и остаются независимыми. Раньше хватало перекрытия по одной
-        // оси, и две террасы у перпендикулярных стен дома, чуть заходящие одна за
-        // другую, срастались через достроенную угловую ячейку.
-        if (ovX <= E || ovZ <= E) continue;
+        // Угол достраивается у крыльев, которые СТЫКУЮТСЯ ПОЛНОСТЬЮ: либо
+        // перекрываются по обеим осям, либо приложены торцом на ВСЮ толщину
+        // соседнего крыла. Случайное касание краем (одна терраса на десяток
+        // сантиметров длиннее фасада и задевает соседнюю) — это две разные
+        // террасы, и достраивать между ними нечего.
+        const wThk = W.maxZ - W.minZ;    // толщина крыла W поперёк его досок
+        const tThk = Tt.maxX - Tt.minX;  // толщина крыла T
+        const touchX = ovX <= E, touchZ = ovZ <= E;
+        if (touchX && touchZ) continue;                 // сошлись только углом
+        if (touchX && ovZ < wThk - E) continue;         // торец T приложен не на всю толщину W
+        if (touchZ && ovX < tThk - E) continue;         // торец W приложен не на всю толщину T
         const exRight = W.maxX > Sx1 + E, exLeft = W.minX < Sx0 - E;
         if (exRight === exLeft) continue;               // W торчит ровно с одной стороны (угол, не T/+)
         const exUp = Tt.maxZ > Sz1 + E, exDown = Tt.minZ < Sz0 - E;
@@ -1676,7 +1680,11 @@ function facadeSelectedAreaM2() {
   const zones = (typeof S !== 'undefined' && S.wallZones) ? S.wallZones : {};
   const sel = segs.filter(s => zones[s.userData.segId]);
   const list = sel.length ? sel : segs;
-  let a = list.reduce((s, o) => s + (o.userData.segW || 0) * (o.userData.segH || 0), 0);
+  // Фронтон не прямоугольный: у него вместо segW×segH записана готовая площадь
+  // (segArea) — сумма площадей его треугольников, без выреза под окно.
+  let a = list.reduce((s, o) => s + (o.userData.segArea !== undefined
+    ? o.userData.segArea
+    : (o.userData.segW || 0) * (o.userData.segH || 0)), 0);
   for (const p of ((threeState && threeState.facadePillars) || [])) {
     if (p.userData._facadeOn) a += (p.userData.segW || 0) * (p.userData.segH || 0);
   }
