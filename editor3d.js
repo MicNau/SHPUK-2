@@ -59,8 +59,16 @@ const E3D_KIND = {
   facade:       'facade',    // выбор сегментов стен кликом по самим мешам
 };
 
+// Палец толще курсора: на телефоне все радиусы попадания растягиваются (режим
+// включает nav-mobile.js через e3dSetTouch). Ручка на экране остаётся прежнего
+// размера — растёт только зона, которая её ловит.
+const E3D_TOUCH_R = 1.8;
+
+function _e3dR(r) { return E3D.touch ? r * E3D_TOUCH_R : r; }
+
 const E3D = {
   sec:   null,   // активный раздел («terrace», «paths», …) или null
+  touch: false,  // мобильный режим: жесты пальцем вместо мыши
   group: null,   // THREE.Group: сетка, подсветка, маркеры, ручки
   grid:  null,   // THREE.GridHelper — живёт внутри group
   press: null,   // {x, y, hit, np} — состояние между pointerdown и pointerup
@@ -143,7 +151,7 @@ function _e3dHitRects(list, act, np) {
 // Точка ломаной, а если мимо точек — ближайший сегмент (для вставки в PR2).
 function _e3dHitLine(name, np) {
   const pts = S.pts[name] || [];
-  const r = E3D_PICK_R / GRID;
+  const r = _e3dR(E3D_PICK_R) / GRID;
   let best = r, idx = null;
   pts.forEach((q, i) => {
     if (q.break) return;
@@ -154,7 +162,7 @@ function _e3dHitLine(name, np) {
 }
 
 function _e3dHitPoints(list, np) {
-  const r = E3D_PICK_R / GRID;
+  const r = _e3dR(E3D_PICK_R) / GRID;
   let best = r, idx = null;
   (list || []).forEach((q, i) => {
     const d = Math.hypot(q.x - np.x, q.y - np.y);
@@ -197,7 +205,7 @@ const E3D_POOL_MIN = 1.0;   // минимальный габарит бассе�
 function _e3dHitPool(np) {
   const p = S.pool;
   if (!p) return null;
-  const r = E3D_HANDLE_HIT / GRID;
+  const r = _e3dR(E3D_HANDLE_HIT) / GRID;
   if (Math.hypot(np.x - (p.x + p.w), np.y - (p.y + p.h)) < r) return { kind: 'pool', idx: 0, handle: 'resize' };
   if (p.kind === 'round') {
     const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
@@ -221,7 +229,7 @@ function _e3dPoolOutline(p) {
 }
 
 function _e3dHitHandles(list, np) {
-  const r = E3D_HANDLE_HIT / GRID;
+  const r = _e3dR(E3D_HANDLE_HIT) / GRID;
   let best = r, hit = null;
   for (const h of list) {
     const d = Math.hypot(h.np.x - np.x, h.np.y - np.y);
@@ -233,7 +241,7 @@ function _e3dHitHandles(list, np) {
 // Маркеры входа в ограждение: пара точек на петле, каждую можно таскать.
 function _e3dHitEntry(np) {
   if (typeof railingEntryPointsNorm !== 'function') return null;
-  const r = E3D_HANDLE_HIT / GRID;
+  const r = _e3dR(E3D_HANDLE_HIT) / GRID;
   let best = r, hit = null;
   for (const e of railingEntryPointsNorm()) {
     for (const [k, q] of [[0, e.a], [1, e.b]]) {
@@ -731,7 +739,7 @@ function _e3dLineWrite(name, segs) {
 // Ближайшая существующая точка в пределах радиуса склейки → {si, pi, pt}.
 function _e3dGluePoint(name, np) {
   const segs = _e3dLineSegs(name);
-  const r = E3D_GLUE_R / GRID;
+  const r = _e3dR(E3D_GLUE_R) / GRID;
   let best = r, hit = null;
   segs.forEach((seg, si) => seg.forEach((p, pi) => {
     const d = Math.hypot(p.x - np.x, p.y - np.y);
@@ -807,8 +815,28 @@ function _e3dDrawClick(np) {
 
 // ── События ──────────────────────────────────────────────────────────────
 
+function _e3dCancelPress() {
+  E3D.press = null;
+  E3D.drag = null;
+  if (threeState) threeState.controls.enabled = true;
+}
+
+// Мобильный режим (вызывает nav-mobile.js). Жесты: одно касание — только выбор и
+// перетаскивание объекта, вид от него не крутится; два пальца — поворот и
+// масштаб вида. Мышиные кнопки не трогаем: на планшете с мышью всё как было.
+function e3dSetTouch(on) {
+  E3D.touch = !!on;
+  const c = (typeof threeState !== 'undefined' && threeState) ? threeState.controls : null;
+  if (!c || typeof THREE === 'undefined') return;
+  c.touches.ONE = on ? -1 : THREE.TOUCH.ROTATE;      // -1 — «ничего» (см. onTouchStart)
+  c.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
+}
+
 function _e3dOnDown(ev) {
   if (ev.button !== 0 || !E3D.sec || !threeState) return;
+  // Второй палец — это жест камеры (два пальца крутят и масштабируют вид):
+  // начатую протяжку бросаем, иначе объект уехал бы вместе с видом.
+  if (E3D.touch && ev.isPrimary === false) { _e3dCancelPress(); return; }
   const p = _e3dPointAt(ev);
   const hit = p ? e3dHitTest(p.norm, p.object) : null;
   E3D.press = { x: ev.clientX, y: ev.clientY, hit, np: p ? p.norm : null, moved: false };
@@ -896,6 +924,9 @@ function e3dAttach() {
   el.addEventListener('pointermove', _e3dOnHover);
   window.addEventListener('keydown', _e3dOnKey);
   E3D.bound = true;
+  // Сцена могла родиться позже, чем включился мобильный режим — переносим на
+  // неё настройку жестов (touches у OrbitControls живут в самой сцене).
+  if (E3D.touch) e3dSetTouch(true);
 }
 
 // Delete / Backspace — удалить выбранный объект (то же, что кнопка в панели).

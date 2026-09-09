@@ -47,6 +47,10 @@ function dGoTo(s) {
   if (s === 1) { _dInitHouseGrid(); _dSyncSelectNext(); }
   else if (s === 2) _dInitParamsView();
   else if (s === 3) _dInitWorkspace();
+
+  // Мобильная раскладка (nav-mobile.js) досогласует свои зоны и покажет
+  // инструкцию экрана. В десктопном режиме хука нет — ничего не происходит.
+  if (typeof mAfterGoTo === 'function') mAfterGoTo(s);
 }
 
 // Ширина панелей и кегль заголовков. Считаем по РЕАЛЬНЫМ метрикам шрифта, а не
@@ -951,6 +955,10 @@ function _dRenderSidebar() {
     const box = row && row.closest('.d-sb-row');
     if (box) requestAnimationFrame(() => box.scrollIntoView({ block: 'nearest' }));
   }
+
+  // На телефоне открытый раздел занимает нижнюю половину экрана, а сверху
+  // показывается вид — переключает зоны nav-mobile.js.
+  if (typeof mAfterSidebar === 'function') mAfterSidebar();
 }
 
 // ══════════════════════════════════════════════
@@ -1396,17 +1404,28 @@ const D_SECTION_HINTS = {
 // Помним показанные разделы в рамках сессии.
 const _dHintShown = new Set();
 
+// Текст подсказки раздела. На телефоне жесты другие («касание» вместо «клик»),
+// поэтому мобильная раскладка подменяет формулировки через mHintText.
+function _dHintText(secId) {
+  const m = (typeof mHintText === 'function') ? mHintText(secId) : '';
+  return m || D_SECTION_HINTS[secId] || '';
+}
+
 function _dShowEditorHint(secId) {
   if (_dHintShown.has(secId)) return;
-  const text = D_SECTION_HINTS[secId];
+  const text = _dHintText(secId);
   if (!text) return;
   _dHintShown.add(secId);
+  // На телефоне окна показываются очередью (mHintTake): при первом заходе их
+  // может совпасть несколько, и они перекрывали бы друг друга.
+  const item0 = D_SIDEBAR_ITEMS.find(i => i.id === secId);
+  if (typeof mHintTake === 'function'
+      && mHintTake('sec:' + secId, item0 ? item0.lbl : '', text)) return;
   const ov = document.getElementById('d-hint-overlay');
   const body = document.getElementById('d-hint-text');
   const title = document.getElementById('d-hint-title');
   if (!ov || !body) return;
-  const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
-  if (title) title.textContent = item ? item.lbl : '';
+  if (title) title.textContent = item0 ? item0.lbl : '';
   body.textContent = text;
   ov.classList.add('active');
 }
@@ -1414,13 +1433,14 @@ function _dShowEditorHint(secId) {
 function _dSyncSectionHint() {
   const el = document.getElementById('d-3d-hint');
   if (!el) return;
-  el.textContent = (dStep === 3 && dActiveItem && D_SECTION_HINTS[dActiveItem])
-    ? D_SECTION_HINTS[dActiveItem] : '';
+  el.textContent = (dStep === 3 && dActiveItem) ? _dHintText(dActiveItem) : '';
 }
 
 function dHideEditorHint() {
   const ov = document.getElementById('d-hint-overlay');
   if (ov) ov.classList.remove('active');
+  // Закрыли одно окно — мобильная очередь показывает следующее.
+  if (typeof mHintClosed === 'function') mHintClosed();
 }
 
 // ── Подсказка по управлению 3D — всплывающим окном при ПЕРВОМ запуске ──
@@ -1432,6 +1452,10 @@ const HINT_3D_TEXT = 'Левая кнопка мыши — вращение, а 
 let _d3dHintShown = false;
 
 function dShow3dHint() {
+  // На телефоне вид появляется только в открытом разделе, и жесты там другие —
+  // подсказку показывает мобильная очередь (mHintTake).
+  if (typeof mHintTake === 'function'
+      && mHintTake('view3d', 'Управление видом', HINT_3D_TEXT)) return;
   if (_d3dHintShown) return;
   const ov = document.getElementById('d-hint-overlay');
   const body = document.getElementById('d-hint-text');
@@ -2342,6 +2366,9 @@ async function dApplyRealMat(e, pid) {
   const list = document.getElementById('d-mat-list');
   if (list) list.querySelectorAll('.d-mat-btn-apply').forEach(b => { b.disabled = false; });
   btn.disabled = true;
+  // На телефоне каталог — отдельный экран: «Применить» возвращает к настройкам
+  // элемента (ТЗ мобильной версии, п. 8).
+  if (typeof mAfterApply === 'function') mAfterApply();
 }
 
 function dToggleMatCard(mid) {
@@ -2376,6 +2403,9 @@ function dApplyMat(e, mid, name, color, priceStr) {
   btn.textContent = '✓';
   btn.style.background = '#444';
   setTimeout(() => { btn.textContent = orig; btn.style.background = '#000'; }, 600);
+  // Каталог-заглушка ведёт себя как настоящий: на телефоне «Применить»
+  // возвращает к настройкам элемента.
+  if (typeof mAfterApply === 'function') mAfterApply();
 }
 
 function dCompareMat(e, mid, name, color) {

@@ -1,0 +1,140 @@
+/* MOBILE STYLES — вертикальная раскладка телефона (ветка Mobile).
+   Подключается всегда, но действует только при body.m-mode: класс ставит
+   nav-mobile.js, когда ширина окна ниже M_BREAKPOINT (экран телефона 1080
+   физических пикселей ≈ 360 CSS). Оформление то же, что на десктопе — те же
+   токены, цвета и формы; меняются раскладка и кегли, а высота кнопок и полей
+   поднята до пальцевой (44 px). */
+
+/* Экран не тянется по горизонтали: каркас узкий, и любой вылезший блок дал бы
+   боковой скролл вместо переноса. */
+body.m-mode {
+  --header-h: 44px;
+  --panel-title-fz: 20px;
+  overflow: hidden;
+}
+
+/* ── ХЕДЕР ── */
+/* Название и «На главную» обязаны уместиться в одну строку (ТЗ п. 4): название
+   сжимается многоточием, кнопка остаётся целиком. */
+body.m-mode .d-header { padding: 0 10px; gap: 8px; }
+body.m-mode .d-header-title {
+  font-size: 20px; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+}
+body.m-mode .d-header-home { height: 30px; padding: 0 10px; font-size: 13px; }
+
+/* ── ЭКРАН 1 — выбор дома ── */
+/* Скроллится весь экран: карточки идут колонкой, за ними «Участок без дома»
+   и «Дальше» (её показывает _dSyncSelectNext при возврате). */
+body.m-mode .d-select-wrap {
+  padding: 12px 12px calc(16px + env(safe-area-inset-bottom, 0px));
+  gap: 12px; overflow-y: auto; overflow-x: hidden;
+}
+body.m-mode .d-select-title { font-size: 22px; }
+body.m-mode .d-house-progress { font-size: 13px; }
+/* Скроллится весь экран, а не сетка: flex:none оставляет ей высоту по числу
+   карточек — иначе она сжималась бы до свободного места и наезжала на «Участок
+   без дома». */
+body.m-mode .d-house-grid {
+  grid-template-columns: 1fr; overflow: visible; padding: 0; flex: none;
+}
+body.m-mode .d-house-card { height: 150px; margin: 0 0 -1px 0; }
+body.m-mode .d-house-card .hcl { font-size: 17px; left: 12px; right: 12px; }
+body.m-mode .d-house-card .hcl-sub { font-size: 13px; }
+body.m-mode .d-house-extra { flex-direction: column; gap: 12px; width: 100%; }
+body.m-mode .d-house-card-empty { flex: 0 0 120px; height: 120px; width: 100%; }
+body.m-mode .d-house-card-empty .hcl { font-size: 17px; }
+body.m-mode .d-select-actions { margin-left: 0; width: 100%; }
+body.m-mode .d-select-actions .d-btn { width: 100%; height: 44px; font-size: 16px; }
+
+/* ── ЭКРАН 2 — параметры дома (3D-вида нет, ТЗ п. 6) ── */
+body.m-mode .d-params-layout { flex-direction: column; }
+body.m-mode .d-params-center { display: none; }
+body.m-mode .d-params-left {
+  width: 100%; border-right: none; flex: 1; min-height: 0;
+  padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+}
+body.m-mode .d-params-title { margin-bottom: 8px; }
+body.m-mode .d-params-actions .d-btn { height: 44px; font-size: 16px; }
+body.m-mode .d-param-label { font-size: 15px; }
+body.m-mode .d-param-unit { font-size: 14px; }
+
+/* ── ЭКРАН 3 — благоустройство ── */
+/* Пока раздел не выбран, экран — это список разделов. С открытым разделом
+   (класс m-open ставит mSyncSection) сверху появляется вид, снизу остаются
+   настройки и кнопки открытого раздела, а остальные пункты списка прячутся:
+   вернуться к ним можно кнопкой «Меню» с экрана каталога. */
+body.m-mode #d-screen-3 .d-workspace { flex-direction: column; min-height: 0; }
+/* Десктопная центральная колонка осталась пустой — вид из неё переехал в .m-3d;
+   без этого её flex:1 забирал бы верх экрана под пустое место. */
+body.m-mode #d-screen-3 .d-center { display: none; }
+body.m-mode .m-3d { display: none; position: relative; flex: 0 0 42vh; min-height: 0; }
+body.m-mode #d-screen-3.m-open .m-3d { display: block; }
+body.m-mode .m-3d .d-center-view { position: absolute; inset: 0; }
+body.m-mode .m-sec { flex: 1; min-height: 0; display: flex; }
+body.m-mode .m-sec .d-sidebar { width: 100%; border-right: none; }
+body.m-mode .d-sidebar-title { padding: 10px 12px 6px; }
+body.m-mode .d-sidebar-list { padding: 0 12px 8px; gap: 6px; }
+/* «К параметрам дома» живёт в нижней панели экрана — своя строка кнопок в
+   сайдбаре была бы её дублем. */
+body.m-mode .d-sidebar-actions { display: none; }
+body.m-mode .d-sb-btn { height: 44px; font-size: 16px; }
+body.m-mode .d-sb-accordion { padding: 10px 0 4px; }
+body.m-mode .d-sb-accordion .d-canvas-btn { height: 44px; font-size: 15px; }
+body.m-mode #d-screen-3.m-open .d-sb-row { display: none; }
+body.m-mode #d-screen-3.m-open .d-sb-row.m-active { display: flex; }
+/* Подсказка раздела на телефоне занимала бы половину вида — жесты объясняет
+   окно при первом заходе (nav-mobile.js), а плашка в углу скрыта. */
+body.m-mode .d-3d-hint { display: none; }
+body.m-mode .d-3d-overlay .d-3d-dim { font-size: 12px; padding: 2px 5px; }
+
+/* Нижняя панель кнопок экрана и «Смета» под ней (ТЗ п. 7). */
+body.m-mode .m-bar {
+  display: flex; gap: 8px; padding: 8px 12px 0; flex-shrink: 0;
+}
+/* Подписи кнопок — в одну строку: «К параметрам дома» переносилась и делала
+   панель вдвое выше соседней кнопки. */
+body.m-mode .m-bar .d-btn {
+  flex: 1; height: 44px; font-size: 13px; white-space: nowrap; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+/* Нижняя кромка: у телефонов там системная полоса жестов (safe-area). */
+body.m-mode #d-screen-3 .d-panel-footer {
+  padding: 8px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+}
+body.m-mode #d-screen-4 .m-bar {
+  padding: 8px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+}
+body.m-mode .d-fab-summary { height: 44px; font-size: 18px; }
+
+/* ── ЭКРАН 4 — каталог ── */
+body.m-mode #d-screen-4 { flex-direction: column; }
+body.m-mode #d-screen-4 .d-panel {
+  width: 100%; border-left: none; flex: 1; min-height: 0;
+}
+body.m-mode .d-panel-header { padding: 10px 12px 8px; }
+body.m-mode .d-panel-body { padding: 10px 12px 0; }
+body.m-mode .d-mat-list { padding: 10px 0; gap: 10px; }
+body.m-mode .d-mat-name { font-size: 15px; }
+body.m-mode .d-mat-short { font-size: 13px; }
+body.m-mode .d-mat-price { font-size: 14px; }
+body.m-mode .d-mat-thumb { width: 60px; height: 60px; }
+body.m-mode .d-mat-btn { height: 40px; font-size: 14px; }
+body.m-mode .d-filters-toggle { height: 40px; font-size: 15px; }
+body.m-mode .d-filters-box .d-color-grid { grid-template-columns: repeat(6, 1fr); }
+body.m-mode .d-color-dot { min-height: 28px; }
+body.m-mode #d-screen-4 .d-panel-footer { display: none; }
+
+/* ── ОКНА ── */
+/* Инструкция перед экраном и подсказка раздела (ТЗ п. 9) — то же окно, что на
+   десктопе, по ширине экрана. */
+body.m-mode .d-hint-box { width: 100%; max-width: calc(100vw - 32px); padding: 18px; gap: 12px; }
+body.m-mode .d-hint-title { font-size: 19px; }
+body.m-mode .d-hint-text { font-size: 15px; }
+body.m-mode .d-hint-box .d-btn { min-width: 120px; height: 44px; font-size: 16px; }
+body.m-mode .d-summary-box { width: 100%; max-width: calc(100vw - 24px); max-height: 86vh; }
+body.m-mode .d-summary-header { padding: 14px 16px; }
+body.m-mode .d-summary-title { font-size: 19px; }
+body.m-mode .d-summary-body { padding: 14px 16px; }
+body.m-mode .d-summary-actions { padding: 12px 16px; gap: 8px; }
+body.m-mode .d-summary-btn { height: 44px; font-size: 14px; }
+body.m-mode .d-photo-overlay { padding: 16px; }
