@@ -583,6 +583,17 @@ function _e3dSyncOverlay() {
           : `${_fmtM3d(wm)} × ${_fmtM3d(hm)}`;
         _e3dLabels.push({ np: { x: r.x + r.w / 2, y: r.y + r.h / 2 }, text: txt });
       });
+    } else if (kind === 'railing') {
+      // Ширина разрыва — таким же числом, как остальные размеры: на глаз её было
+      // не подобрать, а маркеры тянутся по периметру.
+      if (typeof railingEntryPointsNorm === 'function') {
+        for (const e of railingEntryPointsNorm()) {
+          const len = Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y) * GRID;
+          if (len < 0.05) continue;
+          _e3dLabels.push({ np: { x: (e.a.x + e.b.x) / 2, y: (e.a.y + e.b.y) / 2 },
+                            text: _fmtM3d(len) });
+        }
+      }
     } else if (kind === 'line') {
       const pts = S.pts[sec] || [];
       const segs = (typeof splitAtBreaks === 'function') ? splitAtBreaks(pts) : [pts];
@@ -947,7 +958,41 @@ function _e3dOnKey(ev) {
 }
 
 // Смена активного раздела: сбрасываем начатый отрезок, перерисовываем слой.
+// Разделы, которые размечаются «по земле»: при их открытии камера поднимается
+// на вид сверху — с уровня глаз разметку видно плохо, а участок целиком не
+// помещается. Вид НЕ строго вертикальный (иначе теряются высоты) и азимут
+// сохраняется — меняются только угол подъёма и дистанция.
+const E3D_TOP_SECS = new Set(['terrace', 'pool_terrace', 'steps', 'paths', 'fence', 'beds']);
+const E3D_TOP_PITCH = 58 * Math.PI / 180;   // угол над горизонтом
+// Дорожки и забор идут по всему участку, остальное — вокруг дома.
+const E3D_TOP_WIDE = new Set(['paths', 'fence']);
+
+function e3dTopView(sec) {
+  if (!threeState || !threeState.camera || !threeState.controls) return;
+  const cam = threeState.camera, ctr = threeState.controls;
+  const sz = (typeof lastHouseSize === 'function') ? lastHouseSize() : { L: 0, W: 0 };
+  // Цель — центр участка (он же центр плана): разметка любого раздела лежит
+  // внутри него, а центр дома увёл бы вид к краю.
+  const c = _e3dToWorld({ x: 0.5, y: 0.5 });
+  const span = E3D_TOP_WIDE.has(sec) ? GRID * 0.62
+                                     : Math.max(sz.L, sz.W, 8) + 12;
+  const dist = Math.min(ctr.maxDistance || 50,
+                        Math.max(ctr.minDistance || 4,
+                                 span / (2 * Math.tan(cam.fov * Math.PI / 360))));
+  // Азимут оставляем прежний: пользователь сам развернул сцену как ему удобно.
+  const dx = cam.position.x - ctr.target.x, dz = cam.position.z - ctr.target.z;
+  const az = (Math.hypot(dx, dz) > 0.01) ? Math.atan2(dx, dz) : Math.PI / 4;
+  const horiz = Math.cos(E3D_TOP_PITCH) * dist;
+  ctr.target.set(c.x, 0, c.z);
+  cam.position.set(c.x + Math.sin(az) * horiz,
+                   Math.sin(E3D_TOP_PITCH) * dist,
+                   c.z + Math.cos(az) * horiz);
+  threeState.camTouched = true;   // сцена больше не переставляет камеру сама
+  ctr.update();
+}
+
 function e3dSetSection(secId) {
+  const changed = E3D.sec !== ((secId && E3D_KIND[secId]) ? secId : null);
   E3D.sec = (secId && E3D_KIND[secId]) ? secId : null;
   E3D.press = null;
   E3D.drag = null;
@@ -956,6 +1001,7 @@ function e3dSetSection(secId) {
     threeState.controls.enabled = true;
     threeState.renderer.domElement.style.cursor = '';
   }
+  if (changed && E3D.sec && E3D_TOP_SECS.has(E3D.sec)) e3dTopView(E3D.sec);
   e3dSync();
   // Панель раздела рисуется РАНЬШЕ этого вызова, и состояние кнопки «Удалить
   // выбранную» там считалось по ещё не обновлённому разделу: при первом открытии

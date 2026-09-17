@@ -84,7 +84,10 @@ function _dSyncSidebarWidth() {
   const rowW = labelW + 24 + 4 + 2 + editW + 16;
   // Заголовки (левые панели и названия разделов в правой) при кегле 100 — по ним
   // подбирается их кегль под получившуюся ширину; зависимость линейная.
-  const titleW100 = widest([...SIDEBAR_TITLES, ...D_MENU_ITEMS.map(i => i.lbl)], 100, 400);
+  // У забора в заголовке каталога стоит ещё и высота — строка длиннее названия
+  // раздела, и кегль подбирается по ней, иначе заголовок обрезался бы.
+  const fenceTitle = `Забор (высота ${(+S.fenceH).toFixed(2)} м)`;
+  const titleW100 = widest([...SIDEBAR_TITLES, ...D_MENU_ITEMS.map(i => i.lbl), fenceTitle], 100, 400);
   probe.remove();
   // Ширина не должна быть меньше той, в которой заголовок читается минимальным кеглем.
   const needLeft  = titleW100 * TITLE_FZ_MIN / 100 + 2 * SIDEBAR_PAD;
@@ -1503,7 +1506,12 @@ function _dRenderPanelContent() {
 
   const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
   const panelTitle = document.getElementById('d-panel-title');
-  if (panelTitle) panelTitle.textContent = item ? item.lbl : 'Материалы';
+  // У забора высота задана жёстко (FENCE_H) и в настройках её нет — показываем
+  // прямо в заголовке каталога, чтобы не искать её в другом месте.
+  if (panelTitle) {
+    panelTitle.textContent = !item ? 'Материалы'
+      : (secId === 'fence' ? `${item.lbl} (высота ${(+S.fenceH).toFixed(2)} м)` : item.lbl);
+  }
 
   // Дефолтный раздел каталога для текущего элемента (сбрасываем явный выбор при
   // смене элемента/подрежима). Для ограждения террасы — раздел «Ограждения террасы».
@@ -1838,9 +1846,12 @@ function _dRenderColorGrid() {
   // раньше в фильтре висели цвета из COLORS.md, обнулявшие выдачу. Пока каталог
   // не загружен, палитра показывается целиком — иначе фильтр мигал бы пустым.
   const colors = _availableColors(dActiveItem);
+  // Название цвета — СВОЯ подпись (data-label + ::after), а не браузерный title:
+  // системная подсказка появляется через секунду с лишним, и цвет приходилось
+  // «выжидать». Своя всплывает сразу по наведению.
   grid.innerHTML = colors.map(c =>
     `<div class="d-color-dot ${catFilter(dActiveItem).colors.has(c.id) ? 'selected' : ''}"
-          title="${c.label}" style="background:${c.hex};"
+          data-label="${c.label}" style="background:${c.hex};"
           onclick="dToggleColor('${c.id.replace(/'/g, "\\'")}')"></div>`
   ).join('');
 }
@@ -1848,17 +1859,18 @@ function _dRenderColorGrid() {
 function _dRenderPriceGrid() {
   const grid = document.getElementById('d-price-grid');
   if (!grid) return;
-  // Мебель: цена за изделие (десятки тысяч ₽), а тиры заданы в ₽/м.пог для доски —
-  // фильтр по ним бессмыслен, прячем блок целиком и сбрасываем выбор.
+  // Разделы без ценовых категорий: у мебели цена за изделие (тиры заданы для
+  // доски), у забора и грядок категорий в каталоге нет — фильтр давал бы пустую
+  // выдачу. Блок прячем целиком и выбор сбрасываем.
   const sect = document.getElementById('d-price-section');
-  const isFurniture = (dActiveItem === 'furniture');
-  if (sect) sect.style.display = isFurniture ? 'none' : '';
-  if (isFurniture) { catFilter(dActiveItem).prices = new Set(); grid.innerHTML = ''; return; }
+  const noTiers = PRICE_TIER_HIDDEN.has(dActiveItem);
+  if (sect) sect.style.display = noTiers ? 'none' : '';
+  if (noTiers) { catFilter(dActiveItem).prices = new Set(); grid.innerHTML = ''; return; }
   grid.innerHTML = PRICE_TIERS.map(t =>
     `<button class="d-price-btn ${catFilter(dActiveItem).prices.has(t.id) ? 'selected' : ''}"
              onclick="dSelectPrice('${t.id}')">
        <span class="d-radio"></span>
-       <span class="d-price-lbl">${t.lbl}<span class="d-price-sub">${t.sub}</span></span>
+       <span class="d-price-lbl">${t.lbl}</span>
      </button>`
   ).join('');
 }
@@ -2072,6 +2084,9 @@ function _productPrice(p) {
 // Предикаты тиров. МПК: надёжный признак — принадлежность разделу 2329
 // «Террасная доска из МПК» (тег mpk, ревизия API 2026-07-31); подстрока в
 // названии — fallback.
+// Разделы, где фильтр ценовых категорий не показывается (см. _dRenderPriceGrid).
+const PRICE_TIER_HIDDEN = new Set(['furniture', 'fence', 'beds']);
+
 const PRICE_TIER_MATCH = {
   budget:   p => (_productPrice(p) ?? 0) < 500,
   balanced: p => { const v = _productPrice(p) ?? 0; return v >= 500 && v <= 900; },
@@ -3027,38 +3042,6 @@ function _ensureProjectCalc() {
     });
 }
 
-// ── Смета проекта в PDF ──
-//
-// Собирается фоновой задачей: Calculator ставит её, опрашивает состояние и
-// отдаёт ссылку на файл. Тело запроса — то же, что у расчёта. Раньше PDF был
-// только по одному объекту; в новой версии API тип project поддерживается и
-// здесь, поэтому смета выгружается на проект целиком.
-async function dProjectReport() {
-  const btn = document.getElementById('d-project-pdf');
-  const state = document.getElementById('d-project-pdf-state');
-  const setState = t => { if (state) state.textContent = t; };
-  const req = buildProjectCalcRequest();
-  const calc = _dCalculator();
-  if (req.error || !calc) { setState(req.error || 'Сервис расчёта не подключён.'); return; }
-
-  if (btn) btn.disabled = true;
-  setState('Ставим задачу…');
-  try {
-    const url = await calc.getReport(CalculationType.PROJECT, req.payload,
-      s => setState(s === ReportStatus.PENDING ? 'Готовим смету…' : ''));
-    // Ссылка приходит относительной (/api/v1/calculation_report/file/…). На хосте
-    // без прокси статика и API — разные домены, поэтому разворачиваем по домену API.
-    const domain = (typeof RESOURCE_API_DOMAIN !== 'undefined') ? RESOURCE_API_DOMAIN : '';
-    window.open(domain ? new URL(url, domain).href : url, '_blank');
-    setState('');
-  } catch (e) {
-    console.warn('[calculation_report]', e);
-    setState(_calcErrorText(e));
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
 // Итог по объекту: материалы + работы.
 function _objectCalcTotal(obj) {
   if (!obj) return 0;
@@ -3114,11 +3097,7 @@ function _dRenderProjectCalc() {
   }).join('');
 
   host.innerHTML = head + sections + `
-    <div class="est-project-total">Итого по проекту: <span class="est-total">${_fmtRub(total)}</span></div>
-    <div class="est-actions">
-      <button class="d-canvas-btn" id="d-project-pdf" onclick="dProjectReport()">Смета проекта в PDF</button>
-      <span class="est-note" id="d-project-pdf-state"></span>
-    </div>`;
+    <div class="est-project-total">Итого по проекту: <span class="est-total">${_fmtRub(total)}</span></div>`;
 }
 
 // ══════════════════════════════════════════════

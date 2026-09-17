@@ -581,21 +581,27 @@ function pillarPosition(item, ps) {
   };
 }
 
-function buildPillar(parent, modules, item, wallH, yOffset, ps) {
-  const p = cloneModule(modules, 'pillar');
-  if (!p) return;
-  p.scale.set(ps, wallH, ps);
+// Угловой столб фасада собирается ПОЛОСАМИ — теми же, что простенок (wallBands):
+// цельный столб красился под одного соседа на всю высоту, и отделка на углу шла
+// сплошняком мимо поясов стены. Каждая полоса отделывается «под ближайшую
+// вставку» отдельно (смежность считает _collectFacadeSegments, viewer3d-core).
+// segW/segH — площадь двух наружных граней полосы, для сметы.
+function buildPillar(parent, modules, item, wallH, yOffset, ps, bands) {
+  const list = (bands && bands.length) ? bands : [{ y0: 0, y1: wallH }];
   const pos = pillarPosition(item, ps);
-  p.position.set(pos.x, yOffset, pos.z);
-  // Угловой столб фасада: отделывается АВТОМАТИЧЕСКИ «под ближайшую вставку» —
-  // если примыкающий элемент фасада выбран под панели, столб красится вместе с ним
-  // (смежность определяется bbox-касанием в _collectFacadeSegments, viewer3d-core).
-  // segW/segH — площадь двух наружных граней для сметы.
-  p.userData.facadePillar = true;
-  p.userData.segW = 2 * ps;
-  p.userData.segH = wallH;
-  setupShadows(p);
-  parent.add(p);
+  for (const band of list) {
+    const bh = band.y1 - band.y0;
+    if (bh <= 0.01) continue;
+    const p = cloneModule(modules, 'pillar');
+    if (!p) return;
+    p.scale.set(ps, bh, ps);
+    p.position.set(pos.x, yOffset + band.y0, pos.z);
+    p.userData.facadePillar = true;
+    p.userData.segW = 2 * ps;
+    p.userData.segH = bh;
+    setupShadows(p);
+    parent.add(p);
+  }
 }
 
 // Переименовывает имена материалов всех мешей объекта (опц. только те, что равны
@@ -1577,22 +1583,73 @@ function polyArea2(poly) {
   return Math.abs(a) / 2;
 }
 
-// Членение фронтона по границам окна — тот же принцип, что у простенка
-// (см. wallBands): вертикальные резы по краям окна дают левую и правую части,
-// средняя колонка режется по низу и верху окна на подоконную и надоконную.
-// Куски покрывают фронтон целиком, поэтому площадь в смете не меняется.
+// Членение фронтона: вертикальные резы по границам окна фронтона И по границам
+// проёмов стены ПОД ним (wallCuts), чтобы отделка фронтона вставала колонками
+// ровно над простенками и окнами этажа, а не сама по себе. Колонка с окном
+// фронтона дополнительно режется по его низу и верху (подоконная и надоконная
+// части). Куски покрывают фронтон целиком, поэтому площадь в смете не меняется.
 const GABLE_PIECE_MIN = 0.05;   // м² — кусок меньше этого не выделяем
+const GABLE_CUT_MIN   = 0.12;   // м — резы ближе этого считаем одним
 
-function gablePieces(points2D, u0, u1, v0, v1) {
+function gablePieces(points2D, u0, u1, v0, v1, wallCuts) {
   const cutX = (poly, c, sign) => clipPoly2(poly, p => sign * (p.x - c));
   const cutY = (poly, c, sign) => clipPoly2(poly, p => sign * (p.y - c));
-  const mid = cutX(cutX(points2D, u0, +1), u1, -1);
-  return [
-    { suffix: 's0',  poly: cutX(points2D, u0, -1) },
-    { suffix: 'o0b', poly: cutY(mid, v0, -1) },
-    { suffix: 'o0t', poly: cutY(mid, v1, +1) },
-    { suffix: 's1',  poly: cutX(points2D, u1, +1) },
-  ].filter(p => p.poly.length >= 3 && polyArea2(p.poly) > GABLE_PIECE_MIN);
+  // Резы по возрастанию, без дублей: границы окна фронтона + унаследованные
+  // границы стены. Крайние (по краям полигона) не нужны — там и так край.
+  const uMax = Math.max(...points2D.map(p => p.x));
+  const cuts = [u0, u1, ...(wallCuts || [])]
+    .filter(u => u > GABLE_CUT_MIN && u < uMax - GABLE_CUT_MIN)
+    .sort((a, b) => a - b)
+    .filter((u, i, arr) => i === 0 || u - arr[i - 1] > GABLE_CUT_MIN);
+  const out = [];
+  let col = 0;
+  const edges = [0, ...cuts, uMax];
+  for (let i = 0; i < edges.length - 1; i++) {
+    const a = edges[i], b = edges[i + 1];
+    let poly = points2D;
+    if (a > 0) poly = cutX(poly, a, +1);
+    if (b < uMax) poly = cutX(poly, b, -1);
+    if (poly.length < 3) continue;
+    // Колонка окна фронтона — та, что совпала с его границами.
+    const isWin = Math.abs(a - u0) < GABLE_CUT_MIN && Math.abs(b - u1) < GABLE_CUT_MIN;
+    if (isWin) {
+      out.push({ suffix: 'o0b', poly: cutY(poly, v0, -1) });
+      out.push({ suffix: 'o0t', poly: cutY(poly, v1, +1) });
+    } else {
+      out.push({ suffix: 's' + col, poly });
+      col++;
+    }
+  }
+  return out.filter(p => p.poly.length >= 3 && polyArea2(p.poly) > GABLE_PIECE_MIN);
+}
+
+// Границы проёмов стены ПОД фронтоном, приведённые к оси фронтона (u, метры от
+// frame.ll). По ним фронтон получает то же вертикальное членение, что и стена:
+// иначе его куски не совпадали бы с простенками этажа.
+function gableWallCuts(frame, outline, modulesDef) {
+  if (!outline || !outline.items || !modulesDef) return [];
+  const along = frame.uAxis;                      // направление вдоль фронтона
+  const cuts = [];
+  for (const item of outline.items) {
+    if (item.type !== 'wall') continue;
+    // Ребро стены берём то, что идёт вдоль фронтона и лежит на его линии.
+    const par = Math.abs(item.dx * along.x + item.dz * along.z);
+    if (par < 0.9) continue;
+    const sx = item.x + item.dx * item.startOffset;
+    const sz = item.z + item.dz * item.startOffset;
+    // Поперечное расстояние от плоскости фронтона: дальняя стена не в счёт.
+    const offX = sx - frame.ll.x, offZ = sz - frame.ll.z;
+    const alongOff = offX * along.x + offZ * along.z;
+    const perp = Math.hypot(offX - along.x * alongOff, offZ - along.z * alongOff);
+    if (perp > 0.6) continue;
+    let cursor = 0;
+    for (const fill of resolveFills(item, modulesDef)) {
+      cursor += fill.width;
+      const px = sx + item.dx * cursor, pz = sz + item.dz * cursor;
+      cuts.push((px - frame.ll.x) * along.x + (pz - frame.ll.z) * along.z);
+    }
+  }
+  return cuts;
 }
 
 // Строит один gable/mansard front: полигон + опционально прямоугольное окно-дырка + window GLB.
@@ -1637,7 +1694,7 @@ function buildOneGable(parent, frame, cfg, sharedWallMat, glbModules, modulesDef
 
   // Фронтон с окном собирается кусками (левый, подоконный, надоконный, правый):
   // каждый выбирается под отделку отдельно, окно остаётся между ними без выреза.
-  const pieces = gablePieces(points2D, u0, u1, v0, v1);
+  const pieces = gablePieces(points2D, u0, u1, v0, v1, frame.wallCuts);
   if (pieces.length > 1) {
     for (const piece of pieces) {
       const tris = THREE.ShapeUtils.triangulateShape(piece.poly, []);
@@ -1789,6 +1846,8 @@ function buildGableWindows(parent, desc, outline, baseY, angleDeg, sharedWallMat
       log(`[gable_win] side=${cfg.side} не подходит для longAxisX=${longAxisX}. Пропускаю.`, 'warn');
       continue;
     }
+    // Фронтон наследует вертикальное членение стены под ним (границы проёмов).
+    frame.wallCuts = gableWallCuts(frame, outline, desc.modules);
     buildOneGable(parent, frame, cfg, sharedWallMat, modules, desc.modules);
   }
   log(`[gable_win] построено ${list.length} (${roofType})`, 'ok');
@@ -3650,10 +3709,20 @@ function buildHouseFromDescriptor(houseGroup, desc, modules, params, options = {
       }
     }
 
+    // Полосы этажа (ниже окна / по окну / выше окна) — одни на все его рёбра:
+    // окна этажа сажают на общую отметку, поэтому угловые столбы режутся теми же
+    // линиями, что и простенки. Берём первое ребро, у которого окно есть.
+    let floorBands = null;
+    for (const item of outline.items) {
+      if (item.type !== 'wall') continue;
+      const b = wallBands(resolveFills(item, desc.modules), wallH);
+      if (b.length > 1) { floorBands = b; break; }
+    }
+
     let edgeIdx = 0;
     for (const item of outline.items) {
       if (item.type === 'pillar') {
-        buildPillar(houseGroup, modules, item, wallH, yOffset, ps);
+        buildPillar(houseGroup, modules, item, wallH, yOffset, ps, floorBands);
       } else if (item.type === 'wall') {
         // segPrefix — стабильный id ребра для выбора сегментов фасада (S.wallZones)
         buildEdgeWall(houseGroup, modules, desc.modules, item, wallH, yOffset, wt, ps, `f${fi}:e${edgeIdx}`);

@@ -152,6 +152,23 @@ function terracePerimeterSegments(worldPts, houseL, houseW, otherRects){
   return segs;
 }
 
+// Насколько конец сегмента близок к дому. Нужен, чтобы секция-добор (та, что
+// короче остальных) вставала СО СТОРОНЫ ДОМА: у стены обрезок незаметен, а на
+// открытой стороне бросается в глаза. Сегмент, у которого ближе к дому начало,
+// раскраивается с конца — тогда добор приходится на «домашний» край.
+function _railDistToHouse(x, z) {
+  let best = Infinity;
+  for (const [ax, az, bx, bz] of _railHouseEdges()) {
+    const dx = bx - ax, dz = bz - az;
+    const len2 = dx * dx + dz * dz;
+    if (len2 < 1e-6) continue;
+    let t = ((x - ax) * dx + (z - az) * dz) / len2;
+    t = Math.max(0, Math.min(1, t));
+    best = Math.min(best, Math.hypot(x - (ax + dx * t), z - (az + dz * t)));
+  }
+  return best;
+}
+
 // Цвет деревянных колонн (mod_porch_column fallback) — им же красим перила/балясины,
 // чтобы ограждение визуально совпадало с колоннами навеса.
 const PORCH_COLUMN_COLOR = 0x6e4a2a; // дерево — коричневый (перила/колонны/балясины)
@@ -335,20 +352,38 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, segsOv
     if (_railPostReg) _railPostReg.push({ x: px, z: pz });
   }
 
-  for (const s of segs) {
+  for (const seg0 of segs) {
+    // Добор-секция должна стоять У СТЕНЫ: раскрой всегда идёт от свободного конца,
+    // поэтому сегмент, упирающийся в дом НАЧАЛОМ, разворачиваем. Так у дома
+    // оказывается короткая секция, а по открытой стороне идут целые.
+    const dA = _railDistToHouse(seg0.ax, seg0.az), dB = _railDistToHouse(seg0.bx, seg0.bz);
+    const flip = dA < dB - 0.05;
+    const toWall = Math.abs(dA - dB) > 0.05;     // есть ли у сегмента «домашний» конец
+    const s = flip ? { ax: seg0.bx, az: seg0.bz, bx: seg0.ax, bz: seg0.az } : seg0;
     const dx = s.bx - s.ax, dz = s.bz - s.az;
     const L = Math.hypot(dx, dz);
     if (L < 0.20) continue;
     const ux = dx / L, uz = dz / L;
-    // Секции фиксированной ширины ~1 м (одинаковы на всех сегментах) + один узкий «добор»
+    // Секции фиксированной ширины (одинаковы на всех сегментах) + один «добор»
     // в конце, если длина не делится на W нацело. Концы — точно на углах.
     const W = RAIL_SECTION_W;
     const nFull = Math.max(1, Math.floor(L / W + 1e-6));
     const rem = L - nFull * W;
     const pos = [];
-    for (let i = 0; i <= nFull; i++) pos.push(i * W);
-    if (rem > 0.15) pos.push(L);                           // узкая добор-секция
-    else pos[pos.length - 1] = L;                          // мелкий остаток — растворяем в последней
+    if (!toWall && rem > 0.01) {
+      // Кромка без стены (оба конца — свободные углы): прятать обрезок некуда,
+      // поэтому режем пролёт на равные секции не шире стандартной.
+      const n = Math.max(1, Math.ceil(L / W - 1e-6));
+      for (let i = 0; i <= n; i++) pos.push(L * i / n);
+    } else {
+      for (let i = 0; i <= nFull; i++) pos.push(i * W);
+      // Добор короче RAIL_SECTION_MIN не выделяем: обрезок перил между двумя
+      // столбами выглядел браком. Мелкий остаток делим пополам с соседней секцией —
+      // обе выходят почти в размер, а не одна растянутая.
+      if (rem > RAIL_SECTION_MIN) pos.push(L);
+      else if (nFull >= 2) { pos[pos.length - 1] = L - (W + rem) / 2; pos.push(L); }
+      else pos[pos.length - 1] = L;
+    }
     for (let i = 0; i < pos.length; i++) {
       placePostAt(s.ax + ux * pos[i], s.az + uz * pos[i], ux, uz);
     }
