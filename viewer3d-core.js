@@ -1610,6 +1610,17 @@ function _facadeStackedOn(kneeBox, segBox) {
       && over(kneeBox.min.y, kneeBox.max.y, segBox.min.y, segBox.max.y) > -FACADE_STACK_GAP;
 }
 
+// Сосед УГЛОВОГО СТОЛБА: правило зеркальное поясу карниза. По горизонтали
+// достаточно касания (столб стоит торцом к простенку), а по вертикали нужно
+// реальное перекрытие — иначе полоса столба цеплялась бы за пояса стены выше и
+// ниже себя, и отделка на углу снова шла бы сплошняком мимо членения стены.
+function _facadeSideBy(pillarBox, segBox) {
+  const over = (a0, a1, b0, b1) => Math.min(a1, b1) - Math.max(a0, b0);
+  return over(pillarBox.min.x, pillarBox.max.x, segBox.min.x, segBox.max.x) > -FACADE_STACK_GAP
+      && over(pillarBox.min.z, pillarBox.max.z, segBox.min.z, segBox.max.z) > -FACADE_STACK_GAP
+      && over(pillarBox.min.y, pillarBox.max.y, segBox.min.y, segBox.max.y) > 0.02;
+}
+
 function _collectFacadeSegments(root) {
   const segs = [], pillars = [];
   root.traverse(o => {
@@ -1627,10 +1638,9 @@ function _collectFacadeSegments(root) {
     for (const p of pillars) {
       const follow = !!p.userData.facadeFollow;
       const pb = new THREE.Box3().setFromObject(p);
-      if (!follow) pb.expandByScalar(0.08);
       const adj = new Set();
       for (const sb of segBoxes) {
-        const hit = follow ? _facadeStackedOn(pb, sb.box) : pb.intersectsBox(sb.box);
+        const hit = follow ? _facadeStackedOn(pb, sb.box) : _facadeSideBy(pb, sb.box);
         if (hit) adj.add(sb.id);
       }
       p.userData._adjIds = [...adj];

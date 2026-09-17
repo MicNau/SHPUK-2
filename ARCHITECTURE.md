@@ -183,8 +183,8 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 
 ```
 styles-desktop.css?v=46   styles-mobile.css?v=1      state.js?v=72
-canvas.js?v=61            shared/house-builder.js?v=88  ResourceManager.js?v=9
-viewer3d-core.js?v=156    viewer3d-builders.js?v=60   viewer3d-railing.js?v=17
+canvas.js?v=61            shared/house-builder.js?v=89  ResourceManager.js?v=9
+viewer3d-core.js?v=157    viewer3d-builders.js?v=60   viewer3d-railing.js?v=17
 viewer3d-entourage.js?v=14   editor3d.js?v=12         nav-desktop.js?v=125
 nav-mobile.js?v=1         backend_API/Calculator.js?v=3
 ```
@@ -980,7 +980,22 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   стены), на дальней кромке четыре равные по 1.25 м, обрезков нет; ширина
   разрыва показывается как «1 м»; смета закрывается кликом по содержимому, кнопки
   PDF нет.
+- **Отделка на углу режется по высоте, как стена.** Угловой столб собирается
+  полосами `wallBands` (те же, что у простенка), и каждая полоса отделывается под
+  своего соседа: раньше цельный столб красился под одного соседа на всю высоту, и
+  пояс отделки на углу шёл сплошняком. Смежность столба считается зеркально поясу
+  карниза (`_facadeSideBy`): по горизонтали хватает касания, по вертикали нужно
+  реальное перекрытие, иначе полоса цеплялась бы за пояса выше и ниже себя.
+- **Фронтон наследует членение стены под ним.** К границам своего окна
+  добавляются границы проёмов ребра, лежащего в плоскости фронтона
+  (`gableWallCuts` → `frame.wallCuts`), поэтому колонки отделки фронтона встают
+  ровно над простенками и окнами этажа. Резы ближе 0.12 м считаются одним.
+- Замеры: у мансарды столбы режутся на полосы 0.9 / 1.2 / 0.9 м, выбор полосы
+  окна включает ровно одну часть столба; западный фронтон делится на 8 кусков с
+  границами по стене (0.25, 1.49, 2.39, 3.58, 4.53, 5.77, 6.67 м), суммарная
+  площадь 24.69 м².
 - Cache-bust: `state.js?v=72`, `styles-desktop.css?v=46`,
+  `shared/house-builder.js?v=89`, `viewer3d-core.js?v=157`,
   `viewer3d-builders.js?v=60`, `viewer3d-railing.js?v=17`, `editor3d.js?v=12`,
   `nav-desktop.js?v=125`.
 
