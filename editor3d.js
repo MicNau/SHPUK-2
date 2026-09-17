@@ -669,29 +669,49 @@ function _e3dDragMove(np) {
   if (!d) return;
   const dx = np.x - d.from.x, dy = np.y - d.from.y;
 
+  // Объект не проходит сквозь другие: положение, в котором он налез бы на дом
+  // или на чужую разметку, просто не применяется — объект упирается и остаётся
+  // на последнем допустимом месте (ТЗ п. 13). Касание при этом разрешено, на нём
+  // держатся стык террас и примыкание лестницы.
+  const blocked = (rect, secId, idx) =>
+    (typeof rectCollides === 'function') && rectCollides(rect, secId, idx);
+
   if (d.kind === 'rect') {
     const r = secRects(sec)[d.idx];
     if (!r) return;
     const res = snapDraggedRect(d.handle, d.start, dx, dy, d.idx, sec);
+    if (blocked(res, sec, d.idx)) return;
     r.x = res.x; r.y = res.y; r.w = res.w; r.h = res.h;
   } else if (d.kind === 'steps') {
     const st = (S.stepsList || [])[d.idx];
     if (!st) return;
     // excludeIdx = -1 — лестница снапается ко ВСЕМ террасам и стенам дома.
     const res = snapDraggedRect(d.handle, d.start, dx, dy, -1);
+    const was = { x: st.x, y: st.y, w: st.w, h: st.h };
     st.x = res.x; st.y = res.y; st.w = res.w; st.h = res.h;
     _stepsNormalize();                       // глубину и разворот задаёт не пользователь
     _stepsSnapToRailPost(d.handle);          // «залипание» к столбу ограждения
+    // Проверяем уже нормализованную лестницу: разворот и глубину ставит код, и
+    // именно они решают, налезает ли она на соседей.
+    if (blocked({ x: st.x, y: st.y, w: st.w, h: st.h }, 'steps', d.idx)) {
+      st.x = was.x; st.y = was.y; st.w = was.w; st.h = was.h;
+      return;
+    }
   } else if (d.kind === 'beds') {
     const b = (S.beds || [])[d.idx];
     if (!b || d.handle !== 'move') return;
     const c = _clampBedPos(snapNorm(d.start.x + dx), snapNorm(d.start.y + dy), b.w, b.h);
+    if (blocked({ x: c.x, y: c.y, w: b.w, h: b.h }, 'beds', d.idx)) return;
     b.x = c.x; b.y = c.y;
   } else if (d.kind === 'point') {
     const p = (S.furniture || [])[d.idx];
     if (!p || d.handle !== 'move') return;
-    p.x = Math.max(0, Math.min(1, snapNorm(d.start.x + dx)));
-    p.y = Math.max(0, Math.min(1, snapNorm(d.start.y + dy)));
+    const q = { x: Math.max(0, Math.min(1, snapNorm(d.start.x + dx))),
+                y: Math.max(0, Math.min(1, snapNorm(d.start.y + dy))) };
+    // Мебель ходит по настилу и сквозь ограждение, но не сквозь стены дома.
+    if (typeof furnitureCollides === 'function' && furnitureCollides(q, d.idx)) return;
+    p.x = q.x;
+    p.y = q.y;
     // Сама модель едет за курсором сразу: маркера под мебелью больше нет, и без
     // этого во время протяжки не было бы никакой обратной связи. Отметку по
     // высоте (настил террасы или земля) досчитает сборка на отпускании.
@@ -723,6 +743,13 @@ function _e3dDragMove(np) {
     const snapTo = (typeof _lineCloseTarget === 'function') ? _lineCloseTarget(sec, d.idx, q) : null;
     if (snapTo) q = { x: snapTo.x, y: snapTo.y };
     else if (sec === 'fence' && typeof _fenceTooClose === 'function' && _fenceTooClose(q)) return;
+    // Точка дорожки тянет за собой два своих отрезка — оба должны остаться на
+    // свободном месте, иначе полоса легла бы на террасу или на дом.
+    if (sec === 'paths' && typeof pathSegCollides === 'function') {
+      for (const nb of [pts[d.idx - 1], pts[d.idx + 1]]) {
+        if (nb && !nb.break && pathSegCollides(nb, q)) return;
+      }
+    }
     pt.x = q.x; pt.y = q.y;
   }
   e3dSync();   // сцену НЕ пересобираем: тяжёлая сборка идёт один раз, на отпускании
@@ -815,8 +842,14 @@ function _e3dDrawClick(np) {
   }
   if (!E3D.draw || E3D.draw.name !== name) { E3D.draw = { name, start: p, cursor: null }; e3dSync(); return; }
   const a = E3D.draw.start;
+  if (Math.hypot(p.x - a.x, p.y - a.y) < SNAP / GRID) { E3D.draw = null; e3dSync(); return; }  // клик в ту же точку
+  // Дорожка не ложится на террасу, ступени, грядки и дом (ТЗ п. 14): начатый
+  // отрезок при этом не бросаем — пользователь доведёт его до свободного места.
+  if (name === 'paths' && typeof pathSegCollides === 'function' && pathSegCollides(a, p)) {
+    if (typeof dToast === 'function') dToast('Дорожка не ставится на дом и другие объекты');
+    return;
+  }
   E3D.draw = null;
-  if (Math.hypot(p.x - a.x, p.y - a.y) < SNAP / GRID) { e3dSync(); return; }   // клик в ту же точку
   _e3dLineCommit(name, a, p);
   _lineSel = { name, idx: null };
   e3dSync();
