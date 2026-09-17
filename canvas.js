@@ -485,6 +485,136 @@ function _occupiedRectsNorm(exceptSec) {
   return out;
 }
 
+// ── Коллизии при перетаскивании и создании (ТЗ пп. 13, 14) ──────────────
+// Объекты благоустройства не должны налезать друг на друга и заходить внутрь
+// дома: терраса примыкает к стене, но не в дом; дорожка идёт рядом с террасой,
+// но не по ней. КАСАНИЕ разрешено — на нём держатся стык террас, примыкание
+// лестницы и кромка настила у стены, поэтому запрет начинается с перекрытия
+// COLLIDE_EPS (2 см в масштабе плана).
+const COLLIDE_EPS = 0.02 / GRID;
+
+// Пары, которым перекрываться ПОЛОЖЕНО: мебель стоит на настиле и на дорожке, а
+// лестница врезается в террасу верхней ступенью — без этого её нельзя было бы
+// подвинуть вдоль кромки.
+const COLLIDE_IGNORE = {
+  furniture:    new Set(['terrace', 'pool_terrace', 'steps', 'paths']),
+  terrace:      new Set(['furniture', 'steps']),
+  pool_terrace: new Set(['furniture', 'steps']),
+  steps:        new Set(['furniture', 'terrace', 'pool_terrace']),
+  paths:        new Set(['furniture']),
+};
+
+function _collideIgnores(secId, other) {
+  const set = COLLIDE_IGNORE[secId];
+  return !!(set && set.has(other));
+}
+
+// Прямоугольники, с которыми объект раздела secId (индекс idx — он сам) не
+// должен пересекаться. Дом добавляется отдельно (он полигон, см. _houseCovers).
+function _collideBlockers(secId, idx) {
+  const out = [];
+  const add = (x, y, w, h) => { if (w > COLLIDE_EPS && h > COLLIDE_EPS) out.push({ x, y, w, h }); };
+  for (const sec of ['terrace', 'pool_terrace']) {
+    if (_collideIgnores(secId, sec)) continue;
+    const list = (typeof secRects === 'function') ? secRects(sec) : [];
+    list.forEach((r, i) => { if (r && !(sec === secId && i === idx)) add(r.x, r.y, r.w, r.h); });
+  }
+  if (!_collideIgnores(secId, 'steps')) {
+    const list = (typeof stepsAll === 'function') ? stepsAll() : [];
+    list.forEach((st, i) => { if (st && !(secId === 'steps' && i === idx)) add(st.x, st.y, st.w, st.h); });
+  }
+  if (!_collideIgnores(secId, 'beds')) {
+    (S.beds || []).forEach((b, i) => { if (b && !(secId === 'beds' && i === idx)) add(b.x, b.y, b.w, b.h); });
+  }
+  if (!_collideIgnores(secId, 'paths') && secId !== 'paths') {
+    const w = ((S.pathWidth || 120) / 100) / GRID;
+    for (const seg of splitAtBreaks(S.pts.paths || [])) {
+      for (let i = 0; i < seg.length - 1; i++) {
+        const a = seg[i], b = seg[i + 1];
+        add(Math.min(a.x, b.x) - w / 2, Math.min(a.y, b.y) - w / 2,
+            Math.abs(b.x - a.x) + w, Math.abs(b.y - a.y) + w);
+      }
+    }
+  }
+  return out;
+}
+
+// Накрывает ли прямоугольник часть ДОМА. Дом бывает Г- и П-образным, поэтому
+// bbox не годится: во внутреннем углу терраса стоит законно. Считаем по
+// полигону — пробуем точки сетки внутри прямоугольника.
+function _houseCovers(rect) {
+  if (typeof isEmptyLot === 'function' && isEmptyLot()) return false;
+  const hp = (typeof getHousePolygonNorm === 'function') ? getHousePolygonNorm() : null;
+  const poly = hp && hp.corners;
+  if (!poly || poly.length < 3) return false;
+  const inside = (px, py) => {
+    let hit = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const a = poly[i], b = poly[j];
+      if ((a.y > py) !== (b.y > py)
+          && px < (b.x - a.x) * (py - a.y) / (b.y - a.y) + a.x) hit = !hit;
+    }
+    return hit;
+  };
+  // Шаг выборки — 0.25 м: мельче объектов, которыми размечают участок.
+  const step = 0.25 / GRID;
+  const nx = Math.max(1, Math.ceil(rect.w / step)), ny = Math.max(1, Math.ceil(rect.h / step));
+  for (let i = 0; i <= nx; i++) {
+    for (let j = 0; j <= ny; j++) {
+      // Точки берём с отступом внутрь: кромка вплотную к стене — это касание.
+      const px = rect.x + Math.min(rect.w, Math.max(COLLIDE_EPS, rect.w * i / nx));
+      const py = rect.y + Math.min(rect.h, Math.max(COLLIDE_EPS, rect.h * j / ny));
+      if (inside(px, py)) {
+        // Точка ровно на кромке дома — это касание, а не заход внутрь.
+        if (_planDistToPolyEdge({ x: px, y: py }, poly) > COLLIDE_EPS) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function _planDistToPolyEdge(p, poly) {
+  let best = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    best = Math.min(best, _planDistToSeg(p, poly[i], poly[(i + 1) % poly.length]));
+  }
+  return best;
+}
+
+// Главная проверка: можно ли поставить rect объекту раздела secId (idx — его
+// собственный индекс, чтобы он не мешал сам себе).
+function rectCollides(rect, secId, idx) {
+  if (!rect || !(rect.w > 0) || !(rect.h > 0)) return false;
+  if (rect.x < -COLLIDE_EPS || rect.y < -COLLIDE_EPS
+      || rect.x + rect.w > 1 + COLLIDE_EPS || rect.y + rect.h > 1 + COLLIDE_EPS) return true;
+  // Дом не проходим ни для чего, мебель включительно: она может стоять на
+  // настиле и протыкать ограждение террасы, но не стены дома.
+  if (_houseCovers(rect)) return true;
+  for (const b of _collideBlockers(secId, idx)) {
+    if (rect.x < b.x + b.w - COLLIDE_EPS && rect.x + rect.w - COLLIDE_EPS > b.x
+        && rect.y < b.y + b.h - COLLIDE_EPS && rect.y + rect.h - COLLIDE_EPS > b.y) return true;
+  }
+  return false;
+}
+
+// Место под предмет мебели: квадрат вокруг его точки. Мебель стоит на настиле и
+// проходит сквозь ограждение, поэтому у неё запрет один — стены дома.
+const FURN_FOOTPRINT = 0.8;     // м, сторона квадрата под предметом
+
+function furnitureCollides(pt, idx) {
+  const s = FURN_FOOTPRINT / GRID;
+  return rectCollides({ x: pt.x - s / 2, y: pt.y - s / 2, w: s, h: s }, 'furniture', idx);
+}
+
+// Отрезок дорожки: занимает полосу своей ширины — проверяем её как прямоугольник
+// (для косых отрезков это габарит, чуть шире самой полосы).
+function pathSegCollides(a, b) {
+  const w = ((S.pathWidth || 120) / 100) / GRID;
+  const rect = { x: Math.min(a.x, b.x) - w / 2, y: Math.min(a.y, b.y) - w / 2,
+                 w: Math.abs(b.x - a.x) + w, h: Math.abs(b.y - a.y) + w };
+  return rectCollides(rect, 'paths', -1);
+}
+
 function _rectsOverlap(a, b, gap) {
   gap = gap || 0;
   return a.x < b.x + b.w + gap && a.x + a.w + gap > b.x
@@ -497,7 +627,9 @@ function _rectsOverlap(a, b, gap) {
 function _placeFree(rect, exceptSec, axes) {
   const occupied = _occupiedRectsNorm(exceptSec);
   const gap = 0.2 / GRID;                        // 20 см зазора между объектами
-  const free = r => !occupied.some(o => _rectsOverlap(r, o, gap));
+  // Дом считается ПО ПОЛИГОНУ: терраса пристраивается к стене вплотную (для неё
+  // дом не в occupied), но внутрь дома не заходит — как и всё остальное (п. 14).
+  const free = r => !occupied.some(o => _rectsOverlap(r, o, gap)) && !_houseCovers(r);
   if (free(rect)) return rect;
   const step = 0.5 / GRID;
   for (let k = 1; k <= 40; k++) {
