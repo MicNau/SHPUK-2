@@ -18,7 +18,8 @@ const D_SIDEBAR_ITEMS = [
   { id: 'steps',         lbl: 'Ступени',             hasEditor: true  },
   { id: 'paths',         lbl: 'Дорожки',             hasEditor: true  },
   { id: 'fence',         lbl: 'Забор',               hasEditor: true  },
-  { id: 'facade',        lbl: 'Отделка фасада',      hasEditor: true },
+  { id: 'facade',        lbl: 'Отделка фасада 1',    hasEditor: true },
+  { id: 'facade2',       lbl: 'Отделка фасада 2',    hasEditor: true },
   { id: 'beds',          lbl: 'Грядки',              hasEditor: true  },
   { id: 'furniture',     lbl: 'Садовая мебель',      hasEditor: true  },
   { id: 'pool_terrace',  lbl: 'Терраса у бассейна',  hasEditor: true  },
@@ -323,6 +324,7 @@ function _dResetAllConfigurations() {
   S.furniture = [];
   S.activeFurniture = null;
   S.wallZones = {};   // выбор сегментов фасада привязан к контуру дома
+  S.wallZones2 = {};
   S.mats = {};
   S.elementMat = {};
   S.estimate = {};
@@ -750,9 +752,18 @@ const D_TERRACE_H_PARAM = `
     <div class="d-param-unit" id="d-terrace-h-hint"><span>15 см</span><span>80 см</span></div>
   </div>`;
 
+// Сечение доски — специфический фильтр каталога (ТЗ п. 5): живёт в левой панели,
+// рядом с настройками раздела, как высота борта у грядок. Разметку наполняет
+// _dRenderCoreFilter, отбор идёт на бэкенде по характеристике core_type.
+const D_CORE_FILTER = `
+  <div class="d-color-section">
+    <div class="d-color-title">Доска:</div>
+    <div class="d-price-grid" id="d-core-grid"></div>
+  </div>`;
+
 const D_SECTION_UI = {
   terrace: {
-    params: D_TERRACE_H_PARAM,
+    params: D_TERRACE_H_PARAM + D_CORE_FILTER,
     actions: [
       { lbl: 'Ещё одна',          fn: "addRect('terrace')" },
       { lbl: 'Удалить выбранную', fn: 'dDeleteSelected()', sel: true },
@@ -760,6 +771,7 @@ const D_SECTION_UI = {
     ],
   },
   pool_terrace: {
+    params: D_CORE_FILTER,
     actions: [
       { lbl: 'Ещё одна',          fn: "addRect('pool_terrace')" },
       { lbl: 'Бассейн ▭',         fn: "dSetPool('rect')" },
@@ -795,7 +807,7 @@ const D_SECTION_UI = {
     ],
   },
   paths: {
-    params: `
+    params: D_CORE_FILTER + `
       <div class="d-param-group">
         <div class="d-param-head">
           <span class="d-param-label">Ширина дорожки, см.</span>
@@ -841,9 +853,15 @@ const D_SECTION_UI = {
       { lbl: 'Удалить всё',       fn: "dResetSection('furniture')" },
     ],
   },
+  facade2: {
+    actions: [
+      { lbl: 'Сбросить',    fn: "dFacadeClear('facade2')" },
+      { lbl: 'Удалить всё', fn: "dResetSection('facade2')" },
+    ],
+  },
   facade: {
     actions: [
-      { lbl: 'Сбросить',    fn: 'dFacadeClear()' },
+      { lbl: 'Сбросить',    fn: "dFacadeClear('facade')" },
       { lbl: 'Удалить всё', fn: "dResetSection('facade')" },
     ],
   },
@@ -926,6 +944,7 @@ function _dRenderSidebar() {
   // как разметка панели создана заново.
   _dRenderRailFilters();
   _dRenderBedFilters();
+  _dRenderCoreFilter();
   // Поля параметров рисуются заново — вернуть в них значения из состояния.
   if (dActiveItem === 'terrace') _dSyncTerraceHeight();
   if (dActiveItem === 'paths') {
@@ -971,9 +990,11 @@ function _dRenderSidebar() {
 // по ТЗ она не нужна.
 // ══════════════════════════════════════════════
 
-// «Сбросить» — снять отделку со всех сегментов.
-function dFacadeClear() {
-  S.wallZones = {};
+// «Сбросить» — снять отделку со всех сегментов СВОЕГО раздела: отделок две, и
+// вторая от кнопки первой страдать не должна.
+function dFacadeClear(secId) {
+  const sec = secId || dActiveItem || 'facade';
+  if (sec === 'facade2') S.wallZones2 = {}; else S.wallZones = {};
   if (typeof _applyFacadeSelection === 'function') _applyFacadeSelection();
   if (typeof e3dSync === 'function') e3dSync();
 }
@@ -989,7 +1010,8 @@ function dDeleteItem(secId) {
   if (RECT_SECTIONS[secId]) { secRects(secId).length = 0; setSecActiveIdx(secId, null); }
   if (secId === 'steps')   { S.stepsList = [{ ...DEFAULT_STEPS_RECT }]; S.activeSteps = 0; }
   if (secId === 'beds')    { S.beds = []; S.activeBed = null; }
-  if (secId === 'facade')  { S.wallZones = {}; }
+  if (secId === 'facade')   { S.wallZones = {}; }
+  if (secId === 'facade2')  { S.wallZones2 = {}; }
   if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
   S.sections = S.sections.filter(s => s !== secId);
   if (S.mats && S.mats[secId]) delete S.mats[secId];
@@ -1054,6 +1076,27 @@ function dSetBedFilter(kind, value) {
     ? list.filter(v => v !== value)
     : list.concat([value]);
   _dRenderBedFilters();
+  dShowResults();
+}
+
+// ── Фильтр сечения доски (полнотелая / пустотелая) ──
+// Мультивыбор, как у ценовых категорий; отбор делает бэкенд предикатом по
+// характеристике core_type, поэтому выбор входит в ключ кэша каталога.
+function _dRenderCoreFilter() {
+  const grid = document.getElementById('d-core-grid');
+  if (!grid || typeof CORE_TYPES === 'undefined') return;
+  const on = catFilter(dActiveItem).core;
+  grid.innerHTML = CORE_TYPES.map(c =>
+    `<button class="d-price-btn ${on.has(c.id) ? 'selected' : ''}"
+             onclick="dSelectCore('${c.id}')">
+       <span class="d-radio"></span><span class="d-price-txt">${c.lbl}</span>
+     </button>`).join('');
+}
+
+function dSelectCore(id) {
+  const on = catFilter(dActiveItem).core;
+  if (on.has(id)) on.delete(id); else on.add(id);
+  _dRenderCoreFilter();
   dShowResults();
 }
 
@@ -1289,6 +1332,7 @@ function dResetSection(secId) {
   if (secId === 'beds')      { S.beds = []; S.activeBed = null; }
   if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
   if (secId === 'facade')    S.wallZones = {};
+  if (secId === 'facade2')   S.wallZones2 = {};
   if (secId === 'fence')     S.fenceGate = null;
   if (secId === 'beds')      S.bedFilters = { h: [], mount: [] };
   if (secId === 'pool_terrace') S.pool = null;
@@ -1361,7 +1405,9 @@ function _dSectionHasContent(secId) {
   if (secId === 'steps')     return (S.stepsList || []).length > 0;
   if (secId === 'beds')      return (S.beds || []).length > 0;
   if (secId === 'furniture') return (S.furniture || []).length > 0;
-  if (secId === 'facade')    return Object.keys(S.wallZones || {}).length > 0;
+  if (secId === 'facade' || secId === 'facade2') {
+    return Object.keys(facadeZones(secId)).length > 0;
+  }
   if (S.pts && S.pts[secId]) return S.pts[secId].length > 0;
   return true;
 }
@@ -1396,10 +1442,12 @@ const D_SECTION_HINTS = {
   steps: 'Лестницу двигают за середину, ширину меняют маркерами по краям. Разворачивается к террасе автоматически, количество ступеней считается от высоты.',
   beds: 'Грядку перетаскивайте мышью; клик по ней разворачивает на 90°.',
   paths: 'Дорожка рисуется отрезками: клик — начало, второй клик — конец. Следующий отрезок — снова клик. Клик по уже поставленной точке склеивает отрезки, Esc отменяет начатый.',
-  fence: 'Забор рисуется отрезками: клик — начало, второй клик — конец. Клик по уже поставленной точке склеивает. Ближе 3 м к дому и террасе забор не ставится. «КАЛИТКА» делает проём 1 м.',
+  fence: 'Забор рисуется отрезками: клик — начало, второй клик — конец. Клик по уже поставленной точке склеивает. Ближе 3 м к дому и террасе забор не ставится. «КАЛИТКА» ставит готовую калитку — маркер двигают по линии.',
   railing: 'Ограждение строится по периметру террасы само и разрывается под лестницей. Нужен разрыв без лестницы — «ОБОЗНАЧИТЬ ВХОД», затем тяните маркеры разрыва по периметру.',
   furniture: 'Мебель появляется в сцене при выборе товара в каталоге. Перетаскивайте её мышью, клик разворачивает на 90°; на террасе она встаёт на настил.',
   facade: 'Кликайте по стенам дома, отмечая места под отделку. Повторный клик снимает выбор. Простенок и фронтон делятся по границам окна; пояс по линии карниза отделывается вместе с соседней стеной.',
+
+  facade2: 'Кликайте по стенам дома, отмечая места под отделку. Повторный клик снимает выбор. Простенок и фронтон делятся по границам окна; пояс по линии карниза отделывается вместе с соседней стеной.',
 };
 
 // Всплывающее окно при ПЕРВОМ заходе в раздел — в дополнение к плашке в углу:
@@ -1659,11 +1707,13 @@ function _applySampleToActive(sample) {
     // камерой на ближайшем свободном месте, повторный клик по карточке ставит
     // ещё один. Точек размещения больше нет.
     _assignFurnitureProduct(sample);
-  } else if (dActiveItem === 'facade') {
-    // Фасад: материал панелей ложится на выбранные сегменты (S.wallZones) без
-    // пересборки сцены; пустой выбор = весь фасад.
-    S.elementMat.facade = sample.textures ? { textures: sample.textures }
-                        : (sample.color ? { color: sample.color } : null);
+  } else if (dActiveItem === 'facade' || dActiveItem === 'facade2') {
+    // Фасад: материал панелей ложится на выбранные сегменты СВОЕГО раздела
+    // (facadeZones) без пересборки сцены. Отделок две, и у каждой свой материал,
+    // поэтому «пустой выбор = весь фасад» больше не действует: вторая отделка
+    // залила бы собой всё.
+    S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures }
+                              : (sample.color ? { color: sample.color } : null);
     if (typeof _applyFacadeSelection === 'function' && typeof threeState !== 'undefined' && threeState) {
       _applyFacadeSelection();
     }
@@ -2048,13 +2098,20 @@ async function _ensureCatalogSection(sectionId) {
     // на клиенте больше не считаются. Несколько выбранных категорий идут одним
     // предикатом IN.
     const cats = _selectedPriceCats();
-    if (cats.length && typeof PropertyPath !== 'undefined' && typeof PropertyOp !== 'undefined') {
-      filters.push(new Filter(FilterType.PROPERTIES, [{
-        property: PropertyPath.PRICE_CATEGORY,
-        op: cats.length > 1 ? PropertyOp.IN : PropertyOp.EQ,
-        value: cats.length > 1 ? cats : cats[0],
-      }]));
+    const cores = _selectedCoreTypes();
+    const preds = [];
+    if (typeof PropertyPath !== 'undefined' && typeof PropertyOp !== 'undefined') {
+      const pred = (path, list) => ({
+        property: path,
+        op: list.length > 1 ? PropertyOp.IN : PropertyOp.EQ,
+        value: list.length > 1 ? list : list[0],
+      });
+      if (cats.length)  preds.push(pred(PropertyPath.PRICE_CATEGORY, cats));
+      // Сечение доски — та же механика: фильтр отбирает только товары, у которых
+      // характеристика заполнена (у ступеней solid, у доски ДПК и МПК hollow).
+      if (cores.length) preds.push(pred(PropertyPath.CORE_TYPE, cores));
     }
+    if (preds.length) filters.push(new Filter(FilterType.PROPERTIES, preds));
     const res = await rm.getResources(...filters);
     // res === null → ошибка запроса → null (повторяемо); иначе массив (возможно пустой).
     let products = res ? (res.products || []) : null;
@@ -2075,6 +2132,7 @@ async function _ensureCatalogSection(sectionId) {
     console.info('[catalog] раздел', sectionId,
                  tags.length ? `(тег${tags.length > 1 ? 'и' : ''} «${tags.join(', ')}»)` : '(без тега)',
                  cats.length ? `(категор${cats.length > 1 ? 'ии' : 'ия'} «${cats.join(', ')}»)` : '',
+                 cores.length ? `(сечение «${cores.join(', ')}»)` : '',
                  '→', products === null ? 'ошибка запроса' : products.length + ' товар(ов)');
     _catalogCache[key] = products;
     if (products === null) _catalogNoteFail(sectionId);
@@ -2142,11 +2200,19 @@ function _selectedPriceCats() {
   return Object.keys(PRICE_TIER_CATEGORY).filter(t => sel.has(t)).map(t => PRICE_TIER_CATEGORY[t]);
 }
 
-// Ключ кэша каталога: раздел плюс выбранные категории — выдачи для разных
-// наборов разные, потому что фильтрует сервер.
+// Сечение доски, выбранное пользователем: значения характеристики core_type.
+function _selectedCoreTypes() {
+  const sel = (typeof catFilter === 'function') ? catFilter(dActiveItem).core : null;
+  if (!sel || !sel.size) return [];
+  return (typeof CORE_TYPES !== 'undefined' ? CORE_TYPES : []).filter(c => sel.has(c.id)).map(c => c.id);
+}
+
+// Ключ кэша каталога: раздел плюс выбранные категории и сечение — выдачи для
+// разных наборов разные, потому что фильтрует сервер.
 function _catKey(sectionId) {
-  const cats = _selectedPriceCats();
-  return cats.length ? sectionId + '|' + cats.join(',') : String(sectionId);
+  const parts = [String(sectionId), _selectedPriceCats().join(','), _selectedCoreTypes().join(',')];
+  while (parts.length > 1 && !parts[parts.length - 1]) parts.pop();
+  return parts.join('|');
 }
 function _priceCategoryOf(p) {
   const v = (typeof productProp === 'function') ? productProp(p, PROP_PRICE_CATEGORY) : undefined;
@@ -2582,9 +2648,9 @@ function _elementMetric(el) {
     const n = (S.furniture || []).filter(p => p.product).length;
     return n > 0 ? { kind: 'piece', value: n, text: n + ' шт' } : null;
   }
-  if (el === 'facade')  {
-    // Площадь выбранных сегментов стен (пустой выбор = весь фасад) — из viewer3d.
-    const a = (typeof facadeSelectedAreaM2 === 'function') ? facadeSelectedAreaM2() : 0;
+  if (el === 'facade' || el === 'facade2') {
+    // Площадь кусков, выбранных В ЭТОЙ отделке (их две) — считает viewer3d.
+    const a = (typeof facadeSelectedAreaM2 === 'function') ? facadeSelectedAreaM2(el) : 0;
     return a > 0 ? { kind: 'deck', value: a, text: a.toFixed(1) + ' м²' } : null;
   }
   return null;
@@ -2596,7 +2662,7 @@ function _elementMetric(el) {
 //   piece  — количество × цена/шт.
 function _computeEstimate() {
   const order = ['terrace', 'railing', 'steps', 'paths', 'pool_terrace', 'fence',
-                 'beds', 'facade', 'furniture'];
+                 'beds', 'facade', 'facade2', 'furniture'];
   const rows = [];
   for (const el of order) {
     if (!S.sections.includes(el)) continue;
@@ -2950,6 +3016,15 @@ function _projectObjects() {
     const o = _furnitureProjectObject(lbl('furniture'));
     if (o) objs.push(o);
   }
+  // Отделка фасада: каждая из двух идёт своим объектом со своими участками
+  // (pieces). Участки собирает viewer3d по выбранным кускам — в системе
+  // координат стены, в миллиметрах.
+  for (const sec of (typeof FACADE_SECS !== 'undefined' ? FACADE_SECS : ['facade'])) {
+    if (!S.sections.includes(sec)) continue;
+    if (typeof facadePieces !== 'function') break;
+    const pieces = facadePieces(sec, _elementProductId(sec));
+    if (pieces.length) objs.push({ type: CalculationType.FACADE, name: lbl(sec), pieces });
+  }
   return objs;
 }
 
@@ -3218,6 +3293,59 @@ function dShowSummary() {
     _dRenderProjectCalc();
   }
   document.getElementById('d-summary-overlay').classList.add('active');
+}
+
+// ── Заявка: имя, почта, согласие ──────────────────────────────────────────
+// «Отправить заявку» в смете открывает это окно; по «Отправить» на сервер уходит
+// имя, почта и ОПИСАНИЕ проекта (project-io.js). Смету бэкенд считает сам, в
+// запрос она не входит. Ключ проекта возвращается в ответе — по нему приходит
+// ссылка в письме.
+function dOpenRequest() {
+  const ov = document.getElementById('d-req-overlay');
+  if (!ov) return;
+  const err = document.getElementById('d-req-err');
+  if (err) err.textContent = '';
+  ov.classList.add('active');
+  const name = document.getElementById('d-req-name');
+  if (name) setTimeout(() => name.focus(), 50);
+}
+
+function dCloseRequest() {
+  const ov = document.getElementById('d-req-overlay');
+  if (ov) ov.classList.remove('active');
+}
+
+function dCloseRequestDone() {
+  const ov = document.getElementById('d-req-done');
+  if (ov) ov.classList.remove('active');
+}
+
+async function dSendRequest() {
+  const nameEl = document.getElementById('d-req-name');
+  const mailEl = document.getElementById('d-req-email');
+  const err = document.getElementById('d-req-err');
+  const btn = document.getElementById('d-req-send');
+  const name = (nameEl && nameEl.value || '').trim();
+  const email = (mailEl && mailEl.value || '').trim();
+  const say = t => { if (err) err.textContent = t; };
+  if (!name)  { say('Укажите, как к вам обращаться.'); if (nameEl) nameEl.focus(); return; }
+  // Проверка почты нарочно грубая: адреса бывают неожиданные, а отказывать
+  // из-за формы адреса хуже, чем отправить письмо в никуда.
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    say('Проверьте адрес почты.'); if (mailEl) mailEl.focus(); return;
+  }
+  if (typeof saveProjectToServer !== 'function') { say('Сервис недоступен.'); return; }
+  say('');
+  if (btn) { btn.disabled = true; btn.textContent = 'Отправляем…'; }
+  let res = null;
+  try { res = await saveProjectToServer(name, email); }
+  catch (e) { console.warn('[project] save failed', e); res = { error: 'Не удалось отправить заявку.' }; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Отправить'; }
+  if (!res || res.error) { say((res && res.error) || 'Не удалось отправить заявку.'); return; }
+  dCloseRequest();
+  dCloseSummary();
+  const done = document.getElementById('d-req-done');
+  if (done) done.classList.add('active');
 }
 
 function dCloseSummary() {

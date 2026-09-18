@@ -57,6 +57,7 @@ const E3D_KIND = {
   fence:        'line',
   railing:      'railing',   // строится по террасе — таскаются только маркеры входа
   facade:       'facade',    // выбор сегментов стен кликом по самим мешам
+  facade2:      'facade',    // вторая отделка: та же механика, свой набор кусков
 };
 
 // Палец толще курсора: на телефоне все радиусы попадания растягиваются (режим
@@ -341,8 +342,14 @@ function e3dSelect(hit) {
     // Мультивыбор: повторный клик снимает. Клик мимо стены не трогает выбранное —
     // иначе один промах сбрасывал бы всю отделку.
     if (idx === null) return;
-    if (S.wallZones[idx]) delete S.wallZones[idx];
-    else S.wallZones[idx] = true;
+    const mine = facadeZones(sec);
+    if (mine[idx]) delete mine[idx];
+    else {
+      mine[idx] = true;
+      // Отделок две, и кусок принадлежит одной: взяли его во вторую — из первой
+      // он уходит, иначе на одном месте лежали бы два материала.
+      delete facadeZones(facadeOtherSec(sec))[idx];
+    }
     if (typeof _applyFacadeSelection === 'function') _applyFacadeSelection();
     e3dSync();
     return;
@@ -522,8 +529,12 @@ function e3dSync() {
     // Рамки выбора нужны, пока отделка НЕ назначена: без них не видно, что
     // отмечено. Как только товар выбран, панели видны сами, и разметка только
     // мешает — прячем. Снимут отделку («Удалить всё») — рамки вернутся.
-    for (const seg of (S.elementMat && S.elementMat.facade) ? [] : (threeState.facadeSegs || [])) {
-      if (!S.wallZones[seg.userData.segId]) continue;
+    // Считается материал СВОЕГО раздела: у второй отделки он может быть ещё не
+    // выбран, когда у первой уже есть.
+    const zones = facadeZones(sec);
+    const hasMat = !!(S.elementMat && S.elementMat[sec]);
+    for (const seg of hasMat ? [] : (threeState.facadeSegs || [])) {
+      if (!zones[seg.userData.segId]) continue;
       const box = new THREE.Box3().setFromObject(seg);
       const h = new THREE.Box3Helper(box, E3D_COL_SEL);
       h.material.depthTest = false;
