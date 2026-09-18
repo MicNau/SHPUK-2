@@ -65,7 +65,21 @@ const E3D_KIND = {
 // размера — растёт только зона, которая её ловит.
 const E3D_TOUCH_R = 1.8;
 
-function _e3dR(r) { return E3D.touch ? r * E3D_TOUCH_R : r; }
+// Радиусы заданы в метрах, а хватается пользователь за пиксели: с видом сверху
+// на весь участок камера уходит на 60+ м, и ручка в 0.2 м превращается в точку
+// размером с курсор. Коэффициент держит маркеры и зоны попадания примерно того
+// же экранного размера, под какой они подбирались с обычной дистанции.
+const E3D_VIEW_REF = 24;    // м — дистанция, на которую рассчитаны радиусы
+const E3D_VIEW_MAX = 2.6;   // потолок: вблизи ручки не должны разрастаться
+
+function _e3dViewScale() {
+  if (typeof threeState === 'undefined' || !threeState
+      || !threeState.camera || !threeState.controls) return 1;
+  const d = threeState.camera.position.distanceTo(threeState.controls.target);
+  return Math.min(E3D_VIEW_MAX, Math.max(1, d / E3D_VIEW_REF));
+}
+
+function _e3dR(r) { return r * (E3D.touch ? E3D_TOUCH_R : 1) * _e3dViewScale(); }
 
 const E3D = {
   sec:   null,   // активный раздел («terrace», «paths», …) или null
@@ -435,7 +449,18 @@ function _e3dMarker(np, color, radius) {
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.set(w.x, y, w.z);
   mesh.renderOrder = 1000;
+  // Размер кружка догоняет камеру покадрово (_e3dScaleMarkers): пересобирать
+  // слой на каждый поворот колеса ради этого не стоит.
+  mesh.userData.e3dMarker = true;
+  mesh.scale.setScalar(_e3dViewScale());
   return mesh;
+}
+
+// Маркеры масштабируются вокруг собственного центра, поэтому позиции не едут.
+function _e3dScaleMarkers() {
+  if (!E3D.group) return;
+  const k = _e3dViewScale();
+  E3D.group.traverse(o => { if (o.userData && o.userData.e3dMarker) o.scale.setScalar(k); });
 }
 
 function _e3dRectPts(r) {
@@ -1008,24 +1033,45 @@ function _e3dOnKey(ev) {
 // сохраняется — меняются только угол подъёма и дистанция.
 const E3D_TOP_SECS = new Set(['terrace', 'pool_terrace', 'steps', 'paths', 'fence', 'beds']);
 const E3D_TOP_PITCH = 58 * Math.PI / 180;   // угол над горизонтом
-// Дорожки и забор идут по всему участку, остальное — вокруг дома.
-const E3D_TOP_WIDE = new Set(['paths', 'fence']);
+const E3D_TOP_MARGIN = 1.08;                // поля вокруг участка, чтобы сетка не упиралась в рамку
+
+// Дистанция, с которой квадрат участка целиком попадает в кадр при заданных
+// азимуте и подъёме. Камера смотрит в центр участка с расстояния d, поэтому для
+// точки v (от центра, по земле) глубина в кадре равна d + v·f, а смещения по
+// осям кадра — v·right и v·up. Условие «точка внутри кадра» разворачивается в
+// нижнюю границу для d, и берём наибольшую по всем четырём углам.
+function _e3dFitDist(cam, az, pitch, half) {
+  const tanY = Math.tan(cam.fov * Math.PI / 360);
+  const tanX = tanY * (cam.aspect || 1);
+  const f     = new THREE.Vector3(-Math.sin(az) * Math.cos(pitch), -Math.sin(pitch),
+                                  -Math.cos(az) * Math.cos(pitch));
+  const right = new THREE.Vector3(Math.cos(az), 0, -Math.sin(az));
+  const up    = new THREE.Vector3().crossVectors(right, f);
+  let dist = 0;
+  for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    const v = new THREE.Vector3(sx * half, 0, sz * half);
+    const depth = v.dot(f);
+    dist = Math.max(dist,
+                    Math.abs(v.dot(right)) / tanX - depth,
+                    Math.abs(v.dot(up))    / tanY - depth);
+  }
+  return dist;
+}
 
 function e3dTopView(sec) {
   if (!threeState || !threeState.camera || !threeState.controls) return;
   const cam = threeState.camera, ctr = threeState.controls;
-  const sz = (typeof lastHouseSize === 'function') ? lastHouseSize() : { L: 0, W: 0 };
   // Цель — центр участка (он же центр плана): разметка любого раздела лежит
   // внутри него, а центр дома увёл бы вид к краю.
   const c = _e3dToWorld({ x: 0.5, y: 0.5 });
-  const span = E3D_TOP_WIDE.has(sec) ? GRID * 0.62
-                                     : Math.max(sz.L, sz.W, 8) + 12;
-  const dist = Math.min(ctr.maxDistance || 50,
-                        Math.max(ctr.minDistance || 4,
-                                 span / (2 * Math.tan(cam.fov * Math.PI / 360))));
   // Азимут оставляем прежний: пользователь сам развернул сцену как ему удобно.
   const dx = cam.position.x - ctr.target.x, dz = cam.position.z - ctr.target.z;
   const az = (Math.hypot(dx, dz) > 0.01) ? Math.atan2(dx, dz) : Math.PI / 4;
+  // В кадр берём весь участок, а не окрестность дома: размечать дорожку или
+  // забор по краю иначе приходится вслепую, подтягивая камеру руками.
+  const dist = Math.min(ctr.maxDistance || 80,
+                        Math.max(ctr.minDistance || 4,
+                                 _e3dFitDist(cam, az, E3D_TOP_PITCH, GRID / 2) * E3D_TOP_MARGIN));
   const horiz = Math.cos(E3D_TOP_PITCH) * dist;
   ctr.target.set(c.x, 0, c.z);
   cam.position.set(c.x + Math.sin(az) * horiz,
@@ -1054,4 +1100,4 @@ function e3dSetSection(secId) {
 }
 
 // Кадровый хук: подписи следуют за камерой. Вызывается из animate (см. _onAnimFrame).
-function e3dOnFrame() { _e3dPlaceLabels(); }
+function e3dOnFrame() { _e3dPlaceLabels(); _e3dScaleMarkers(); }
