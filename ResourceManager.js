@@ -57,8 +57,8 @@ const PropertyPath = Object.freeze({
 // PropertyPath.PRICE_CATEGORY. Значения латиницей, потому что это ключ, а не
 // подпись: показывать его пользователю должен интерфейс, своими словами.
 const PriceCategory = Object.freeze({
-    BUDGET: 'budget',    // бюджет
-    BALANCE: 'balance',  // баланс
+    BUDGET: 'budget',    // эконом
+    BALANCE: 'balance',  // средний
     PREMIUM: 'premium',  // премиум
 });
 
