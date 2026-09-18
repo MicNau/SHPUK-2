@@ -51,6 +51,8 @@ const PropertyPath = Object.freeze({
     GARDEN_BED_CORNER_BRACKET_TYPE: 'components.corner_bracket.type',
 
     PRICE_CATEGORY: 'price_category',
+
+    CORE_TYPE: 'core_type',
 });
 
 // Ценовая категория товара: значение характеристики по пути
@@ -60,6 +62,14 @@ const PriceCategory = Object.freeze({
     BUDGET: 'budget',    // эконом
     BALANCE: 'balance',  // средний
     PREMIUM: 'premium',  // премиум
+});
+
+// Сечение доски: значение характеристики по пути PropertyPath.CORE_TYPE.
+// У товаров, где сечение не задано, пути в properties нет вовсе — такой товар
+// не попадёт ни в solid, ни в hollow.
+const CoreType = Object.freeze({
+    SOLID: 'solid',    // полнотелая
+    HOLLOW: 'hollow',  // пустотелая
 });
 
 const PROPERTY_PATH = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)*$/;
@@ -539,5 +549,41 @@ class ResourceManager {
             await this.getSections(true);
         }
         return this.#flatCache?.find(s => s.code === code) || null;
+    }
+
+    // Сохранение и загрузка проекта (backend_API/ResourceManager.js, 2026-09-18).
+    // Сервер кладёт присланный data как есть и возвращает ключ; по ключу проект
+    // отдаётся обратно. Ошибку методы не поднимают — возвращают null.
+    async saveProject(name, email, data) {
+        try {
+            const response = await fetch(`${this.#api_domain}/api/v1/create_project/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email, data }),
+            });
+            if (!response.ok) {
+                console.error(`HTTP ${response.status}`);
+                return null;
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to save project:', error);
+            return null;
+        }
+    }
+
+    async getProject(saveId) {
+        try {
+            const response = await fetch(
+                `${this.#api_domain}/api/v1/project/${encodeURIComponent(saveId)}/`);
+            if (!response.ok) {
+                console.error(`HTTP ${response.status}`);
+                return null;
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to load project:', error);
+            return null;
+        }
     }
 }

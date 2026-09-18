@@ -750,9 +750,18 @@ const D_TERRACE_H_PARAM = `
     <div class="d-param-unit" id="d-terrace-h-hint"><span>15 см</span><span>80 см</span></div>
   </div>`;
 
+// Сечение доски — специфический фильтр каталога (ТЗ п. 5): живёт в левой панели,
+// рядом с настройками раздела, как высота борта у грядок. Разметку наполняет
+// _dRenderCoreFilter, отбор идёт на бэкенде по характеристике core_type.
+const D_CORE_FILTER = `
+  <div class="d-color-section">
+    <div class="d-color-title">Доска:</div>
+    <div class="d-price-grid" id="d-core-grid"></div>
+  </div>`;
+
 const D_SECTION_UI = {
   terrace: {
-    params: D_TERRACE_H_PARAM,
+    params: D_TERRACE_H_PARAM + D_CORE_FILTER,
     actions: [
       { lbl: 'Ещё одна',          fn: "addRect('terrace')" },
       { lbl: 'Удалить выбранную', fn: 'dDeleteSelected()', sel: true },
@@ -760,6 +769,7 @@ const D_SECTION_UI = {
     ],
   },
   pool_terrace: {
+    params: D_CORE_FILTER,
     actions: [
       { lbl: 'Ещё одна',          fn: "addRect('pool_terrace')" },
       { lbl: 'Бассейн ▭',         fn: "dSetPool('rect')" },
@@ -795,7 +805,7 @@ const D_SECTION_UI = {
     ],
   },
   paths: {
-    params: `
+    params: D_CORE_FILTER + `
       <div class="d-param-group">
         <div class="d-param-head">
           <span class="d-param-label">Ширина дорожки, см.</span>
@@ -926,6 +936,7 @@ function _dRenderSidebar() {
   // как разметка панели создана заново.
   _dRenderRailFilters();
   _dRenderBedFilters();
+  _dRenderCoreFilter();
   // Поля параметров рисуются заново — вернуть в них значения из состояния.
   if (dActiveItem === 'terrace') _dSyncTerraceHeight();
   if (dActiveItem === 'paths') {
@@ -1054,6 +1065,27 @@ function dSetBedFilter(kind, value) {
     ? list.filter(v => v !== value)
     : list.concat([value]);
   _dRenderBedFilters();
+  dShowResults();
+}
+
+// ── Фильтр сечения доски (полнотелая / пустотелая) ──
+// Мультивыбор, как у ценовых категорий; отбор делает бэкенд предикатом по
+// характеристике core_type, поэтому выбор входит в ключ кэша каталога.
+function _dRenderCoreFilter() {
+  const grid = document.getElementById('d-core-grid');
+  if (!grid || typeof CORE_TYPES === 'undefined') return;
+  const on = catFilter(dActiveItem).core;
+  grid.innerHTML = CORE_TYPES.map(c =>
+    `<button class="d-price-btn ${on.has(c.id) ? 'selected' : ''}"
+             onclick="dSelectCore('${c.id}')">
+       <span class="d-radio"></span><span class="d-price-txt">${c.lbl}</span>
+     </button>`).join('');
+}
+
+function dSelectCore(id) {
+  const on = catFilter(dActiveItem).core;
+  if (on.has(id)) on.delete(id); else on.add(id);
+  _dRenderCoreFilter();
   dShowResults();
 }
 
@@ -2048,13 +2080,20 @@ async function _ensureCatalogSection(sectionId) {
     // на клиенте больше не считаются. Несколько выбранных категорий идут одним
     // предикатом IN.
     const cats = _selectedPriceCats();
-    if (cats.length && typeof PropertyPath !== 'undefined' && typeof PropertyOp !== 'undefined') {
-      filters.push(new Filter(FilterType.PROPERTIES, [{
-        property: PropertyPath.PRICE_CATEGORY,
-        op: cats.length > 1 ? PropertyOp.IN : PropertyOp.EQ,
-        value: cats.length > 1 ? cats : cats[0],
-      }]));
+    const cores = _selectedCoreTypes();
+    const preds = [];
+    if (typeof PropertyPath !== 'undefined' && typeof PropertyOp !== 'undefined') {
+      const pred = (path, list) => ({
+        property: path,
+        op: list.length > 1 ? PropertyOp.IN : PropertyOp.EQ,
+        value: list.length > 1 ? list : list[0],
+      });
+      if (cats.length)  preds.push(pred(PropertyPath.PRICE_CATEGORY, cats));
+      // Сечение доски — та же механика: фильтр отбирает только товары, у которых
+      // характеристика заполнена (у ступеней solid, у доски ДПК и МПК hollow).
+      if (cores.length) preds.push(pred(PropertyPath.CORE_TYPE, cores));
     }
+    if (preds.length) filters.push(new Filter(FilterType.PROPERTIES, preds));
     const res = await rm.getResources(...filters);
     // res === null → ошибка запроса → null (повторяемо); иначе массив (возможно пустой).
     let products = res ? (res.products || []) : null;
@@ -2075,6 +2114,7 @@ async function _ensureCatalogSection(sectionId) {
     console.info('[catalog] раздел', sectionId,
                  tags.length ? `(тег${tags.length > 1 ? 'и' : ''} «${tags.join(', ')}»)` : '(без тега)',
                  cats.length ? `(категор${cats.length > 1 ? 'ии' : 'ия'} «${cats.join(', ')}»)` : '',
+                 cores.length ? `(сечение «${cores.join(', ')}»)` : '',
                  '→', products === null ? 'ошибка запроса' : products.length + ' товар(ов)');
     _catalogCache[key] = products;
     if (products === null) _catalogNoteFail(sectionId);
@@ -2142,11 +2182,19 @@ function _selectedPriceCats() {
   return Object.keys(PRICE_TIER_CATEGORY).filter(t => sel.has(t)).map(t => PRICE_TIER_CATEGORY[t]);
 }
 
-// Ключ кэша каталога: раздел плюс выбранные категории — выдачи для разных
-// наборов разные, потому что фильтрует сервер.
+// Сечение доски, выбранное пользователем: значения характеристики core_type.
+function _selectedCoreTypes() {
+  const sel = (typeof catFilter === 'function') ? catFilter(dActiveItem).core : null;
+  if (!sel || !sel.size) return [];
+  return (typeof CORE_TYPES !== 'undefined' ? CORE_TYPES : []).filter(c => sel.has(c.id)).map(c => c.id);
+}
+
+// Ключ кэша каталога: раздел плюс выбранные категории и сечение — выдачи для
+// разных наборов разные, потому что фильтрует сервер.
 function _catKey(sectionId) {
-  const cats = _selectedPriceCats();
-  return cats.length ? sectionId + '|' + cats.join(',') : String(sectionId);
+  const parts = [String(sectionId), _selectedPriceCats().join(','), _selectedCoreTypes().join(',')];
+  while (parts.length > 1 && !parts[parts.length - 1]) parts.pop();
+  return parts.join('|');
 }
 function _priceCategoryOf(p) {
   const v = (typeof productProp === 'function') ? productProp(p, PROP_PRICE_CATEGORY) : undefined;

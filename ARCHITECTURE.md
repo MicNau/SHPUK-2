@@ -182,10 +182,10 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-styles-desktop.css?v=46   styles-mobile.css?v=1      state.js?v=72
-canvas.js?v=62            shared/house-builder.js?v=89  ResourceManager.js?v=9
+styles-desktop.css?v=46   styles-mobile.css?v=1      state.js?v=73
+canvas.js?v=62            shared/house-builder.js?v=89  ResourceManager.js?v=10
 viewer3d-core.js?v=157    viewer3d-builders.js?v=60   viewer3d-railing.js?v=17
-viewer3d-entourage.js?v=14   editor3d.js?v=13         nav-desktop.js?v=126
+viewer3d-entourage.js?v=14   editor3d.js?v=13         nav-desktop.js?v=127
 nav-mobile.js?v=1         backend_API/Calculator.js?v=3
 ```
 
@@ -946,6 +946,24 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Ветка **Mobile**: фильтр сечения доски.
+
+- **«Полнотелая / Пустотелая»** — специфический фильтр каталога, живёт в левой
+  панели рядом с настройками раздела (терраса, терраса у бассейна, дорожки), как
+  высота борта у грядок. Отбирает бэкенд: предикат по характеристике `core_type`
+  (`CoreType.SOLID` / `HOLLOW`), одна выбранная — `eq`, обе — `in`. Вместе с
+  ценовой категорией предикаты уходят одним фильтром `PROPERTIES`.
+- Фильтр отбирает только товары, у которых сечение заполнено: у ступеней приходит
+  `solid`, у доски ДПК и МПК — `hollow`, у остального характеристики нет вовсе.
+  Выбор входит в ключ кэша каталога (`_catKey`) вместе с категориями.
+- `ResourceManager.js` синхронизирован с копией бэкенда (ревизия 2026-09-18):
+  добавлены `PropertyPath.CORE_TYPE`, `CoreType` и методы `saveProject(name,
+  email, data)` / `getProject(saveId)` — они понадобятся для отправки заявки.
+- Замеры (моки API): «Пустотелая» даёт `eq hollow`, обе — `in [solid, hollow]`,
+  вместе с «Премиум» — два предиката в одном фильтре; блок есть в террасе и
+  дорожках, в грядках его нет.
+- Cache-bust: `state.js?v=73`, `ResourceManager.js?v=10`, `nav-desktop.js?v=127`.
 
 Ветка **Mobile**: ценовая категория отбирается на бэкенде.
 

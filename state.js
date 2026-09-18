@@ -444,6 +444,13 @@ const BED_HEIGHTS = [150, 200, 225, 270, 300];   // мм
 // prop — значение характеристики components.corner_bracket.type (бэкенд, 2026-08-27:
 // три значения вместо двух, «шарнир» и «угол» теперь различимы). re — запасной
 // разбор названия, пока характеристики у товара нет.
+// Сечение доски (характеристика каталога core_type): у ступеней приходит solid,
+// у террасной доски ДПК и МПК — hollow. Подписи наши, значения — ключи API.
+const CORE_TYPES = [
+  { id: 'solid',  lbl: 'Полнотелая' },
+  { id: 'hollow', lbl: 'Пустотелая' },
+];
+
 const BED_MOUNTS = [
   { id: 'plastic_hinge', lbl: 'Пластиковый шарнир', prop: 'plastic_joint',
     re: /шарнир|hinge/i },
@@ -461,7 +468,10 @@ const BED_MOUNTS = [
 function catFilter(secId) {
   const key = secId || '_';
   let f = S.catFilters[key];
-  if (!f) { f = S.catFilters[key] = { colors: new Set(), prices: new Set() }; }
+  // core — сечение доски (полнотелая / пустотелая), характеристика core_type:
+  // отбирает бэкенд, как и ценовую категорию.
+  if (!f) { f = S.catFilters[key] = { colors: new Set(), prices: new Set(), core: new Set() }; }
+  if (!f.core) f.core = new Set();
   return f;
 }
 
