@@ -49,6 +49,8 @@ const PropertyPath = Object.freeze({
     GARDEN_BED_CORNER_BRACKET_TYPE: 'components.corner_bracket.type',
 
     PRICE_CATEGORY: 'price_category',
+
+    CORE_TYPE: 'core_type',
 });
 
 // Ценовая категория товара: значение характеристики по пути
@@ -58,6 +60,13 @@ const PriceCategory = Object.freeze({
     BUDGET: 'budget',    // бюджет
     BALANCE: 'balance',  // баланс
     PREMIUM: 'premium',  // премиум
+});
+
+// Сечение доски: значение характеристики по пути PropertyPath.CORE_TYPE.
+// У товаров, где сечение не задано, пути в properties нет вовсе.
+const CoreType = Object.freeze({
+    SOLID: 'solid',    // полнотелая
+    HOLLOW: 'hollow',  // пустотелая
 });
 
 const PROPERTY_PATH = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)*$/;
@@ -516,6 +525,39 @@ class ResourceManager {
             await this.getSections(true);
         }
         return this.#flatCache?.find(s => s.code === code) || null;
+    }
+
+    async saveProject(name, email, data) {
+        try {
+            const response = await fetch(`${this.#api_domain}/api/v1/create_project/`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name, email, data}),
+            });
+            if (!response.ok) {
+                console.error(`HTTP ${response.status}`);
+                return null;
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to save project:', error);
+            return null;
+        }
+    }
+
+    async getProject(saveId) {
+        try {
+            const response = await fetch(
+                `${this.#api_domain}/api/v1/project/${encodeURIComponent(saveId)}/`);
+            if (!response.ok) {
+                console.error(`HTTP ${response.status}`);
+                return null;
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to load project:', error);
+            return null;
+        }
     }
 }
 let manager = new ResourceManager()

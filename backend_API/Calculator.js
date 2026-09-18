@@ -46,6 +46,7 @@ const CalculationType = {
     FENCE: 'fence',
     RAILING: 'railing',
     PATH: 'path',
+    FACADE: 'facade',
     FURNITURE: 'furniture',
     GARDEN_BEDS: 'garden_beds',
     PROJECT: 'project',
@@ -57,20 +58,22 @@ const CALCULATION_PATHS = {
     fence: 'calculate_fence/',
     railing: 'calculate_railing/',
     path: 'calculate_path/',
+    facade: 'calculate_facade/',
     furniture: 'calculate_furniture/',
     garden_beds: 'calculate_garden_beds/',
     project: 'calculate_project/',
 };
 
 // Основные материалы объекта: по ним работает onlyMainMaterials. У мебели и
-// грядок ролей нет вовсе, у проекта с объединёнными материалами они теряются
-// при сложении по товарам, поэтому смета отдаётся целиком.
+// грядок ролей нет вовсе, у проекта с объединёнными материалами и у фасада они
+// теряются при сложении по товарам, поэтому смета отдаётся целиком.
 const MAIN_MATERIALS = {
     terrace: ['deckingBoard', 'halfStep'],
     steps: ['step', 'riser', 'facadeBoard'],
     fence: ['section', 'picket'],
     railing: ['section'],
     path: ['deckingBoard'],
+    facade: null,
     furniture: null,
     garden_beds: null,
     project: null,
@@ -109,6 +112,7 @@ class Calculator {
      *   fence     - {lines, gateCount, sectionProductId, picketProductId};
      *   railing   - {lines, sectionProductId};
      *   path      - {vertices, deckingBoardProductId};
+     *   facade    - {pieces};
      *   furniture - {items};
      *   garden_beds - {items};
      *   project   - {objects, mergeMaterials}.

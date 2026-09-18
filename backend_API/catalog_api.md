@@ -1,7 +1,8 @@
 # API каталога и ресурсный менеджер
 
 
-Домен: `https://sollersdev.ru`
+Домен: `https://calc.outdoor-mebel.ru` или `https://sollersdev.ru` — API на обоих одинаковый.
+Ссылки на текстуры в ответе ведут на тот домен, к которому был запрос.
 
 ## Эндпоинты
 
@@ -12,6 +13,8 @@
 | GET | `/api/v1/sections/tree/` | разделы деревом |
 | GET | `/api/v1/products/?<фильтры>` | список товаров, пакетно |
 | GET | `/api/v1/products/<id>/` | один товар по id(c суффиксом конфигурации, то есть то что в ResorceManager называется id) |
+| POST | `/api/v1/create_project/` | сохранить проект, ответ — код проекта |
+| GET | `/api/v1/project/<save_id>/` | сохранённый проект по коду |
 
 Возвращаются только активные и доступные товары.
 
@@ -83,6 +86,25 @@
 }
 ```
 
+## Откуда можно обращаться
+
+Браузеру разрешено читать ответы API с двух адресов: `https://outdoor-mebel.ru`
+и `https://micnau.github.io`. С любого другого источника запрос уйдёт, но
+браузер не отдаст вам ответ — это CORS, и выглядит он как сетевая ошибка в
+консоли.
+
+Локальная разработка фронта (`http://localhost:5173` и подобное) в список не
+входит: скажите свой адрес, добавим — он прописывается на сервере, а не в коде.
+
+## Частота запросов
+
+Выдача каталога ограничена 120 запросами в минуту на клиента. Превышение —
+429 с телом `{"error": "..."}` и заголовком `Retry-After`. Пределы остальных
+адресов описаны в [calculation_api.md](calculation_api.md).
+
+Сохранение проекта — 10 запросов в минуту, чтение сохранённого проекта идёт
+в общий лимит 150 в минуту вместе с опросом готовности сметы.
+
 ## Фильтры
 
 Фильтры применяются последовательно: возвращается пересечение по всем выборкам.
@@ -147,8 +169,9 @@
 
 - `FilterType` — какие бывают фильтры
 - `PropertyOp` — операции сравнения для фильтра по характеристикам: `EQ`, `NE`, `LT`, `LTE`, `GT`, `GTE`, `IN`
-- `PropertyPath` — согласованные пути до характеристик: `HEIGHT`, `WIDTH`, `LENGTH`, `FENCING_POST_CAP_TYPE`, `FENCING_POST_WIDTH`, `GARDEN_BED_CORNER_BRACKET_TYPE`, `PRICE_CATEGORY`
+- `PropertyPath` — согласованные пути до характеристик: `HEIGHT`, `WIDTH`, `LENGTH`, `FENCING_POST_CAP_TYPE`, `FENCING_POST_WIDTH`, `GARDEN_BED_CORNER_BRACKET_TYPE`, `PRICE_CATEGORY`, `CORE_TYPE`
 - `PriceCategory` — значения ценовой категории: `BUDGET`, `BALANCE`, `PREMIUM` (`budget`, `balance`, `premium`)
+- `CoreType` — сечение доски: `SOLID`, `HOLLOW` (`solid` — полнотелая, `hollow` — пустотелая)
 - `SORT_FILEDS` — поля сортировки
 - `SORT_ORDER` — порядок сортировки
 
@@ -185,6 +208,25 @@ const notPremium = new Filter(FilterType.PROPERTIES, [
 
 Та же категория приходит в `properties` выдачи, так что подписывать товар
 можно тем, что уже приехало, без второго запроса.
+
+### Полнотелая и пустотелая доска
+
+Сечение доски лежит в характеристиках по пути `core_type`, значение `solid`
+(полнотелая) или `hollow` (пустотелая). У товаров, где сечение не задано, пути
+в `properties` нет вовсе — это «неизвестно», а не «полнотелая».
+
+```js
+const hollow = new Filter(FilterType.PROPERTIES, [
+    { property: PropertyPath.CORE_TYPE, op: PropertyOp.EQ, value: CoreType.HOLLOW },
+])
+
+// Подпись по тому, что уже приехало в выдаче
+const coreType = resource.properties[PropertyPath.CORE_TYPE]   // 'solid' | 'hollow' | undefined
+const label = { [CoreType.SOLID]: 'Полнотелая', [CoreType.HOLLOW]: 'Пустотелая' }[coreType] ?? ''
+```
+
+Фильтр по `core_type` отбирает только товары, у которых сечение заполнено:
+доска без него не попадёт ни в `solid`, ни в `hollow`.
 
 Фильтры проверяются **до** запроса: кривой предикат падает с сообщением в консоль,
 а `getResources` возвращает `null`, не сходив в сеть.
@@ -255,7 +297,63 @@ await manager.getSectionByCode(code)
 manager.getCachedProducts()
 ```
 
-Всё, кроме последнего, возвращает `null` при ошибке или если объекта нет.
+```js
+await manager.saveProject(name, email, data)   // {status, save_id}
+await manager.getProject(saveId)              // {save_id, status, data, createdAt}
+```
+
+Всё, кроме `getCachedProducts`, возвращает `null` при ошибке или если объекта нет.
+
+## Сохранённые проекты
+
+Проект, который нарисовал пользователь, можно сохранить на сервере и потом
+открыть по коду.
+
+### Сохранение
+
+`POST /api/v1/create_project/`
+
+```json
+{"name": "Иван", "email": "ivan@example.com", "data": {...}}
+```
+
+`data` — любой json проекта: сервер хранит его как есть и не разбирает. Имя и
+почта пока не сохраняются, но передавайте их уже сейчас.
+
+Ответ `201`:
+
+```json
+{"status": "pending", "save_id": "wWIxTUyg7jqZuUgZ3kPq9RtLmN0aXbYc"}
+```
+
+`save_id` — 32 латинские буквы и цифры, по нему проект открывается обратно.
+`status` пока всегда `pending`: заявка принята, дальнейшая обработка появится
+позже.
+
+| Код | Когда |
+|---|---|
+| 400 `{"error": "Нет поля data"}` | нет `data` или `data: null` |
+| 400 `{"error": "Невалидный JSON"}` | тело не разбирается как JSON |
+| 413 | тело больше 1 МБ; отвечает nginx HTML-страницей, а не JSON |
+| 429 | больше 10 сохранений в минуту, см. `Retry-After` |
+| 500 `{"error": "Internal server error"}` | ошибка сервера |
+
+### Чтение
+
+`GET /api/v1/project/<save_id>/`
+
+```json
+{
+  "save_id": "wWIxTUyg7jqZuUgZ3kPq9RtLmN0aXbYc",
+  "status": "pending",
+  "data": {...},
+  "createdAt": "2026-09-18T11:50:24+00:00"
+}
+```
+
+`data` возвращается ровно в том виде, в каком был сохранён; `createdAt` —
+время сохранения, ISO 8601 в UTC. Нет такого проекта — `404
+{"error": "Проект не найден"}`.
 
 ## Конфигурации
 
@@ -284,8 +382,8 @@ manager.getCachedProducts()
 | `prices` | цена конфигурации, если она у неё своя, иначе цена товара |
 
 В `properties` приезжают не все характеристики, а публичные: габариты
-(`dimensions`), текстуры (`textures`), модель (`glb_url`) и ценовая категория
-(`price_category`). Товар может показать что-то сверх этого — например
+(`dimensions`), текстуры (`textures`), модель (`glb_url`), ценовая категория
+(`price_category`) и сечение доски (`core_type`). Товар может показать что-то сверх этого — например
 `components.post`, — и тогда оно приедет **вместе** с перечисленным, а не
 вместо него. Остальное — роли, ссылки на компоненты, нормы расхода — кухня
 расчёта и наружу не идёт.

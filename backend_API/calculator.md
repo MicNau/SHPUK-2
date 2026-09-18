@@ -34,6 +34,7 @@ const calculator = new Calculator('https://sollersdev.ru/api/v1/');
 | Забор | `FENCE` | `{lines, gateCount, sectionProductId, picketProductId}` |
 | Оградка | `RAILING` | `{lines, sectionProductId}` |
 | Дорожка | `PATH` | `{vertices, deckingBoardProductId}` |
+| Фасад | `FACADE` | `{pieces}` |
 | Мебель | `FURNITURE` | `{items}` |
 | Грядки | `GARDEN_BEDS` | `{items}` |
 | Проект | `PROJECT` | `{objects, mergeMaterials}` |
@@ -81,8 +82,9 @@ const materialsCost = await calculator.getTotalCost(
 
 Основные материалы заданы в `MAIN_MATERIALS`: у террасы доска и полуступень, у
 ступеней ступень, подступенок и фасадная доска, у забора секции и штакетник, у
-оградки секции, у дорожки доска. У мебели и грядок основными считаются все
-позиции.
+оградки секции, у дорожки доска. У мебели, грядок и фасада основными считаются
+все позиции: у фасада смета ключуется товарами, а не ролями, и отличить доску
+по ключу нельзя.
 У проекта опция применяется к каждому объекту по его типу; в объединённой
 смете роли теряются при сложении по товарам, и она отдаётся целиком.
 
