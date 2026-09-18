@@ -1650,10 +1650,12 @@ function _collectFacadeSegments(root) {
   }
 }
 
-// Материал панелей отделки из S.elementMat.facade: PBR-текстуры товара каталога
+// Материал панелей отделки из S.elementMat[secId]: PBR-текстуры товара каталога
 // (раздел фасадных панелей, walls-тег) или однотонный цвет. null — не выбран.
-function _facadePanelMaterial() {
-  const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat.facade : null;
+// Отделок две («Отделка фасада 1» и «2»), у каждой свой материал и свой набор
+// выбранных кусков.
+function _facadePanelMaterial(secId) {
+  const em = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat[secId || 'facade'] : null;
   if (!em) return null;
   const env = threeState.envMap || null;
   const m = new THREE.MeshStandardMaterial({
@@ -1675,17 +1677,19 @@ function _facadePanelMaterial() {
 // результат (панели). Материал не выбран → сцена не меняется.
 function _applyFacadeSelection() {
   if (!threeState || !threeState.facadeSegs || !threeState.facadeSegs.length) return;
-  const zones = (typeof S !== 'undefined' && S.wallZones) ? S.wallZones : {};
-  const selCount = Object.keys(zones).length;
-  if (threeState._facadePanelMat) threeState._facadePanelMat.dispose();
-  const panel = _facadePanelMaterial();          // ОБЩИЙ на все панельные сегменты
-  threeState._facadePanelMat = panel;
+  const secs = (typeof FACADE_SECS !== 'undefined') ? FACADE_SECS : ['facade'];
+  // Материал на каждую отделку свой. Прежний общий кэш держал один материал —
+  // теперь их столько же, сколько отделок.
+  for (const m of (threeState._facadePanelMats || [])) { if (m) m.dispose(); }
+  const mats = {};
+  for (const sec of secs) mats[sec] = _facadePanelMaterial(sec);
+  threeState._facadePanelMats = secs.map(sec => mats[sec]);
   // Общий раскрасчик: панель (с одноразовым мировым UV) либо родной материал.
-  const paint = (rootObj, usePanel) => {
+  const paint = (rootObj, panel) => {
     rootObj.traverse(o => {
       if (!o.isMesh || !o.material) return;
       if (!o.userData._baseMat) o.userData._baseMat = o.material;
-      if (usePanel) {
+      if (panel) {
         if (!o.userData._facadeUV) { _applyWorldBoxUV(o, HOUSE_WALL_TILE); o.userData._facadeUV = true; }
         o.material = panel;
       } else {
@@ -1693,19 +1697,25 @@ function _applyFacadeSelection() {
       }
     });
   };
+  // Раздел, которому принадлежит кусок. Кусок числится за одной отделкой:
+  // выбор во второй снимает его из первой (см. e3dSelect).
+  const secOf = id => secs.find(sec => facadeZones(sec)[id]) || null;
 
   for (const seg of threeState.facadeSegs) {
-    const selected = !!zones[seg.userData.segId];
-    paint(seg, !!panel && (selected || selCount === 0));
+    const sec = secOf(seg.userData.segId);
+    paint(seg, sec ? mats[sec] : null);
   }
 
-  // Угловые столбы — «под ближайшую вставку»: включён, если пустой выбор
-  // (весь фасад) или выбран любой примыкающий элемент. Флаг _facadeOn читает
-  // facadeSelectedAreaM2 (площадь столба попадает в смету вместе со вставкой).
+  // Угловые столбы — «под ближайшую вставку»: столб красится материалом той
+  // отделки, к которой относится примыкающий к нему выбранный кусок. Флаг
+  // _facadeSec читает facadeSelectedAreaM2 (площадь столба идёт в смету своего
+  // раздела). Прежнее правило «пустой выбор = весь фасад» с двумя отделками не
+  // работает: вторая залила бы собой весь дом.
   for (const p of (threeState.facadePillars || [])) {
-    const on = selCount === 0 || (p.userData._adjIds || []).some(id => zones[id]);
-    p.userData._facadeOn = on;
-    paint(p, !!panel && on);
+    const sec = (p.userData._adjIds || []).map(secOf).find(Boolean) || null;
+    p.userData._facadeSec = sec;
+    p.userData._facadeOn = !!sec;
+    paint(p, sec ? mats[sec] : null);
   }
 }
 
@@ -1713,21 +1723,126 @@ function _applyFacadeSelection() {
 // Оконная колонка — два меша с общим segId и СВОИМИ segH (перемычка/подоконник),
 // сумма по мешам даёт точную площадь без задвоения. Угловые столбы добавляются
 // по флагу _facadeOn (выставляет _applyFacadeSelection).
-function facadeSelectedAreaM2() {
+function facadeSelectedAreaM2(secId) {
+  const sec = secId || 'facade';
   const segs = (threeState && threeState.facadeSegs) || [];
   if (!segs.length) return 0;
-  const zones = (typeof S !== 'undefined' && S.wallZones) ? S.wallZones : {};
-  const sel = segs.filter(s => zones[s.userData.segId]);
-  const list = sel.length ? sel : segs;
+  const zones = (typeof facadeZones === 'function') ? facadeZones(sec) : {};
+  const list = segs.filter(s => zones[s.userData.segId]);
   // Фронтон не прямоугольный: у него вместо segW×segH записана готовая площадь
   // (segArea) — сумма площадей его треугольников, без выреза под окно.
   let a = list.reduce((s, o) => s + (o.userData.segArea !== undefined
     ? o.userData.segArea
     : (o.userData.segW || 0) * (o.userData.segH || 0)), 0);
   for (const p of ((threeState && threeState.facadePillars) || [])) {
-    if (p.userData._facadeOn) a += (p.userData.segW || 0) * (p.userData.segH || 0);
+    if (p.userData._facadeSec === sec) a += (p.userData.segW || 0) * (p.userData.segH || 0);
   }
   return a;
+}
+
+// ── Участки обшивки для расчёта (calculate_facade, ключ pieces) ──────────
+// Бэкенд ждёт плоские многоугольники В СИСТЕМЕ СТЕНЫ: x вдоль стены от её
+// начала, y вверх, миллиметры; дырок в участке быть не может, поэтому каждый
+// выбранный кусок идёт своим участком (они склеиваются на стороне расчёта).
+// Стена — ребро контура дома, нумерация с единицы в порядке обхода. Высота
+// считается от НИЗА СТЕН ПЕРВОГО ЭТАЖА: у двухэтажного дома куски второго идут
+// выше на высоту этажа плюс перекрытие, и промежуток виден расчёту как есть.
+// Угловые столбы и пояс карниза отдельными участками не идут: столбы бэкенд
+// считает уголками, а пояс — узкая полоса, которая следует за соседом.
+
+function _facadeWallEdges() {
+  const poly = (typeof _housePoly !== 'undefined' && _housePoly) ? _housePoly.corners : null;
+  if (!poly || poly.length < 3) return [];
+  const out = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const len = Math.hypot(dx, dz);
+    if (len < 0.05) continue;
+    out.push({ id: out.length + 1, ax: a.x, az: a.z, ux: dx / len, uz: dz / len, len });
+  }
+  return out;
+}
+
+// Мировые вершины меша (с учётом трансформаций родителей).
+function _facadeMeshPoints(root) {
+  const pts = [];
+  const v = new THREE.Vector3();
+  root.updateMatrixWorld(true);
+  root.traverse(o => {
+    if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
+    const pos = o.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+      pts.push({ x: v.x, y: v.y, z: v.z });
+    }
+  });
+  return pts;
+}
+
+// Ребро, в плоскости которого лежит кусок: ближайшее по среднему расстоянию.
+function _facadeWallOf(pts, edges) {
+  let best = null, bestD = Infinity;
+  for (const e of edges) {
+    let sum = 0;
+    for (const p of pts) {
+      const t = (p.x - e.ax) * e.ux + (p.z - e.az) * e.uz;
+      sum += Math.hypot(p.x - (e.ax + e.ux * t), p.z - (e.az + e.uz * t));
+    }
+    const d = sum / pts.length;
+    if (d < bestD) { bestD = d; best = e; }
+  }
+  return best;
+}
+
+// Выпуклая оболочка (обход Эндрю): куски фронтона — треугольники и трапеции,
+// сегменты стен — прямоугольники, всё выпуклое.
+function _facadeHull(pts) {
+  const p = pts.slice().sort((a, b) => (a.x - b.x) || (a.y - b.y));
+  if (p.length < 3) return p;
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const half = src => {
+    const out = [];
+    for (const q of src) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], q) <= 0) out.pop();
+      out.push(q);
+    }
+    out.pop();
+    return out;
+  };
+  return half(p).concat(half(p.slice().reverse()));
+}
+
+function facadePieces(secId, productId) {
+  const segs = (threeState && threeState.facadeSegs) || [];
+  const edges = _facadeWallEdges();
+  if (!segs.length || !edges.length) return [];
+  const zones = (typeof facadeZones === 'function') ? facadeZones(secId) : {};
+  // Низ стен первого этажа = верх фундамента: от него считаем высоту.
+  let baseY = Infinity;
+  for (const s of segs) {
+    if (!/^f0:/.test(s.userData.segId || '')) continue;
+    baseY = Math.min(baseY, new THREE.Box3().setFromObject(s).min.y);
+  }
+  if (!isFinite(baseY)) baseY = 0;
+  const mm = v => Math.round(v * 1000);
+  const out = [];
+  for (const seg of segs) {
+    if (!zones[seg.userData.segId]) continue;
+    const pts = _facadeMeshPoints(seg);
+    if (pts.length < 3) continue;
+    const e = _facadeWallOf(pts, edges);
+    if (!e) continue;
+    const flat = pts.map(p => ({ x: (p.x - e.ax) * e.ux + (p.z - e.az) * e.uz, y: p.y - baseY }));
+    const hull = _facadeHull(flat);
+    if (hull.length < 3) continue;
+    out.push({
+      wallId: e.id,
+      productId: productId || null,
+      vertices: hull.map(q => ({ x: mm(q.x), y: mm(q.y) })),
+    });
+  }
+  return out;
 }
 
 // (Пикинг сегментов кликом в 3D удалён — выбор ведётся ТОЛЬКО на плане

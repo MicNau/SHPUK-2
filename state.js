@@ -9,7 +9,8 @@ const SECS = [
   {id:'steps',        lbl:'Ступени',            req:'steps'},
   {id:'paths',        lbl:'Дорожки',            req:'paths'},
   {id:'fence',        lbl:'Забор',              req:'fence'},
-  {id:'facade',       lbl:'Фасад',              req:'facade'},
+  {id:'facade',       lbl:'Фасад 1',            req:'facade'},
+  {id:'facade2',      lbl:'Фасад 2',            req:'facade2'},
   {id:'beds',         lbl:'Грядки',             req:'beds'},
   {id:'furniture',    lbl:'Мебель',             req:'furniture'},
   {id:'pool_terrace', lbl:'Терраса у бассейна', req:'pool_terrace'},
@@ -107,6 +108,10 @@ const ELEMENT_COLOR_NAMES = {
   facade: ['Chocolate mix', 'Suar mix', 'Snow mix', 'Sand mix', 'Grey dark', 'White', 'Орех',
            'Серый', 'Венге', 'Антрацит', 'Тик', 'Чёрный', 'Темно-коричневый', 'Песочный',
            'Светло-коричневый', 'Бежевый', 'Дуб', 'Коричневый', 'Кремовый', 'Шоколад'],
+
+  facade2: ['Chocolate mix', 'Suar mix', 'Snow mix', 'Sand mix', 'Grey dark', 'White', 'Орех',
+           'Серый', 'Венге', 'Антрацит', 'Тик', 'Чёрный', 'Темно-коричневый', 'Песочный',
+           'Светло-коричневый', 'Бежевый', 'Дуб', 'Коричневый', 'Кремовый', 'Шоколад'],
   beds: ['Венге', 'Серый', 'Коричневый'],
 };
 
@@ -150,7 +155,7 @@ const CATALOG_SECTIONS = [
 // Дефолтный раздел каталога для каждого элемента проекта (sidebar) → bitrix_id.
 const CONSTRUCTION_TO_SECTION = {
   terrace: 2314, paths: 2314, pool_terrace: 2314,
-  steps: 2330, beds: 2357, fence: 2348, facade: 2680, furniture: 2430,
+  steps: 2330, beds: 2357, fence: 2348, facade: 2680, facade2: 2680, furniture: 2430,
   railing: 2331,   // «Ограждения для террасы из ДПК» — отдельный элемент проекта
 };
 
@@ -370,6 +375,11 @@ const S = {
   // формат 'f{этаж}:e{ребро}:s{сегмент}' → true). Пустой выбор при заданном
   // материале (S.elementMat.facade) = «весь фасад». Материал панелей — S.elementMat.facade.
   wallZones: {},
+  // Отделок фасада ДВЕ (ТЗ 2026-09-18): «Отделка фасада 1» и «Отделка фасада 2»
+  // работают одинаково, но выбор и материал у каждой свой. Второй набор зон —
+  // здесь, материалы лежат в S.elementMat.facade / .facade2. Кусок принадлежит
+  // одной отделке: выбор во второй снимает его из первой и наоборот.
+  wallZones2: {},
   // Материалы дома (шаг «Параметры дома»).
   roofMat: 'tile',     // tile | metal_green | metal_red (единственная группа с текстурами)
   // Стены, фундамент и рамы — общая палитра HOUSE_COLORS:
@@ -467,6 +477,23 @@ const BED_MOUNTS = [
 ];
 
 // Фильтры каталога выбранного раздела (создаются лениво). secId — id пункта меню.
+// Зоны отделки нужного раздела фасада. Разделов два, состояние у каждого своё.
+const FACADE_SECS = ['facade', 'facade2'];
+
+function facadeZones(secId) {
+  if (secId === 'facade2') {
+    if (!S.wallZones2) S.wallZones2 = {};
+    return S.wallZones2;
+  }
+  if (!S.wallZones) S.wallZones = {};
+  return S.wallZones;
+}
+
+// Другой раздел фасада — тот, из которого кусок надо убрать при выборе.
+function facadeOtherSec(secId) {
+  return (secId === 'facade2') ? 'facade' : 'facade2';
+}
+
 function catFilter(secId) {
   const key = secId || '_';
   let f = S.catFilters[key];
