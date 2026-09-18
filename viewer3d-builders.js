@@ -2433,6 +2433,24 @@ function fenceModelUrl() {
   return (el && (el.modelUrl || el.glbFileUrl)) || '';
 }
 
+// Калитка вставляется ГОТОВОЙ моделью (ТЗ 2026-09-18): у товара забора для этого
+// есть поле wicket_glb_url. Пока бэкенд его не проставил, берём локальную модель
+// по имени модели забора — mod_fence_003.glb ↔ mod_wicket_003.glb. Список
+// известных нам пар закрытый: у остальных заборов своей калитки нет, и запрос за
+// ней вернул бы 404.
+const WICKET_LOCAL_DIR = 'assets/houses/modules/fences/';
+const WICKET_LOCAL = new Set(['003', '005']);
+
+function wicketModelUrl() {
+  const el = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat.fence : null;
+  const direct = el && (el.wicketGlbUrl
+    || (typeof productProp === 'function' && typeof PROP_WICKET_GLB !== 'undefined'
+        ? productProp(el, PROP_WICKET_GLB) : null));
+  if (direct) return direct;
+  const m = /mod_fence_(\d+)\.glb/i.exec(fenceModelUrl() || '');
+  return (m && WICKET_LOCAL.has(m[1])) ? WICKET_LOCAL_DIR + 'mod_wicket_' + m[1] + '.glb' : '';
+}
+
 function ensureFenceModel(url, label) {
   if (_fenceCache[url] !== undefined) return Promise.resolve(_fenceCache[url]);
   if (_fenceLoading[url]) return _fenceLoading[url];
@@ -3096,6 +3114,17 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
                    _fenceDumpProto(proto); }
     }
   }
+  // Готовая калитка — своя модель; грузится тем же путём, что и забор.
+  const wUrl = (typeof S !== 'undefined' && S.fenceGate) ? wicketModelUrl() : '';
+  let wicket = null;
+  if (wUrl) {
+    if (_fenceCache[wUrl] === undefined) {
+      ensureFenceModel(wUrl, 'калитка').then(() => { if (threeState) buildScene3d(); });
+    } else {
+      wicket = _fenceCache[wUrl];
+      if (wicket) console.info('[fence] калитка из модели:', wUrl);
+    }
+  }
 
   const fenceGroup = new THREE.Group();
   const panelH = (typeof S !== 'undefined' && S.fenceH) ? S.fenceH
@@ -3138,7 +3167,10 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
       // Калитка: проём фиксированной ширины на пролёте, где она стоит (TODO.md,
       // этап 2 п.8). Пролёт делится на два куска — до и после проёма; каждый
       // собирается своими секциями, как обычный пролёт.
-      const parts = _fenceGateSplit(a, ux, uz, segLen, gateW);
+      // Проём делается ПОД саму калитку: её родная ширина, а не условный метр —
+      // растягивать готовую створку нельзя.
+      const gateSpan = wicket ? _fenceNativeW(wicket) : FENCE_GATE_W3D;
+      const parts = _fenceGateSplit(a, ux, uz, segLen, gateW, gateSpan);
       for (const part of parts) {
         const px = a.x + ux * part.t0, pz = a.z + uz * part.t0;
         if (part.gate) _fenceGateLeaf(px, pz, ux, uz, part.len, angle);
@@ -3196,25 +3228,50 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
     const key = postKey(sx, sz);
     const withPost = !postSet.has(key);
     postSet.add(key);
-    if (proto) panelsPainted += _fenceModelSection(proto, fenceGroup, sx, sz, angle, len, sy,
-                                                   panelMat, frameMat, true);
+    // Готовая модель калитки ставится как есть: масштабируется только по высоте
+    // забора, ширина остаётся родной (проём под неё и делался).
+    if (wicket) _fenceWicketLeaf(wicket, fenceGroup, sx, sz, angle, panelH, panelMat, frameMat);
+    else if (proto) panelsPainted += _fenceModelSection(proto, fenceGroup, sx, sz, angle, len, sy,
+                                                        panelMat, frameMat, true);
     else       _fenceSchematicSection(fenceGroup, sx, sz, angle, len, panelH,
                                       panelMat, frameMat, withPost);
     runEnds.push({ x: sx + ux * len, z: sz + uz * len, angle });
   }
 }
 
+// Створка из готовой модели: клон прототипа, масштаб только по высоте забора.
+// Полотно красится товаром (как у секций), остальное — тёмной рамой; если панели
+// в модели не распознались, материалы остаются файловыми — калитка нарисована в
+// цвет своего забора.
+function _fenceWicketLeaf(proto, group, x, z, angle, panelH, panelMat, frameMat) {
+  const inst = proto.clone(true);
+  const sy = panelH / _fenceNativeH(proto);
+  inst.scale.set(1, sy, 1);
+  inst.position.set(x, 0, z);
+  inst.rotation.y = angle;
+  const panels = (typeof _fenceProtoPanels === 'function') ? _fenceProtoPanels(proto) : new Set();
+  const names = new Set();
+  panels.forEach(o => names.add(o.name || ''));
+  inst.traverse(o => {
+    if (!o.isMesh) return;
+    o.castShadow = o.receiveShadow = true;
+    if (!names.size) return;                     // разбор не удался — оставляем как в файле
+    o.material = names.has(o.name || '') ? panelMat : frameMat;
+  });
+  group.add(inst);
+}
+
 // Делит пролёт на куски вокруг калитки: [{t0, len, gate?}]. Калитка задана точкой плана
 // (S.fenceGate); на пролёт она влияет, только если лежит на нём (в пределах 0.3 м).
 // Кусок с gate:true — сама створка: её строит _fenceGateLeaf одной секцией, просвета
 // на месте калитки не остаётся.
-function _fenceGateSplit(a, ux, uz, segLen, gate) {
+function _fenceGateSplit(a, ux, uz, segLen, gate, gateSpan) {
   if (!gate) return [{ t0: 0, len: segLen }];
   const vx = gate.x - a.x, vz = gate.z - a.z;
   const t = vx * ux + vz * uz;                                  // проекция на ось пролёта
   const off = Math.hypot(vx - ux * t, vz - uz * t);             // отклонение от оси
   if (off > 0.30 || t < -0.1 || t > segLen + 0.1) return [{ t0: 0, len: segLen }];
-  const half = FENCE_GATE_W3D / 2;
+  const half = ((gateSpan > 0.2) ? gateSpan : FENCE_GATE_W3D) / 2;
   const g0 = Math.max(0, t - half), g1 = Math.min(segLen, t + half);
   const parts = [];
   if (g0 > 0.3) parts.push({ t0: 0, len: g0 });

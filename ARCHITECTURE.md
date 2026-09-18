@@ -184,9 +184,9 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 ```
 styles-desktop.css?v=46   styles-mobile.css?v=1      state.js?v=73
 canvas.js?v=62            shared/house-builder.js?v=89  ResourceManager.js?v=10
-viewer3d-core.js?v=157    viewer3d-builders.js?v=60   viewer3d-railing.js?v=17
-viewer3d-entourage.js?v=14   editor3d.js?v=13         nav-desktop.js?v=127
-nav-mobile.js?v=1         backend_API/Calculator.js?v=3
+viewer3d-core.js?v=157    viewer3d-builders.js?v=61   viewer3d-railing.js?v=17
+viewer3d-entourage.js?v=14   editor3d.js?v=13         nav-desktop.js?v=128
+nav-mobile.js?v=2         backend_API/Calculator.js?v=3
 ```
 
 `viewer3d-entourage.js` автоматически детектит `IS_MOBILE` (UA + `innerWidth<768`)
@@ -946,6 +946,24 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Ветка **Mobile**: калитка ставится готовой моделью.
+
+- **Калитка — отдельный GLB**, а не секция забора без просвета. Ссылку даёт товар
+  (`wicket_glb_url`, ревизия API 2026-09-18); пока бэкенд её не проставил,
+  работает локальная пара по имени модели забора — `mod_fence_003.glb` ↔
+  `mod_wicket_003.glb` (список известных пар закрытый: у остальных заборов своей
+  калитки нет, и запрос вернул бы 404).
+- **Проём делается под саму калитку**: его ширина — родная ширина модели, а не
+  условный метр. Створка масштабируется только по высоте забора, по длине не
+  тянется. Полотно красится товаром, как у секций; если разбор модели не нашёл
+  панелей, материалы остаются файловыми — калитка нарисована в цвет своего забора.
+- Замеры: у забора 005 калитка грузится (`mod_wicket_005.glb`, габарит
+  0.80 × 1.92 м) и встаёт в проём — рядом с точкой калитки 7 мешей; у забора 001
+  своей калитки нет и запрос не уходит; поле товара перекрывает локальный
+  фолбэк.
+- Cache-bust: `viewer3d-builders.js?v=61`, `state.js?v=73`,
+  `nav-desktop.js?v=128`, `nav-mobile.js?v=2`.
 
 Ветка **Mobile**: фильтр сечения доски.
 

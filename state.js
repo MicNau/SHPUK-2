@@ -411,6 +411,8 @@ function stepsAll() { return Array.isArray(S.stepsList) ? S.stepsList : []; }
 //   грядки   dimensions.height
 //              components.corner_bracket.type ['metal','plastic']
 const PROP_FENCE_H     = 'dimensions.height';
+// Готовая модель калитки у товара забора (API 2026-09-18): ссылка на GLB.
+const PROP_WICKET_GLB  = 'wicket_glb_url';
 const PROP_RAIL_CAP    = 'components.post_cap.type';
 const PROP_RAIL_POST_W = 'components.post.dimensions.width';
 const PROP_BED_H       = 'dimensions.height';
