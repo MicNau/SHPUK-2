@@ -1820,7 +1820,7 @@ function _elementColors(elId) {
 // чип мог бы остаться при пустой выдаче.
 function _availableColors(elId) {
   const all = _elementColors(elId);
-  const products = _catalogCache[_activeSectionId()];
+  const products = _catalogCache[_catKey(_activeSectionId())];
   if (!Array.isArray(products) || !products.length) return all;
   const present = new Set();
   for (const p of products) {
@@ -2015,15 +2015,19 @@ function _activeSectionId() {
 //   null — ошибка/недоступно (перезапросим, но не больше CATALOG_MAX_TRIES раз);
 //   undefined — ещё не грузили.
 async function _ensureCatalogSection(sectionId) {
-  if (Array.isArray(_catalogCache[sectionId])) return _catalogCache[sectionId];
-  if (_catalogLoading[sectionId]) return undefined;
+  // Ключ кэша учитывает выбранные ценовые категории: их отбирает сервер, и для
+  // разных наборов выдачи разные. Счётчик ошибок остаётся на разделе — не
+  // отвечает именно он, а не отдельный фильтр.
+  const key = _catKey(sectionId);
+  if (Array.isArray(_catalogCache[key])) return _catalogCache[key];
+  if (_catalogLoading[key]) return undefined;
   // Сервер не отвечает вовсе — запросы прекращены совсем (см. _catalogNoteFail).
   if (_catalogDown) return null;
   // Раздел уже отвечал ошибкой (например, 400 на section_id) — больше не долбим сервер.
   if ((_catalogFails[sectionId] || 0) >= CATALOG_MAX_TRIES) return null;
   const rm = _getRM();
   if (!rm || typeof Filter === 'undefined') return null;
-  _catalogLoading[sectionId] = true;
+  _catalogLoading[key] = true;
   try {
     // Текстурированные товары (с texture_urls для превью/3D) бэкенд отдаёт только под тегом
     // раздела (SECTION_TAGS). Без тега вернулись бы товары без текстур → превью не приходят.
@@ -2040,6 +2044,17 @@ async function _ensureCatalogSection(sectionId) {
     if (tags.length) filters.push(new Filter(FilterType.TAGS, tags));
     // Объединённому набору лимит вдвое: 50 позиций делились бы между двумя тегами.
     filters.push(new Filter(FilterType.LIMIT, tags.length > 1 ? 100 : 50));
+    // Ценовая категория — предикат по характеристике товара (ТЗ п. 4): вилки цен
+    // на клиенте больше не считаются. Несколько выбранных категорий идут одним
+    // предикатом IN.
+    const cats = _selectedPriceCats();
+    if (cats.length && typeof PropertyPath !== 'undefined' && typeof PropertyOp !== 'undefined') {
+      filters.push(new Filter(FilterType.PROPERTIES, [{
+        property: PropertyPath.PRICE_CATEGORY,
+        op: cats.length > 1 ? PropertyOp.IN : PropertyOp.EQ,
+        value: cats.length > 1 ? cats : cats[0],
+      }]));
+    }
     const res = await rm.getResources(...filters);
     // res === null → ошибка запроса → null (повторяемо); иначе массив (возможно пустой).
     let products = res ? (res.products || []) : null;
@@ -2059,18 +2074,19 @@ async function _ensureCatalogSection(sectionId) {
     // и ошибка запроса выглядят в интерфейсе одинаково («товаров нет»).
     console.info('[catalog] раздел', sectionId,
                  tags.length ? `(тег${tags.length > 1 ? 'и' : ''} «${tags.join(', ')}»)` : '(без тега)',
+                 cats.length ? `(категор${cats.length > 1 ? 'ии' : 'ия'} «${cats.join(', ')}»)` : '',
                  '→', products === null ? 'ошибка запроса' : products.length + ' товар(ов)');
-    _catalogCache[sectionId] = products;
+    _catalogCache[key] = products;
     if (products === null) _catalogNoteFail(sectionId);
     // Ответ получен — счётчики сбрасываем: связь есть, прежние сбои были разовыми.
     else { _catalogFails[sectionId] = 0; _catalogFailTotal = 0; }
   } catch (e) {
     console.warn('[catalog] section load failed', sectionId, e);
-    _catalogCache[sectionId] = null;
+    _catalogCache[key] = null;
     _catalogNoteFail(sectionId);
   }
-  _catalogLoading[sectionId] = false;
-  return _catalogCache[sectionId];
+  _catalogLoading[key] = false;
+  return _catalogCache[key];
 }
 
 function _productPrice(p) {
@@ -2087,11 +2103,10 @@ function _productPrice(p) {
 // Разделы, где фильтр ценовых категорий не показывается (см. _dRenderPriceGrid).
 const PRICE_TIER_HIDDEN = new Set(['furniture', 'fence', 'beds']);
 
+// Клиентских порогов по цене больше нет (ТЗ п. 4): категорию отбирает сервер, а
+// «МПК» — это раздел 2329 / тег mpk, и его по-прежнему узнаём сами.
 const PRICE_TIER_MATCH = {
-  budget:   p => (_productPrice(p) ?? 0) < 500,
-  balanced: p => { const v = _productPrice(p) ?? 0; return v >= 500 && v <= 900; },
-  premium:  p => (_productPrice(p) ?? 0) > 900,
-  mpk:      p => (p.sections || []).includes(2329) || /мпк/i.test(p.name || ''),
+  mpk: p => (p.sections || []).includes(2329) || /мпк/i.test(p.name || ''),
 };
 
 // Ценовая категория ТОВАРА — свойство price_category (появилось у доски 2026-08-31).
@@ -2107,6 +2122,32 @@ const PRICE_CATEGORY_ALIASES = {
   balanced: ['balance', 'balanced', 'standard', 'middle', 'баланс', 'стандарт', 'средний'],
   premium:  ['premium', 'lux', 'премиум', 'люкс'],
 };
+
+// Тир в интерфейсе → значение характеристики price_category у товара. По нему
+// отбирает САМ БЭКЕНД (predicate PROPERTIES, ревизия API 2026-09-17): вилки цен
+// на клиенте больше не считаются. «МПК» в этот список не входит — это тег
+// раздела, а не ценовая категория.
+const PRICE_TIER_CATEGORY = {
+  budget:   (typeof PriceCategory !== 'undefined') ? PriceCategory.BUDGET  : 'budget',
+  balanced: (typeof PriceCategory !== 'undefined') ? PriceCategory.BALANCE : 'balance',
+  premium:  (typeof PriceCategory !== 'undefined') ? PriceCategory.PREMIUM : 'premium',
+};
+
+// Категории, выбранные пользователем, в виде значений для запроса. Пустой массив —
+// запрос идёт без предиката: либо ничего не выбрано, либо среди выбранного есть
+// «МПК», который отбирается по тегу и на сервере вместе с категорией не сложится.
+function _selectedPriceCats() {
+  const sel = (typeof catFilter === 'function') ? catFilter(dActiveItem).prices : null;
+  if (!sel || !sel.size || sel.has('mpk')) return [];
+  return Object.keys(PRICE_TIER_CATEGORY).filter(t => sel.has(t)).map(t => PRICE_TIER_CATEGORY[t]);
+}
+
+// Ключ кэша каталога: раздел плюс выбранные категории — выдачи для разных
+// наборов разные, потому что фильтрует сервер.
+function _catKey(sectionId) {
+  const cats = _selectedPriceCats();
+  return cats.length ? sectionId + '|' + cats.join(',') : String(sectionId);
+}
 function _priceCategoryOf(p) {
   const v = (typeof productProp === 'function') ? productProp(p, PROP_PRICE_CATEGORY) : undefined;
   return (typeof v === 'string' && v) ? v.toLowerCase() : null;
@@ -2128,12 +2169,13 @@ function _tierByCategory(p, tier) {
 function _filterRealByPrice(products) {
   const _tiers = catFilter(dActiveItem).prices;
   if (!_tiers.size) return products;
+  // Запрос уходил уже с предикатом по категории — эта проверка нужна для «МПК»
+  // (он идёт тегом) и для смешанного выбора, где предикат не отправляется.
   return products.filter(p => {
     for (const t of _tiers) {
-      const byCat = _tierByCategory(p, t);
-      if (byCat !== null) { if (byCat) return true; continue; }
       const m = PRICE_TIER_MATCH[t];
-      if (m && m(p)) return true;
+      if (m) { if (m(p)) return true; continue; }
+      if (_tierByCategory(p, t)) return true;
     }
     return false;
   });
@@ -2171,7 +2213,8 @@ function dShowResults() {
   _dRenderColorGrid();
   _dRenderPriceGrid();
   const secId = _activeSectionId();
-  const cached = _catalogCache[secId];
+  const key = _catKey(secId);
+  const cached = _catalogCache[key];
   if (Array.isArray(cached)) {
     if (cached.length) _dRenderRealResults(cached);
     else               _dRenderStubResults();   // раздел реально пуст → заглушки
@@ -2187,7 +2230,7 @@ function dShowResults() {
   }
   // undefined (не грузили) или null (прошлая попытка не удалась) → грузим.
   _dRenderCatalogLoading();
-  if (!_catalogLoading[secId]) {
+  if (!_catalogLoading[key]) {
     _ensureCatalogSection(secId).then(() => dShowResults());
   }
 }
