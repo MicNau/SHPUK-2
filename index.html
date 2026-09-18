@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=46">
+<link rel="stylesheet" href="styles-desktop.css?v=47">
 <!-- Мобильная раскладка: правила действуют только при body.m-mode (nav-mobile.js). -->
-<link rel="stylesheet" href="styles-mobile.css?v=1">
+<link rel="stylesheet" href="styles-mobile.css?v=2">
 </head>
 <body>
 
@@ -207,8 +207,38 @@
     <div class="d-summary-body" id="d-sum-body"></div>
     <div class="d-summary-actions">
       <button class="d-summary-btn d-btn-back" onclick="dCloseSummary()">← Закрыть</button>
-      <button class="d-summary-btn d-btn-next" onclick="event.stopPropagation(); alert('Заявка отправлена!')">ОТПРАВИТЬ ЗАЯВКУ →</button>
+      <button class="d-summary-btn d-btn-next" onclick="event.stopPropagation(); dOpenRequest()">ОТПРАВИТЬ ЗАЯВКУ →</button>
     </div>
+  </div>
+</div>
+
+<!-- ═══ ЗАЯВКА: имя, почта, согласие ═══ -->
+<div class="d-hint-overlay" id="d-req-overlay">
+  <div class="d-hint-box d-req-box">
+    <div class="d-hint-title">Отправить заявку</div>
+    <label class="d-req-field">Как к вам обращаться
+      <input class="d-req-input" id="d-req-name" type="text" autocomplete="name">
+    </label>
+    <label class="d-req-field">E-mail:
+      <input class="d-req-input" id="d-req-email" type="email" autocomplete="email">
+    </label>
+    <div class="d-req-note">Нажимая кнопку «Отправить» я даю согласие на обработку
+      персональных данных</div>
+    <div class="d-req-err" id="d-req-err"></div>
+    <div class="d-req-actions">
+      <button class="d-btn d-btn-back" onclick="dCloseRequest()">Отменить</button>
+      <button class="d-btn d-btn-next" id="d-req-send" onclick="dSendRequest()">Отправить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ЗАЯВКА ОТПРАВЛЕНА ═══ -->
+<div class="d-hint-overlay" id="d-req-done">
+  <div class="d-hint-box">
+    <div class="d-hint-title">Заявка отправлена</div>
+    <div class="d-hint-text">Смета и ссылка на текущий проект отправлены менеджеру
+      и вам на почту</div>
+    <button class="d-btn d-btn-next" onclick="dCloseRequestDone()">Понятно</button>
   </div>
 </div>
 
@@ -251,9 +281,11 @@
      Идёт после viewer3d-*, потому что опирается на threeState и worldToCanvas. -->
 <script src="editor3d.js?v=14"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=130"></script>
+<script src="nav-desktop.js?v=131"></script>
 <!-- Вертикальная раскладка телефона: переставляет те же узлы и ведёт свои
      четыре экрана. Идёт ПОСЛЕ nav-desktop.js — опирается на его функции. -->
 <script src="nav-mobile.js?v=3"></script>
+<!-- Снимок проекта: отправка заявки и открытие по ссылке из письма. -->
+<script src="project-io.js?v=1"></script>
 </body>
 </html>

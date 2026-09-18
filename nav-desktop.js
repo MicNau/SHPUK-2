@@ -3295,6 +3295,59 @@ function dShowSummary() {
   document.getElementById('d-summary-overlay').classList.add('active');
 }
 
+// ── Заявка: имя, почта, согласие ──────────────────────────────────────────
+// «Отправить заявку» в смете открывает это окно; по «Отправить» на сервер уходит
+// имя, почта и ОПИСАНИЕ проекта (project-io.js). Смету бэкенд считает сам, в
+// запрос она не входит. Ключ проекта возвращается в ответе — по нему приходит
+// ссылка в письме.
+function dOpenRequest() {
+  const ov = document.getElementById('d-req-overlay');
+  if (!ov) return;
+  const err = document.getElementById('d-req-err');
+  if (err) err.textContent = '';
+  ov.classList.add('active');
+  const name = document.getElementById('d-req-name');
+  if (name) setTimeout(() => name.focus(), 50);
+}
+
+function dCloseRequest() {
+  const ov = document.getElementById('d-req-overlay');
+  if (ov) ov.classList.remove('active');
+}
+
+function dCloseRequestDone() {
+  const ov = document.getElementById('d-req-done');
+  if (ov) ov.classList.remove('active');
+}
+
+async function dSendRequest() {
+  const nameEl = document.getElementById('d-req-name');
+  const mailEl = document.getElementById('d-req-email');
+  const err = document.getElementById('d-req-err');
+  const btn = document.getElementById('d-req-send');
+  const name = (nameEl && nameEl.value || '').trim();
+  const email = (mailEl && mailEl.value || '').trim();
+  const say = t => { if (err) err.textContent = t; };
+  if (!name)  { say('Укажите, как к вам обращаться.'); if (nameEl) nameEl.focus(); return; }
+  // Проверка почты нарочно грубая: адреса бывают неожиданные, а отказывать
+  // из-за формы адреса хуже, чем отправить письмо в никуда.
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    say('Проверьте адрес почты.'); if (mailEl) mailEl.focus(); return;
+  }
+  if (typeof saveProjectToServer !== 'function') { say('Сервис недоступен.'); return; }
+  say('');
+  if (btn) { btn.disabled = true; btn.textContent = 'Отправляем…'; }
+  let res = null;
+  try { res = await saveProjectToServer(name, email); }
+  catch (e) { console.warn('[project] save failed', e); res = { error: 'Не удалось отправить заявку.' }; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Отправить'; }
+  if (!res || res.error) { say((res && res.error) || 'Не удалось отправить заявку.'); return; }
+  dCloseRequest();
+  dCloseSummary();
+  const done = document.getElementById('d-req-done');
+  if (done) done.classList.add('active');
+}
+
 function dCloseSummary() {
   document.getElementById('d-summary-overlay').classList.remove('active');
 }
