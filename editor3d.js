@@ -1047,7 +1047,7 @@ function _e3dFitDist(cam, az, pitch, half) {
   return dist;
 }
 
-function e3dTopView(sec) {
+function e3dTopView() {
   if (!threeState || !threeState.camera || !threeState.controls) return;
   const cam = threeState.camera, ctr = threeState.controls;
   // Цель — центр участка (он же центр плана): разметка любого раздела лежит
@@ -1080,7 +1080,7 @@ function e3dSetSection(secId) {
     threeState.controls.enabled = true;
     threeState.renderer.domElement.style.cursor = '';
   }
-  if (changed && E3D.sec && E3D_TOP_SECS.has(E3D.sec)) e3dTopView(E3D.sec);
+  if (changed && E3D.sec && E3D_TOP_SECS.has(E3D.sec)) e3dTopView();
   e3dSync();
   // Панель раздела рисуется РАНЬШЕ этого вызова, и состояние кнопки «Удалить
   // выбранную» там считалось по ещё не обновлённому разделу: при первом открытии

@@ -306,6 +306,16 @@ async function pioRestoreFromUrl() {
   if (typeof dGoTo === 'function') dGoTo(3);
   if (typeof onParamChange === 'function') onParamChange();
   else if (typeof buildScene3d === 'function') buildScene3d();
+  // Показываем проект ЦЕЛИКОМ: по умолчанию камера стоит вплотную к дому, и
+  // забор с грядками оказываются за кадром. Вид тот же, что при открытии
+  // раздела «по земле». Канвас появляется с задержкой (_dInit3dSlot), поэтому
+  // пробуем дважды.
+  const frame = () => {
+    if (typeof e3dTopView !== 'function' || typeof threeState === 'undefined' || !threeState) return false;
+    e3dTopView();
+    return true;
+  };
+  setTimeout(() => { if (!frame()) setTimeout(frame, 600); }, 400);
   return true;
 }
 

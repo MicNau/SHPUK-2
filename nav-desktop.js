@@ -412,13 +412,7 @@ function _dInitParamsView() {
   _dRenderFloorParams();
   _dRenderHouseMaterials();
   _dSyncRanges();
-  setTimeout(() => {
-    const slot = document.getElementById('d-slot-params');
-    if (slot && slot.offsetWidth > 0) init3dCanvas('d-slot-params');
-    else setTimeout(() => init3dCanvas('d-slot-params'), 100);
-    // Первый экран с 3D — здесь же показываем, как этим видом управлять (TODO п.1).
-    dShow3dHint();
-  }, 80);
+  _dInit3dSlot('d-slot-params', 2, dShow3dHint);   // + подсказка про управление видом
 }
 
 // Материалы дома (крыша/фундамент/стены/рамы) — квадратные образцы без подписей.
@@ -719,10 +713,25 @@ function _dInitWorkspace() {
   _dRenderSidebar();
   _dSetPanelLocked(true); // Panel locked until an item is selected
 
+  _dInit3dSlot('d-slot-workspace', 3);
+}
+
+// Вид живёт ОДНИМ канвасом и переезжает между экранами, поэтому отложенная
+// инициализация обязана проверить, что её экран всё ещё открыт. При открытии
+// проекта по ссылке шаги 2 и 3 идут подряд: запоздавший таймер шага 2 утаскивал
+// вид в скрытую колонку параметров, и на рабочем экране было пусто, пока
+// пользователь не выбирал раздел (баг 2026-09-19).
+function _dInit3dSlot(slotId, step, after) {
+  const go = () => {
+    if (dStep !== step) return;
+    const slot = document.getElementById(slotId);
+    if (slot && slot.offsetWidth > 0) { init3dCanvas(slotId); return true; }
+    return false;
+  };
   setTimeout(() => {
-    const slot = document.getElementById('d-slot-workspace');
-    if (slot && slot.offsetWidth > 0) init3dCanvas('d-slot-workspace');
-    else setTimeout(() => init3dCanvas('d-slot-workspace'), 100);
+    if (dStep !== step) return;
+    if (!go()) setTimeout(go, 100);        // колонка ещё не разложилась — ждём кадр
+    if (typeof after === 'function') after();
   }, 80);
 }
 
