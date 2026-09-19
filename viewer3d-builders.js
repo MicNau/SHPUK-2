@@ -2330,6 +2330,83 @@ function _subtractRanges(keep, cuts) {
   return out;
 }
 
+// Разрезать осевую линию полигонами: куски, попавшие внутрь любого из них,
+// выбрасываются, остальное отдаётся отдельными ломаными. pad расширяет вырез
+// (отрицательный — наоборот, заводит линию под край полигона).
+function _cutLineByPolys(wp, polys, pad) {
+  const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
+  const out = [];
+  let cur = null, openEnd = false;
+  const flush = () => {
+    if (cur && cur.length >= 2) {
+      let L = 0;
+      for (let k = 1; k < cur.length; k++) L += Math.hypot(cur[k].x - cur[k-1].x, cur[k].z - cur[k-1].z);
+      if (L > 0.05) out.push(cur);
+    }
+    cur = null;
+  };
+  for (let k = 0; k < wp.length - 1; k++) {
+    const a = wp[k], b = wp[k + 1];
+    let keep = [[0, 1]];
+    for (const poly of polys) keep = _subtractRanges(keep, _polyCutRanges(a.x, a.z, b.x, b.z, poly, pad || 0));
+    keep.sort((p, q) => p[0] - q[0]);
+    let first = true;
+    for (const [t0, t1] of keep) {
+      const p0 = lerp(a, b, t0), p1 = lerp(a, b, t1);
+      if (cur && openEnd && first && t0 < 1e-6) cur.push(p1);      // продолжение той же линии
+      else { flush(); cur = [p0, p1]; }
+      first = false;
+      openEnd = (t1 > 1 - 1e-6);
+    }
+    if (!keep.length) { flush(); openEnd = false; }
+  }
+  flush();
+  return out;
+}
+
+// Что накрывает дорожку: дом и настилы террас. Полосе разрешено проходить сквозь
+// них (ТЗ 2026-09-19 — правило коллизий для дорожек отменено), но скрытый кусок
+// не строится и не считается: под настилом и в доме дорожки физически нет.
+const PATH_TUCK = 0.05;          // на столько дорожка заводится ПОД край, чтобы не было шва
+
+// Дорожки считаются в двух системах: 3D строит их в МИРЕ, а смета и снимок
+// проекта — в метрах ПЛАНА (от угла участка). Накрыватели поэтому тоже отдаются
+// в нужной системе: space — 'world' или 'plan'.
+function _pathCoverPolys(space, houseL, houseW) {
+  const out = [];
+  if (space === 'plan') {
+    const hp = (typeof getHousePolygonNorm === 'function') ? getHousePolygonNorm() : null;
+    if (hp && hp.corners && hp.corners.length >= 3) {
+      out.push(hp.corners.map(c => ({ x: c.x * GRID, z: c.y * GRID })));
+    }
+    for (const sec of ['terrace', 'pool_terrace']) {
+      for (const poly of (_terraceRectsToPolygons(sec) || [])) {
+        out.push(poly.map(p => ({ x: p.x * GRID, z: p.y * GRID })));
+      }
+    }
+    return out;
+  }
+  if (_housePoly && _housePoly.corners && _housePoly.corners.length >= 3) {
+    out.push(_housePoly.corners.map(c => ({ x: c.x, z: c.z })));
+  }
+  for (const sec of ['terrace', 'pool_terrace']) {
+    for (const poly of (_terraceRectsToPolygons(sec) || [])) {
+      out.push(canvasToWorld(poly, houseL, houseW));
+    }
+  }
+  return out;
+}
+
+// Осевые линии дорожек без кусков, спрятанных домом и настилами.
+function pathLinesVisible(lines, space, houseL, houseW) {
+  const lw = (houseL === undefined) ? lastHouseSize() : { L: houseL, W: houseW };
+  const polys = _pathCoverPolys(space || 'plan', lw.L, lw.W);
+  if (!polys.length) return lines;
+  const out = [];
+  for (const wp of lines) out.push(..._cutLineByPolys(wp, polys, -PATH_TUCK));
+  return out;
+}
+
 // Полотно дорожки как замкнутый полигон (левый борт вперёд + правый назад).
 function _pathRibbonPoly(wp, halfW) {
   const { left, right } = _offsetPolyline(wp, halfW);
@@ -2341,41 +2418,16 @@ function _pathRibbonPoly(wp, halfW) {
 // дорожки. Куски, накрытые более ранней линией, просто выбрасываются: площадь там
 // уже посчитана, а физически это одно и то же покрытие.
 // Ответвления (T-стыки) подрезаются, как и в 3D, тем же _trimPathJunctions.
-function pathLinesNoOverlap(lines, halfW) {
+function pathLinesNoOverlap(lines, halfW, space) {
   if (typeof _offsetPolyline !== 'function') return lines;
-  const trimmed = _trimPathJunctions(lines, halfW);
+  // Скрытые куски выбрасываются ПЕРВЫМИ: в смету идёт ровно то, что построено.
+  // Смета и снимок зовут эту функцию в координатах плана — их и берём по умолчанию.
+  const trimmed = _trimPathJunctions(pathLinesVisible(lines, space || 'plan'), halfW);
   const ribbons = trimmed.map(wp => _pathRibbonPoly(wp, halfW));
-  const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
   const out = [];
   trimmed.forEach((wp, i) => {
     if (i === 0) { out.push(wp); return; }
-    let cur = null, openEnd = false;
-    const flush = () => {
-      if (cur && cur.length >= 2) {
-        let L = 0;
-        for (let k = 1; k < cur.length; k++) L += Math.hypot(cur[k].x - cur[k-1].x, cur[k].z - cur[k-1].z);
-        if (L > 0.05) out.push(cur);
-      }
-      cur = null;
-    };
-    for (let k = 0; k < wp.length - 1; k++) {
-      const a = wp[k], b = wp[k + 1];
-      let keep = [[0, 1]];
-      for (let j = 0; j < i; j++) {
-        keep = _subtractRanges(keep, _polyCutRanges(a.x, a.z, b.x, b.z, ribbons[j], 0));
-      }
-      keep.sort((p, q) => p[0] - q[0]);
-      let first = true;
-      for (const [t0, t1] of keep) {
-        const p0 = lerp(a, b, t0), p1 = lerp(a, b, t1);
-        if (cur && openEnd && first && t0 < 1e-6) cur.push(p1);      // продолжение той же линии
-        else { flush(); cur = [p0, p1]; }
-        first = false;
-        openEnd = (t1 > 1 - 1e-6);
-      }
-      if (!keep.length) { flush(); openEnd = false; }
-    }
-    flush();
+    out.push(..._cutLineByPolys(wp, ribbons.slice(0, i), 0));
   });
   return out;
 }
@@ -2402,7 +2454,8 @@ function buildPaths3d(parent, M, pts, houseL, houseW) {
   }
   if (!lines.length) { parent.add(group); return; }
 
-  for (const wp of _trimPathJunctions(lines, halfW)) {
+  // Под домом и настилом дорожки нет: скрытые куски не строим (ТЗ 2026-09-19).
+  for (const wp of _trimPathJunctions(pathLinesVisible(lines, 'world', houseL, houseW), halfW)) {
     const { left, right } = _offsetPolyline(wp, halfW);
     _buildPathRibbon(group, left, right, 0, PATH_H, pathW, pathMat, 'deckMeshes');
   }

@@ -378,10 +378,12 @@ function buildRailing3d(parent, worldOutline, deckHeight, houseL, houseW, segsOv
     } else {
       for (let i = 0; i <= nFull; i++) pos.push(i * W);
       // Добор короче RAIL_SECTION_MIN не выделяем: обрезок перил между двумя
-      // столбами выглядел браком. Мелкий остаток делим пополам с соседней секцией —
-      // обе выходят почти в размер, а не одна растянутая.
+      // столбами выглядел браком. Мелкий остаток ДОБИРАЕТ последняя секция —
+      // она выходит шире стандартной не более чем на RAIL_SECTION_MIN. Делить
+      // его пополам с соседней (как было) нельзя: вместо одной секции в пролёте
+      // появлялись две коротких, и это читалось как брак раскроя (рендер
+      // 2026-09-19).
       if (rem > RAIL_SECTION_MIN) pos.push(L);
-      else if (nFull >= 2) { pos[pos.length - 1] = L - (W + rem) / 2; pos.push(L); }
       else pos[pos.length - 1] = L;
     }
     for (let i = 0; i < pos.length; i++) {

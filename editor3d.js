@@ -779,13 +779,8 @@ function _e3dDragMove(np) {
     const snapTo = (typeof _lineCloseTarget === 'function') ? _lineCloseTarget(sec, d.idx, q) : null;
     if (snapTo) q = { x: snapTo.x, y: snapTo.y };
     else if (sec === 'fence' && typeof _fenceTooClose === 'function' && _fenceTooClose(q)) return;
-    // Точка дорожки тянет за собой два своих отрезка — оба должны остаться на
-    // свободном месте, иначе полоса легла бы на террасу или на дом.
-    if (sec === 'paths' && typeof pathSegCollides === 'function') {
-      for (const nb of [pts[d.idx - 1], pts[d.idx + 1]]) {
-        if (nb && !nb.break && pathSegCollides(nb, q)) return;
-      }
-    }
+    // Дорожке пересечения разрешены (ТЗ 2026-09-19): полосу можно вести сквозь
+    // дом и настил, скрытая часть просто не строится (pathLinesVisible).
     pt.x = q.x; pt.y = q.y;
   }
   e3dSync();   // сцену НЕ пересобираем: тяжёлая сборка идёт один раз, на отпускании
@@ -879,12 +874,6 @@ function _e3dDrawClick(np) {
   if (!E3D.draw || E3D.draw.name !== name) { E3D.draw = { name, start: p, cursor: null }; e3dSync(); return; }
   const a = E3D.draw.start;
   if (Math.hypot(p.x - a.x, p.y - a.y) < SNAP / GRID) { E3D.draw = null; e3dSync(); return; }  // клик в ту же точку
-  // Дорожка не ложится на террасу, ступени, грядки и дом (ТЗ п. 14): начатый
-  // отрезок при этом не бросаем — пользователь доведёт его до свободного места.
-  if (name === 'paths' && typeof pathSegCollides === 'function' && pathSegCollides(a, p)) {
-    if (typeof dToast === 'function') dToast('Дорожка не ставится на дом и другие объекты');
-    return;
-  }
   E3D.draw = null;
   _e3dLineCommit(name, a, p);
   _lineSel = { name, idx: null };
