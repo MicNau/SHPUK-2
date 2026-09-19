@@ -2440,24 +2440,37 @@ function fenceModelUrl() {
 }
 
 // Калитка вставляется ГОТОВОЙ моделью (ТЗ 2026-09-18): у товара забора для этого
-// есть поле wicket_glb_url. Пока бэкенд его не проставил, берём локальную модель
-// по имени модели забора — mod_fence_003.glb ↔ mod_wicket_003.glb. Список
-// известных нам пар закрытый: у остальных заборов своей калитки нет, и запрос за
-// ней вернул бы 404.
+// есть поле wicket_glb_url. Калитка ОБЯЗАНА быть того же типа, что забор — индекс
+// модели совпадает: mod_fence_003.glb ↔ mod_wicket_003.glb. Поэтому поле товара
+// берётся, только если его индекс сходится с забором; иначе калитка ищется рядом
+// с моделью забора, в том же каталоге и с тем же номером (правка 2026-09-18: у
+// плетёного забора вставала калитка другого типа).
 const WICKET_LOCAL_DIR = 'assets/houses/modules/fences/';
-const WICKET_LOCAL = new Set(['003', '005']);
 
-function wicketModelUrl() {
+// Кандидаты по приоритету: сначала модель с нужным индексом, потом — то, что
+// прислал бэкенд. Второй нужен как запасной: если рядом с забором файла нет,
+// лучше показать калитку из товара, чем условную секцию.
+function wicketModelUrls() {
   const el = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat.fence : null;
-  const direct = el && (el.wicketGlbUrl
+  const direct = (el && (el.wicketGlbUrl
     || (typeof productProp === 'function' && typeof PROP_WICKET_GLB !== 'undefined'
-        ? productProp(el, PROP_WICKET_GLB) : null));
-  if (direct) return direct;
-  const m = /mod_fence_(\d+)\.glb/i.exec(fenceModelUrl() || '');
-  return (m && WICKET_LOCAL.has(m[1])) ? WICKET_LOCAL_DIR + 'mod_wicket_' + m[1] + '.glb' : '';
+        ? productProp(el, PROP_WICKET_GLB) : null))) || '';
+  const m = /^(.*\/)?mod_fence_(\d+)\.glb(\?.*)?$/i.exec(fenceModelUrl() || '');
+  if (!m) return direct ? [direct] : [];
+  const want = 'mod_wicket_' + m[2] + '.glb';
+  if (direct && new RegExp(want.replace('.', '\\.'), 'i').test(direct)) return [direct];
+  const sameIdx = (m[1] || WICKET_LOCAL_DIR) + want + (m[3] || '');
+  return direct ? [sameIdx, direct] : [sameIdx];
 }
 
-function ensureFenceModel(url, label) {
+// Первый кандидат, который ещё не провалился при загрузке.
+function wicketModelUrl() {
+  const urls = wicketModelUrls();
+  for (const u of urls) if (_fenceCache[u] !== null) return u;
+  return urls[0] || '';
+}
+
+function ensureFenceModel(url, label, normalize) {
   if (_fenceCache[url] !== undefined) return Promise.resolve(_fenceCache[url]);
   if (_fenceLoading[url]) return _fenceLoading[url];
   const done = () => { if (typeof d3dLoadingClear === 'function') d3dLoadingClear(url); };
@@ -2466,7 +2479,7 @@ function ensureFenceModel(url, label) {
     if (typeof THREE === 'undefined' || !THREE.GLTFLoader) { resolve(null); return; }
     show(null);
     new THREE.GLTFLoader().load(url,
-      gltf => { const proto = _fenceNormalizeProto(gltf.scene);
+      gltf => { const proto = (normalize || _fenceNormalizeProto)(gltf.scene);
                 _fenceCache[url] = proto; _fenceLoading[url] = null; done(); resolve(proto); },
       ev => { show(ev && ev.total > 0 ? Math.min(100, Math.round(ev.loaded / ev.total * 100)) : null); },
       err => { console.warn('[fence] не загрузилась модель', url, err);
@@ -2494,6 +2507,75 @@ function _fenceNormalizeProto(scene) {
   console.info('[fence] габариты модели:', proto.userData.nativeW.toFixed(2), '×',
                proto.userData.nativeH.toFixed(2), 'м');
   return proto;
+}
+
+// Калитка нормализуется ИНАЧЕ, чем секция забора. В наших моделях створка лежит
+// отдельной группой и повёрнута «приоткрытой» (в файлах — 45°), а рядом стоит
+// собственный столб. От центровки по общему габариту (как у секции) столб уезжал
+// с линии забора: половину габарита занимала распахнутая створка. Поэтому равняем
+// по СТОЛБУ, а створку кладём в плоскость забора — иначе полотно торчит поперёк
+// линии, а проём остаётся дырой (рендер 2026-09-18).
+function _wicketNormalizeProto(scene) {
+  const proto = new THREE.Group();
+  proto.add(scene);
+  const post = _wicketPost(scene);
+  _wicketCloseLeaf(scene, post);
+  const box = new THREE.Box3().setFromObject(scene);
+  if (!isFinite(box.min.x) || !isFinite(box.max.x)) return proto;
+  const pb = post ? new THREE.Box3().setFromObject(post) : box;
+  scene.position.x -= box.min.x;                       // начало проёма — в нуле
+  scene.position.y -= box.min.y;                       // низ — на земле
+  scene.position.z -= (pb.min.z + pb.max.z) / 2;       // столб — на линии забора
+  const w = box.max.x - box.min.x, h = box.max.y - box.min.y;
+  proto.userData.nativeW = (w > 0.2) ? w : FENCE_SECTION_W;
+  proto.userData.nativeH = (h > 0.2) ? h : FENCE_NATIVE_H;
+  console.info('[fence] калитка: габариты', proto.userData.nativeW.toFixed(2), '×',
+               proto.userData.nativeH.toFixed(2), 'м; столб', post ? (post.name || 'без имени') : 'не найден');
+  return proto;
+}
+
+// Столб калитки: самая высокая деталь, стоящая на земле, с именем столба или с
+// почти квадратным сечением. По нему модель садится на линию забора.
+function _wicketPost(scene) {
+  let best = null, bestH = 0;
+  scene.updateMatrixWorld(true);
+  scene.traverse(o => {
+    if (!o.isMesh) return;
+    const bb = new THREE.Box3().setFromObject(o);
+    const w = bb.max.x - bb.min.x, h = bb.max.y - bb.min.y, d = bb.max.z - bb.min.z;
+    if (!isFinite(h) || h <= 0) return;
+    const named = FENCE_POST_RE.test((o.name || '') + '|' + ((o.material && o.material.name) || ''));
+    if (!named && (Math.max(w, d) > 0.35 || Math.min(w, d) < 0.02)) return;
+    if (h > bestH) { bestH = h; best = o; }
+  });
+  return best;
+}
+
+// Створка в плоскость забора: перебираем повороты вокруг петли и берём тот, при
+// котором полотно самое плоское поперёк линии. Из двух одинаковых (створка
+// «налево» и «направо») выбираем уводящий полотно в проём, в +X от петли, — там
+// его и ждёт разрыв, сделанный под родную ширину калитки.
+function _wicketCloseLeaf(scene, post) {
+  let leaf = null, leafVol = 0;
+  for (const c of scene.children) {
+    if (c === post) continue;
+    const bb = new THREE.Box3().setFromObject(c);
+    const v = (bb.max.x - bb.min.x) * (bb.max.z - bb.min.z);
+    if (isFinite(v) && v > leafVol) { leafVol = v; leaf = c; }
+  }
+  if (!leaf) return;
+  let bestDeg = null, bestD = Infinity, bestCx = -Infinity;
+  for (let deg = -180; deg < 180; deg += 5) {
+    leaf.rotation.y = deg * Math.PI / 180;
+    leaf.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(leaf);
+    const d = bb.max.z - bb.min.z, cx = (bb.min.x + bb.max.x) / 2;
+    if (d < bestD - 1e-3 || (Math.abs(d - bestD) <= 1e-3 && cx > bestCx)) {
+      bestD = d; bestCx = cx; bestDeg = deg;
+    }
+  }
+  leaf.rotation.y = (bestDeg || 0) * Math.PI / 180;
+  leaf.updateMatrixWorld(true);
 }
 
 // Родные габариты прототипа (с запасными значениями, если модель не нормализовалась).
@@ -3125,7 +3207,7 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
   let wicket = null;
   if (wUrl) {
     if (_fenceCache[wUrl] === undefined) {
-      ensureFenceModel(wUrl, 'калитка').then(() => { if (threeState) buildScene3d(); });
+      ensureFenceModel(wUrl, 'калитка', _wicketNormalizeProto).then(() => { if (threeState) buildScene3d(); });
     } else {
       wicket = _fenceCache[wUrl];
       if (wicket) console.info('[fence] калитка из модели:', wUrl);
