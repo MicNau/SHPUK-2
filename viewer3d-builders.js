@@ -2513,15 +2513,19 @@ function _fenceNormalizeProto(scene) {
 // отдельной группой и повёрнута «приоткрытой» (в файлах — 45°), а рядом стоит
 // собственный столб. От центровки по общему габариту (как у секции) столб уезжал
 // с линии забора: половину габарита занимала распахнутая створка. Поэтому равняем
-// по СТОЛБУ, а створку кладём в плоскость забора — иначе полотно торчит поперёк
-// линии, а проём остаётся дырой (рендер 2026-09-18).
+// по СТОЛБУ, а габарит меряем по закрытой калитке (рендер 2026-09-18). Открытой
+// створка и остаётся — так калитку видно в линии забора.
 function _wicketNormalizeProto(scene) {
   const proto = new THREE.Group();
   proto.add(scene);
   const post = _wicketPost(scene);
-  _wicketCloseLeaf(scene, post);
-  const box = new THREE.Box3().setFromObject(scene);
-  if (!isFinite(box.min.x) || !isFinite(box.max.x)) return proto;
+  // Створку оставляем распахнутой, как в файле: открытая калитка заметна в
+  // линии забора, и сделано это намеренно (ответ продукта 2026-09-19). Но
+  // ГАБАРИТ по ней считать нельзя — распахнутое полотно и уже по длине, и шире
+  // поперёк линии. Меряем калитку закрытой: её проём и посадка от этого не
+  // зависят, а открытая створка потом просто выходит за габарит.
+  const box = _wicketClosedBox(scene, post);
+  if (!box || !isFinite(box.min.x) || !isFinite(box.max.x)) return proto;
   const pb = post ? new THREE.Box3().setFromObject(post) : box;
   scene.position.x -= box.min.x;                       // начало проёма — в нуле
   scene.position.y -= box.min.y;                       // низ — на земле
@@ -2529,8 +2533,9 @@ function _wicketNormalizeProto(scene) {
   const w = box.max.x - box.min.x, h = box.max.y - box.min.y;
   proto.userData.nativeW = (w > 0.2) ? w : FENCE_SECTION_W;
   proto.userData.nativeH = (h > 0.2) ? h : FENCE_NATIVE_H;
-  console.info('[fence] калитка: габариты', proto.userData.nativeW.toFixed(2), '×',
-               proto.userData.nativeH.toFixed(2), 'м; столб', post ? (post.name || 'без имени') : 'не найден');
+  console.info('[fence] калитка: проём', proto.userData.nativeW.toFixed(2), '×',
+               proto.userData.nativeH.toFixed(2), 'м; столб', post ? (post.name || 'без имени') : 'не найден',
+               '; створка остаётся открытой');
   return proto;
 }
 
@@ -2551,19 +2556,21 @@ function _wicketPost(scene) {
   return best;
 }
 
-// Створка в плоскость забора: перебираем повороты вокруг петли и берём тот, при
-// котором полотно самое плоское поперёк линии. Из двух одинаковых (створка
-// «налево» и «направо») выбираем уводящий полотно в проём, в +X от петли, — там
-// его и ждёт разрыв, сделанный под родную ширину калитки.
-function _wicketCloseLeaf(scene, post) {
-  let leaf = null, leafVol = 0;
+// Габарит калитки в ЗАКРЫТОМ виде — по нему делается проём и сажается модель.
+// Створку для замера прикрываем: перебираем повороты вокруг петли и берём тот,
+// при котором полотно самое плоское поперёк линии; из двух симметричных
+// («налево» и «направо») — уводящий полотно в проём, в +X от петли. Потом
+// возвращаем файловый поворот: в сцене створка стоит открытой.
+function _wicketClosedBox(scene, post) {
+  let leaf = null, leafArea = 0;
   for (const c of scene.children) {
     if (c === post) continue;
     const bb = new THREE.Box3().setFromObject(c);
-    const v = (bb.max.x - bb.min.x) * (bb.max.z - bb.min.z);
-    if (isFinite(v) && v > leafVol) { leafVol = v; leaf = c; }
+    const a = (bb.max.x - bb.min.x) * (bb.max.z - bb.min.z);
+    if (isFinite(a) && a > leafArea) { leafArea = a; leaf = c; }
   }
-  if (!leaf) return;
+  if (!leaf) return new THREE.Box3().setFromObject(scene);
+  const was = leaf.rotation.y;
   let bestDeg = null, bestD = Infinity, bestCx = -Infinity;
   for (let deg = -180; deg < 180; deg += 5) {
     leaf.rotation.y = deg * Math.PI / 180;
@@ -2574,8 +2581,12 @@ function _wicketCloseLeaf(scene, post) {
       bestD = d; bestCx = cx; bestDeg = deg;
     }
   }
-  leaf.rotation.y = (bestDeg || 0) * Math.PI / 180;
+  leaf.rotation.y = (bestDeg === null ? was : bestDeg * Math.PI / 180);
   leaf.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(scene);
+  leaf.rotation.y = was;                               // створка снова открыта
+  leaf.updateMatrixWorld(true);
+  return box;
 }
 
 // Родные габариты прототипа (с запасными значениями, если модель не нормализовалась).
