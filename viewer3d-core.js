@@ -125,7 +125,10 @@ function _setupControls(camera, domElement) {
   c.enableDamping  = true;
   c.dampingFactor  = 0.08;
   c.minDistance    = 4;
-  c.maxDistance    = 50;
+  // Отъезд должен вмещать весь участок (32 м) под наклоном вида сверху: на
+  // прежних 50 м дальний край сетки не помещался в кадр, и вид сверху при
+  // открытии раздела упирался в потолок зума.
+  c.maxDistance    = 80;
   c.maxPolarAngle  = Math.PI / 2.05;
   // Правая кнопка — pan (перемещение), средняя — dolly
   c.mouseButtons.LEFT   = THREE.MOUSE.ROTATE;
@@ -1164,6 +1167,9 @@ function buildScene3d() {
       _houseBboxMinZ = poly.bbox.minZ;
     }
   }
+  // Габариты публикуем до построения геометрии: ими же считает план↔мир, и
+  // редактору они нужны уже в момент открытия раздела — раньше сцены.
+  if (typeof setHouseSize === 'function') setHouseSize(houseL, houseW);
 
   // usingHouseBuilder вычисляется выше блока if(!isNoHouse), чтобы быть видимым
   // ниже (где порчевая логика решает, рисовать ли процедурное крыльцо).

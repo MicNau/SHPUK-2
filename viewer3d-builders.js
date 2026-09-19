@@ -199,6 +199,12 @@ function canvasToWorld(pts, houseL, houseW) {
 // геометрию ограждения в мире теми же значениями, что и 3D.
 function lastHouseSize() { return { L: _lastHouseL, W: _lastHouseW }; }
 
+// Сцена сообщает габариты СРАЗУ, как только их посчитала. Раньше кэш наполнялся
+// только побочным эффектом canvasToWorld, и до первого пересчёта геометрии
+// (например при открытии раздела на чистом участке) план↔мир считался по нулям:
+// центр участка уезжал в угол дома.
+function setHouseSize(L, W) { _lastHouseL = L; _lastHouseW = W; }
+
 // Обратное преобразование: мир → нормированные координаты плана. Габариты дома по
 // умолчанию берутся из последнего canvasToWorld — плану они неизвестны.
 function worldToCanvas(pts, houseL, houseW) {
@@ -2324,6 +2330,83 @@ function _subtractRanges(keep, cuts) {
   return out;
 }
 
+// Разрезать осевую линию полигонами: куски, попавшие внутрь любого из них,
+// выбрасываются, остальное отдаётся отдельными ломаными. pad расширяет вырез
+// (отрицательный — наоборот, заводит линию под край полигона).
+function _cutLineByPolys(wp, polys, pad) {
+  const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
+  const out = [];
+  let cur = null, openEnd = false;
+  const flush = () => {
+    if (cur && cur.length >= 2) {
+      let L = 0;
+      for (let k = 1; k < cur.length; k++) L += Math.hypot(cur[k].x - cur[k-1].x, cur[k].z - cur[k-1].z);
+      if (L > 0.05) out.push(cur);
+    }
+    cur = null;
+  };
+  for (let k = 0; k < wp.length - 1; k++) {
+    const a = wp[k], b = wp[k + 1];
+    let keep = [[0, 1]];
+    for (const poly of polys) keep = _subtractRanges(keep, _polyCutRanges(a.x, a.z, b.x, b.z, poly, pad || 0));
+    keep.sort((p, q) => p[0] - q[0]);
+    let first = true;
+    for (const [t0, t1] of keep) {
+      const p0 = lerp(a, b, t0), p1 = lerp(a, b, t1);
+      if (cur && openEnd && first && t0 < 1e-6) cur.push(p1);      // продолжение той же линии
+      else { flush(); cur = [p0, p1]; }
+      first = false;
+      openEnd = (t1 > 1 - 1e-6);
+    }
+    if (!keep.length) { flush(); openEnd = false; }
+  }
+  flush();
+  return out;
+}
+
+// Что накрывает дорожку: дом и настилы террас. Полосе разрешено проходить сквозь
+// них (ТЗ 2026-09-19 — правило коллизий для дорожек отменено), но скрытый кусок
+// не строится и не считается: под настилом и в доме дорожки физически нет.
+const PATH_TUCK = 0.05;          // на столько дорожка заводится ПОД край, чтобы не было шва
+
+// Дорожки считаются в двух системах: 3D строит их в МИРЕ, а смета и снимок
+// проекта — в метрах ПЛАНА (от угла участка). Накрыватели поэтому тоже отдаются
+// в нужной системе: space — 'world' или 'plan'.
+function _pathCoverPolys(space, houseL, houseW) {
+  const out = [];
+  if (space === 'plan') {
+    const hp = (typeof getHousePolygonNorm === 'function') ? getHousePolygonNorm() : null;
+    if (hp && hp.corners && hp.corners.length >= 3) {
+      out.push(hp.corners.map(c => ({ x: c.x * GRID, z: c.y * GRID })));
+    }
+    for (const sec of ['terrace', 'pool_terrace']) {
+      for (const poly of (_terraceRectsToPolygons(sec) || [])) {
+        out.push(poly.map(p => ({ x: p.x * GRID, z: p.y * GRID })));
+      }
+    }
+    return out;
+  }
+  if (_housePoly && _housePoly.corners && _housePoly.corners.length >= 3) {
+    out.push(_housePoly.corners.map(c => ({ x: c.x, z: c.z })));
+  }
+  for (const sec of ['terrace', 'pool_terrace']) {
+    for (const poly of (_terraceRectsToPolygons(sec) || [])) {
+      out.push(canvasToWorld(poly, houseL, houseW));
+    }
+  }
+  return out;
+}
+
+// Осевые линии дорожек без кусков, спрятанных домом и настилами.
+function pathLinesVisible(lines, space, houseL, houseW) {
+  const lw = (houseL === undefined) ? lastHouseSize() : { L: houseL, W: houseW };
+  const polys = _pathCoverPolys(space || 'plan', lw.L, lw.W);
+  if (!polys.length) return lines;
+  const out = [];
+  for (const wp of lines) out.push(..._cutLineByPolys(wp, polys, -PATH_TUCK));
+  return out;
+}
+
 // Полотно дорожки как замкнутый полигон (левый борт вперёд + правый назад).
 function _pathRibbonPoly(wp, halfW) {
   const { left, right } = _offsetPolyline(wp, halfW);
@@ -2335,41 +2418,16 @@ function _pathRibbonPoly(wp, halfW) {
 // дорожки. Куски, накрытые более ранней линией, просто выбрасываются: площадь там
 // уже посчитана, а физически это одно и то же покрытие.
 // Ответвления (T-стыки) подрезаются, как и в 3D, тем же _trimPathJunctions.
-function pathLinesNoOverlap(lines, halfW) {
+function pathLinesNoOverlap(lines, halfW, space) {
   if (typeof _offsetPolyline !== 'function') return lines;
-  const trimmed = _trimPathJunctions(lines, halfW);
+  // Скрытые куски выбрасываются ПЕРВЫМИ: в смету идёт ровно то, что построено.
+  // Смета и снимок зовут эту функцию в координатах плана — их и берём по умолчанию.
+  const trimmed = _trimPathJunctions(pathLinesVisible(lines, space || 'plan'), halfW);
   const ribbons = trimmed.map(wp => _pathRibbonPoly(wp, halfW));
-  const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
   const out = [];
   trimmed.forEach((wp, i) => {
     if (i === 0) { out.push(wp); return; }
-    let cur = null, openEnd = false;
-    const flush = () => {
-      if (cur && cur.length >= 2) {
-        let L = 0;
-        for (let k = 1; k < cur.length; k++) L += Math.hypot(cur[k].x - cur[k-1].x, cur[k].z - cur[k-1].z);
-        if (L > 0.05) out.push(cur);
-      }
-      cur = null;
-    };
-    for (let k = 0; k < wp.length - 1; k++) {
-      const a = wp[k], b = wp[k + 1];
-      let keep = [[0, 1]];
-      for (let j = 0; j < i; j++) {
-        keep = _subtractRanges(keep, _polyCutRanges(a.x, a.z, b.x, b.z, ribbons[j], 0));
-      }
-      keep.sort((p, q) => p[0] - q[0]);
-      let first = true;
-      for (const [t0, t1] of keep) {
-        const p0 = lerp(a, b, t0), p1 = lerp(a, b, t1);
-        if (cur && openEnd && first && t0 < 1e-6) cur.push(p1);      // продолжение той же линии
-        else { flush(); cur = [p0, p1]; }
-        first = false;
-        openEnd = (t1 > 1 - 1e-6);
-      }
-      if (!keep.length) { flush(); openEnd = false; }
-    }
-    flush();
+    out.push(..._cutLineByPolys(wp, ribbons.slice(0, i), 0));
   });
   return out;
 }
@@ -2396,7 +2454,8 @@ function buildPaths3d(parent, M, pts, houseL, houseW) {
   }
   if (!lines.length) { parent.add(group); return; }
 
-  for (const wp of _trimPathJunctions(lines, halfW)) {
+  // Под домом и настилом дорожки нет: скрытые куски не строим (ТЗ 2026-09-19).
+  for (const wp of _trimPathJunctions(pathLinesVisible(lines, 'world', houseL, houseW), halfW)) {
     const { left, right } = _offsetPolyline(wp, halfW);
     _buildPathRibbon(group, left, right, 0, PATH_H, pathW, pathMat, 'deckMeshes');
   }
@@ -2434,24 +2493,37 @@ function fenceModelUrl() {
 }
 
 // Калитка вставляется ГОТОВОЙ моделью (ТЗ 2026-09-18): у товара забора для этого
-// есть поле wicket_glb_url. Пока бэкенд его не проставил, берём локальную модель
-// по имени модели забора — mod_fence_003.glb ↔ mod_wicket_003.glb. Список
-// известных нам пар закрытый: у остальных заборов своей калитки нет, и запрос за
-// ней вернул бы 404.
+// есть поле wicket_glb_url. Калитка ОБЯЗАНА быть того же типа, что забор — индекс
+// модели совпадает: mod_fence_003.glb ↔ mod_wicket_003.glb. Поэтому поле товара
+// берётся, только если его индекс сходится с забором; иначе калитка ищется рядом
+// с моделью забора, в том же каталоге и с тем же номером (правка 2026-09-18: у
+// плетёного забора вставала калитка другого типа).
 const WICKET_LOCAL_DIR = 'assets/houses/modules/fences/';
-const WICKET_LOCAL = new Set(['003', '005']);
 
-function wicketModelUrl() {
+// Кандидаты по приоритету: сначала модель с нужным индексом, потом — то, что
+// прислал бэкенд. Второй нужен как запасной: если рядом с забором файла нет,
+// лучше показать калитку из товара, чем условную секцию.
+function wicketModelUrls() {
   const el = (typeof S !== 'undefined' && S.elementMat) ? S.elementMat.fence : null;
-  const direct = el && (el.wicketGlbUrl
+  const direct = (el && (el.wicketGlbUrl
     || (typeof productProp === 'function' && typeof PROP_WICKET_GLB !== 'undefined'
-        ? productProp(el, PROP_WICKET_GLB) : null));
-  if (direct) return direct;
-  const m = /mod_fence_(\d+)\.glb/i.exec(fenceModelUrl() || '');
-  return (m && WICKET_LOCAL.has(m[1])) ? WICKET_LOCAL_DIR + 'mod_wicket_' + m[1] + '.glb' : '';
+        ? productProp(el, PROP_WICKET_GLB) : null))) || '';
+  const m = /^(.*\/)?mod_fence_(\d+)\.glb(\?.*)?$/i.exec(fenceModelUrl() || '');
+  if (!m) return direct ? [direct] : [];
+  const want = 'mod_wicket_' + m[2] + '.glb';
+  if (direct && new RegExp(want.replace('.', '\\.'), 'i').test(direct)) return [direct];
+  const sameIdx = (m[1] || WICKET_LOCAL_DIR) + want + (m[3] || '');
+  return direct ? [sameIdx, direct] : [sameIdx];
 }
 
-function ensureFenceModel(url, label) {
+// Первый кандидат, который ещё не провалился при загрузке.
+function wicketModelUrl() {
+  const urls = wicketModelUrls();
+  for (const u of urls) if (_fenceCache[u] !== null) return u;
+  return urls[0] || '';
+}
+
+function ensureFenceModel(url, label, normalize) {
   if (_fenceCache[url] !== undefined) return Promise.resolve(_fenceCache[url]);
   if (_fenceLoading[url]) return _fenceLoading[url];
   const done = () => { if (typeof d3dLoadingClear === 'function') d3dLoadingClear(url); };
@@ -2460,7 +2532,7 @@ function ensureFenceModel(url, label) {
     if (typeof THREE === 'undefined' || !THREE.GLTFLoader) { resolve(null); return; }
     show(null);
     new THREE.GLTFLoader().load(url,
-      gltf => { const proto = _fenceNormalizeProto(gltf.scene);
+      gltf => { const proto = (normalize || _fenceNormalizeProto)(gltf.scene);
                 _fenceCache[url] = proto; _fenceLoading[url] = null; done(); resolve(proto); },
       ev => { show(ev && ev.total > 0 ? Math.min(100, Math.round(ev.loaded / ev.total * 100)) : null); },
       err => { console.warn('[fence] не загрузилась модель', url, err);
@@ -2488,6 +2560,86 @@ function _fenceNormalizeProto(scene) {
   console.info('[fence] габариты модели:', proto.userData.nativeW.toFixed(2), '×',
                proto.userData.nativeH.toFixed(2), 'м');
   return proto;
+}
+
+// Калитка нормализуется ИНАЧЕ, чем секция забора. В наших моделях створка лежит
+// отдельной группой и повёрнута «приоткрытой» (в файлах — 45°), а рядом стоит
+// собственный столб. От центровки по общему габариту (как у секции) столб уезжал
+// с линии забора: половину габарита занимала распахнутая створка. Поэтому равняем
+// по СТОЛБУ, а габарит меряем по закрытой калитке (рендер 2026-09-18). Открытой
+// створка и остаётся — так калитку видно в линии забора.
+function _wicketNormalizeProto(scene) {
+  const proto = new THREE.Group();
+  proto.add(scene);
+  const post = _wicketPost(scene);
+  // Створку оставляем распахнутой, как в файле: открытая калитка заметна в
+  // линии забора, и сделано это намеренно (ответ продукта 2026-09-19). Но
+  // ГАБАРИТ по ней считать нельзя — распахнутое полотно и уже по длине, и шире
+  // поперёк линии. Меряем калитку закрытой: её проём и посадка от этого не
+  // зависят, а открытая створка потом просто выходит за габарит.
+  const box = _wicketClosedBox(scene, post);
+  if (!box || !isFinite(box.min.x) || !isFinite(box.max.x)) return proto;
+  const pb = post ? new THREE.Box3().setFromObject(post) : box;
+  scene.position.x -= box.min.x;                       // начало проёма — в нуле
+  scene.position.y -= box.min.y;                       // низ — на земле
+  scene.position.z -= (pb.min.z + pb.max.z) / 2;       // столб — на линии забора
+  const w = box.max.x - box.min.x, h = box.max.y - box.min.y;
+  proto.userData.nativeW = (w > 0.2) ? w : FENCE_SECTION_W;
+  proto.userData.nativeH = (h > 0.2) ? h : FENCE_NATIVE_H;
+  console.info('[fence] калитка: проём', proto.userData.nativeW.toFixed(2), '×',
+               proto.userData.nativeH.toFixed(2), 'м; столб', post ? (post.name || 'без имени') : 'не найден',
+               '; створка остаётся открытой');
+  return proto;
+}
+
+// Столб калитки: самая высокая деталь, стоящая на земле, с именем столба или с
+// почти квадратным сечением. По нему модель садится на линию забора.
+function _wicketPost(scene) {
+  let best = null, bestH = 0;
+  scene.updateMatrixWorld(true);
+  scene.traverse(o => {
+    if (!o.isMesh) return;
+    const bb = new THREE.Box3().setFromObject(o);
+    const w = bb.max.x - bb.min.x, h = bb.max.y - bb.min.y, d = bb.max.z - bb.min.z;
+    if (!isFinite(h) || h <= 0) return;
+    const named = FENCE_POST_RE.test((o.name || '') + '|' + ((o.material && o.material.name) || ''));
+    if (!named && (Math.max(w, d) > 0.35 || Math.min(w, d) < 0.02)) return;
+    if (h > bestH) { bestH = h; best = o; }
+  });
+  return best;
+}
+
+// Габарит калитки в ЗАКРЫТОМ виде — по нему делается проём и сажается модель.
+// Створку для замера прикрываем: перебираем повороты вокруг петли и берём тот,
+// при котором полотно самое плоское поперёк линии; из двух симметричных
+// («налево» и «направо») — уводящий полотно в проём, в +X от петли. Потом
+// возвращаем файловый поворот: в сцене створка стоит открытой.
+function _wicketClosedBox(scene, post) {
+  let leaf = null, leafArea = 0;
+  for (const c of scene.children) {
+    if (c === post) continue;
+    const bb = new THREE.Box3().setFromObject(c);
+    const a = (bb.max.x - bb.min.x) * (bb.max.z - bb.min.z);
+    if (isFinite(a) && a > leafArea) { leafArea = a; leaf = c; }
+  }
+  if (!leaf) return new THREE.Box3().setFromObject(scene);
+  const was = leaf.rotation.y;
+  let bestDeg = null, bestD = Infinity, bestCx = -Infinity;
+  for (let deg = -180; deg < 180; deg += 5) {
+    leaf.rotation.y = deg * Math.PI / 180;
+    leaf.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(leaf);
+    const d = bb.max.z - bb.min.z, cx = (bb.min.x + bb.max.x) / 2;
+    if (d < bestD - 1e-3 || (Math.abs(d - bestD) <= 1e-3 && cx > bestCx)) {
+      bestD = d; bestCx = cx; bestDeg = deg;
+    }
+  }
+  leaf.rotation.y = (bestDeg === null ? was : bestDeg * Math.PI / 180);
+  leaf.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(scene);
+  leaf.rotation.y = was;                               // створка снова открыта
+  leaf.updateMatrixWorld(true);
+  return box;
 }
 
 // Родные габариты прототипа (с запасными значениями, если модель не нормализовалась).
@@ -3119,7 +3271,7 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
   let wicket = null;
   if (wUrl) {
     if (_fenceCache[wUrl] === undefined) {
-      ensureFenceModel(wUrl, 'калитка').then(() => { if (threeState) buildScene3d(); });
+      ensureFenceModel(wUrl, 'калитка', _wicketNormalizeProto).then(() => { if (threeState) buildScene3d(); });
     } else {
       wicket = _fenceCache[wUrl];
       if (wicket) console.info('[fence] калитка из модели:', wUrl);

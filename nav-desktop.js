@@ -412,13 +412,7 @@ function _dInitParamsView() {
   _dRenderFloorParams();
   _dRenderHouseMaterials();
   _dSyncRanges();
-  setTimeout(() => {
-    const slot = document.getElementById('d-slot-params');
-    if (slot && slot.offsetWidth > 0) init3dCanvas('d-slot-params');
-    else setTimeout(() => init3dCanvas('d-slot-params'), 100);
-    // Первый экран с 3D — здесь же показываем, как этим видом управлять (TODO п.1).
-    dShow3dHint();
-  }, 80);
+  _dInit3dSlot('d-slot-params', 2, dShow3dHint);   // + подсказка про управление видом
 }
 
 // Материалы дома (крыша/фундамент/стены/рамы) — квадратные образцы без подписей.
@@ -719,10 +713,25 @@ function _dInitWorkspace() {
   _dRenderSidebar();
   _dSetPanelLocked(true); // Panel locked until an item is selected
 
+  _dInit3dSlot('d-slot-workspace', 3);
+}
+
+// Вид живёт ОДНИМ канвасом и переезжает между экранами, поэтому отложенная
+// инициализация обязана проверить, что её экран всё ещё открыт. При открытии
+// проекта по ссылке шаги 2 и 3 идут подряд: запоздавший таймер шага 2 утаскивал
+// вид в скрытую колонку параметров, и на рабочем экране было пусто, пока
+// пользователь не выбирал раздел (баг 2026-09-19).
+function _dInit3dSlot(slotId, step, after) {
+  const go = () => {
+    if (dStep !== step) return;
+    const slot = document.getElementById(slotId);
+    if (slot && slot.offsetWidth > 0) { init3dCanvas(slotId); return true; }
+    return false;
+  };
   setTimeout(() => {
-    const slot = document.getElementById('d-slot-workspace');
-    if (slot && slot.offsetWidth > 0) init3dCanvas('d-slot-workspace');
-    else setTimeout(() => init3dCanvas('d-slot-workspace'), 100);
+    if (dStep !== step) return;
+    if (!go()) setTimeout(go, 100);        // колонка ещё не разложилась — ждём кадр
+    if (typeof after === 'function') after();
   }, 80);
 }
 
@@ -1764,9 +1773,41 @@ function _furnitureBlockers() {
   return out;
 }
 
+// Видно ли место с текущей камеры (ТЗ 2026-09-19: мебель появлялась за домом, вне
+// кадра). Две проверки: точка попадает в кадр и её не закрывает дом.
+function _furnitureVisible(x, y) {
+  if (typeof threeState === 'undefined' || !threeState || !threeState.camera) return true;
+  const sz = lastHouseSize();
+  const w = canvasToWorld([{ x, y }], sz.L, sz.W)[0];
+  const q = new THREE.Vector3(w.x, 0.5, w.z).project(threeState.camera);
+  // Поля по краям: предмет у самой рамки кадра пользователь тоже не заметит.
+  if (!(q.z < 1) || Math.abs(q.x) > 0.85 || Math.abs(q.y) > 0.85) return false;
+  const c = worldToCanvas([{ x: threeState.camera.position.x, z: threeState.camera.position.z }],
+                          sz.L, sz.W)[0];
+  return !_segCrossesHouse(c, { x, y });
+}
+
+// Пересекает ли отрезок плана контур дома: точка за домом в кадр попадает, но
+// закрыта стеной — ставить туда мебель бессмысленно.
+function _segCrossesHouse(a, b) {
+  if (typeof isEmptyLot === 'function' && isEmptyLot()) return false;
+  const hp = (typeof getHousePolygonNorm === 'function') ? getHousePolygonNorm() : null;
+  const poly = hp && hp.corners;
+  if (!poly || poly.length < 3) return false;
+  const cross = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const p = poly[j], q = poly[i];
+    const d1 = cross(a, b, p), d2 = cross(a, b, q);
+    const d3 = cross(p, q, a), d4 = cross(p, q, b);
+    if (((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0))) return true;
+  }
+  return false;
+}
+
 // Ближайшее свободное место к желаемой точке: если там занято, расходимся
-// кольцами по сетке снапа. Не нашли за 40 колец — ставим как есть (лучше
-// поставить внахлёст, чем не поставить вовсе).
+// кольцами по сетке снапа. Предпочитаем место, ВИДНОЕ с камеры; если такого
+// вокруг нет — берём первое свободное (лучше поставить вне кадра, чем не
+// поставить вовсе).
 function _furnitureFreeSpot(near) {
   const half = FURN_SPOT_M / 2 / GRID;
   const blockers = _furnitureBlockers();
@@ -1777,17 +1818,23 @@ function _furnitureFreeSpot(near) {
     return !blockers.some(o => _rectsOverlap(r, o, gap));
   };
   const x0 = snapNorm(near.x), y0 = snapNorm(near.y);
-  if (free(x0, y0)) return { x: x0, y: y0 };
+  let fallback = null;
+  if (free(x0, y0)) {
+    if (_furnitureVisible(x0, y0)) return { x: x0, y: y0 };
+    fallback = { x: x0, y: y0 };
+  }
   const step = SNAP / GRID;
   for (let k = 1; k <= 40; k++) {
     for (let a = 0; a < 12; a++) {                 // кольцо: 12 направлений
       const ang = a * Math.PI / 6;
       const x = snapNorm(x0 + Math.cos(ang) * k * step);
       const y = snapNorm(y0 + Math.sin(ang) * k * step);
-      if (free(x, y)) return { x, y };
+      if (!free(x, y)) continue;
+      if (_furnitureVisible(x, y)) return { x, y };
+      if (!fallback) fallback = { x, y };
     }
   }
-  return { x: x0, y: y0 };
+  return fallback || { x: x0, y: y0 };
 }
 
 // Разворот «лицом к камере», округлённый до 90°: ручка поворота крутит теми же
