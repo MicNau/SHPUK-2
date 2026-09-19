@@ -869,6 +869,25 @@ button, input, select, textarea { font-family: inherit; }
   min-width: 160px; height: 48px; padding: 0 24px; font-size: 18px;
 }
 
+/* ═══ ОКНО ЗАЯВКИ ═══ */
+/* Тот же бокс, что у подсказок: заголовок, поля, согласие и две кнопки. */
+.d-req-box { width: 460px; gap: 12px; }
+.d-req-field {
+  display: flex; flex-direction: column; gap: 6px; width: 100%;
+  font-size: 15px; font-weight: 400; color: #666;
+}
+.d-req-input {
+  width: 100%; height: 44px; padding: 0 12px;
+  background: var(--bg); border: 2px solid var(--btn-border); border-radius: var(--r);
+  font-size: 16px; color: var(--text); outline: none; transition: border-color .15s;
+}
+.d-req-input:focus { border-color: var(--accent); }
+.d-req-note { font-size: 13px; font-weight: 400; color: #888; line-height: 1.35; }
+.d-req-err { font-size: 14px; color: #c0392b; min-height: 18px; }
+.d-req-err:empty { min-height: 0; }
+.d-req-actions { display: flex; gap: 8px; width: 100%; }
+.d-req-actions .d-btn { flex: 1; height: 44px; font-size: 16px; cursor: pointer; }
+
 .d-summary-overlay {
   display: none; position: fixed; inset: 0; z-index: 200;
   background: rgba(0,0,0,.5); align-items: center; justify-content: center;

@@ -472,16 +472,8 @@ function _occupiedRectsNorm(exceptSec) {
     const s = 1.0 / GRID;                       // место под предмет мебели — метр
     for (const f of (S.furniture || [])) add(f.x - s / 2, f.y - s / 2, s, s);
   }
-  if (exceptSec !== 'paths') {
-    const w = ((S.pathWidth || 120) / 100) / GRID;
-    for (const seg of splitAtBreaks(S.pts.paths || [])) {
-      for (let i = 0; i < seg.length - 1; i++) {
-        const a = seg[i], b = seg[i + 1];
-        add(Math.min(a.x, b.x) - w / 2, Math.min(a.y, b.y) - w / 2,
-            Math.abs(b.x - a.x) + w, Math.abs(b.y - a.y) + w);
-      }
-    }
-  }
+  // Дорожки место не занимают: объект встаёт поверх полосы, а её скрытый кусок
+  // потом не строится (ТЗ 2026-09-19 — правило коллизий для дорожек отменено).
   return out;
 }
 
@@ -526,16 +518,9 @@ function _collideBlockers(secId, idx) {
   if (!_collideIgnores(secId, 'beds')) {
     (S.beds || []).forEach((b, i) => { if (b && !(secId === 'beds' && i === idx)) add(b.x, b.y, b.w, b.h); });
   }
-  if (!_collideIgnores(secId, 'paths') && secId !== 'paths') {
-    const w = ((S.pathWidth || 120) / 100) / GRID;
-    for (const seg of splitAtBreaks(S.pts.paths || [])) {
-      for (let i = 0; i < seg.length - 1; i++) {
-        const a = seg[i], b = seg[i + 1];
-        add(Math.min(a.x, b.x) - w / 2, Math.min(a.y, b.y) - w / 2,
-            Math.abs(b.x - a.x) + w, Math.abs(b.y - a.y) + w);
-      }
-    }
-  }
+  // Дорожки в список не идут ВООБЩЕ (ТЗ 2026-09-19): правило коллизий для них
+  // отменено. Полоса может идти сквозь дом и настил — скрытая часть не строится
+  // и не считается (pathLinesVisible), а объекты поверх дорожки ставятся свободно.
   return out;
 }
 
@@ -604,15 +589,6 @@ const FURN_FOOTPRINT = 0.8;     // м, сторона квадрата под п
 function furnitureCollides(pt, idx) {
   const s = FURN_FOOTPRINT / GRID;
   return rectCollides({ x: pt.x - s / 2, y: pt.y - s / 2, w: s, h: s }, 'furniture', idx);
-}
-
-// Отрезок дорожки: занимает полосу своей ширины — проверяем её как прямоугольник
-// (для косых отрезков это габарит, чуть шире самой полосы).
-function pathSegCollides(a, b) {
-  const w = ((S.pathWidth || 120) / 100) / GRID;
-  const rect = { x: Math.min(a.x, b.x) - w / 2, y: Math.min(a.y, b.y) - w / 2,
-                 w: Math.abs(b.x - a.x) + w, h: Math.abs(b.y - a.y) + w };
-  return rectCollides(rect, 'paths', -1);
 }
 
 function _rectsOverlap(a, b, gap) {

@@ -131,6 +131,8 @@ body.m-mode .d-hint-box { width: 100%; max-width: calc(100vw - 32px); padding: 1
 body.m-mode .d-hint-title { font-size: 19px; }
 body.m-mode .d-hint-text { font-size: 15px; }
 body.m-mode .d-hint-box .d-btn { min-width: 120px; height: 44px; font-size: 16px; }
+body.m-mode .d-req-box { width: 100%; max-width: calc(100vw - 32px); }
+body.m-mode .d-req-input { height: 44px; font-size: 16px; }
 body.m-mode .d-summary-box { width: 100%; max-width: calc(100vw - 24px); max-height: 86vh; }
 body.m-mode .d-summary-header { padding: 14px 16px; }
 body.m-mode .d-summary-title { font-size: 19px; }

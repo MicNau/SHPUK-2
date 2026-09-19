@@ -57,6 +57,7 @@ const E3D_KIND = {
   fence:        'line',
   railing:      'railing',   // строится по террасе — таскаются только маркеры входа
   facade:       'facade',    // выбор сегментов стен кликом по самим мешам
+  facade2:      'facade',    // вторая отделка: та же механика, свой набор кусков
 };
 
 // Палец толще курсора: на телефоне все радиусы попадания растягиваются (режим
@@ -64,7 +65,21 @@ const E3D_KIND = {
 // размера — растёт только зона, которая её ловит.
 const E3D_TOUCH_R = 1.8;
 
-function _e3dR(r) { return E3D.touch ? r * E3D_TOUCH_R : r; }
+// Радиусы заданы в метрах, а хватается пользователь за пиксели: с видом сверху
+// на весь участок камера уходит на 60+ м, и ручка в 0.2 м превращается в точку
+// размером с курсор. Коэффициент держит маркеры и зоны попадания примерно того
+// же экранного размера, под какой они подбирались с обычной дистанции.
+const E3D_VIEW_REF = 24;    // м — дистанция, на которую рассчитаны радиусы
+const E3D_VIEW_MAX = 2.6;   // потолок: вблизи ручки не должны разрастаться
+
+function _e3dViewScale() {
+  if (typeof threeState === 'undefined' || !threeState
+      || !threeState.camera || !threeState.controls) return 1;
+  const d = threeState.camera.position.distanceTo(threeState.controls.target);
+  return Math.min(E3D_VIEW_MAX, Math.max(1, d / E3D_VIEW_REF));
+}
+
+function _e3dR(r) { return r * (E3D.touch ? E3D_TOUCH_R : 1) * _e3dViewScale(); }
 
 const E3D = {
   sec:   null,   // активный раздел («terrace», «paths», …) или null
@@ -341,8 +356,14 @@ function e3dSelect(hit) {
     // Мультивыбор: повторный клик снимает. Клик мимо стены не трогает выбранное —
     // иначе один промах сбрасывал бы всю отделку.
     if (idx === null) return;
-    if (S.wallZones[idx]) delete S.wallZones[idx];
-    else S.wallZones[idx] = true;
+    const mine = facadeZones(sec);
+    if (mine[idx]) delete mine[idx];
+    else {
+      mine[idx] = true;
+      // Отделок две, и кусок принадлежит одной: взяли его во вторую — из первой
+      // он уходит, иначе на одном месте лежали бы два материала.
+      delete facadeZones(facadeOtherSec(sec))[idx];
+    }
     if (typeof _applyFacadeSelection === 'function') _applyFacadeSelection();
     e3dSync();
     return;
@@ -428,7 +449,18 @@ function _e3dMarker(np, color, radius) {
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.set(w.x, y, w.z);
   mesh.renderOrder = 1000;
+  // Размер кружка догоняет камеру покадрово (_e3dScaleMarkers): пересобирать
+  // слой на каждый поворот колеса ради этого не стоит.
+  mesh.userData.e3dMarker = true;
+  mesh.scale.setScalar(_e3dViewScale());
   return mesh;
+}
+
+// Маркеры масштабируются вокруг собственного центра, поэтому позиции не едут.
+function _e3dScaleMarkers() {
+  if (!E3D.group) return;
+  const k = _e3dViewScale();
+  E3D.group.traverse(o => { if (o.userData && o.userData.e3dMarker) o.scale.setScalar(k); });
 }
 
 function _e3dRectPts(r) {
@@ -522,8 +554,12 @@ function e3dSync() {
     // Рамки выбора нужны, пока отделка НЕ назначена: без них не видно, что
     // отмечено. Как только товар выбран, панели видны сами, и разметка только
     // мешает — прячем. Снимут отделку («Удалить всё») — рамки вернутся.
-    for (const seg of (S.elementMat && S.elementMat.facade) ? [] : (threeState.facadeSegs || [])) {
-      if (!S.wallZones[seg.userData.segId]) continue;
+    // Считается материал СВОЕГО раздела: у второй отделки он может быть ещё не
+    // выбран, когда у первой уже есть.
+    const zones = facadeZones(sec);
+    const hasMat = !!(S.elementMat && S.elementMat[sec]);
+    for (const seg of hasMat ? [] : (threeState.facadeSegs || [])) {
+      if (!zones[seg.userData.segId]) continue;
       const box = new THREE.Box3().setFromObject(seg);
       const h = new THREE.Box3Helper(box, E3D_COL_SEL);
       h.material.depthTest = false;
@@ -743,13 +779,8 @@ function _e3dDragMove(np) {
     const snapTo = (typeof _lineCloseTarget === 'function') ? _lineCloseTarget(sec, d.idx, q) : null;
     if (snapTo) q = { x: snapTo.x, y: snapTo.y };
     else if (sec === 'fence' && typeof _fenceTooClose === 'function' && _fenceTooClose(q)) return;
-    // Точка дорожки тянет за собой два своих отрезка — оба должны остаться на
-    // свободном месте, иначе полоса легла бы на террасу или на дом.
-    if (sec === 'paths' && typeof pathSegCollides === 'function') {
-      for (const nb of [pts[d.idx - 1], pts[d.idx + 1]]) {
-        if (nb && !nb.break && pathSegCollides(nb, q)) return;
-      }
-    }
+    // Дорожке пересечения разрешены (ТЗ 2026-09-19): полосу можно вести сквозь
+    // дом и настил, скрытая часть просто не строится (pathLinesVisible).
     pt.x = q.x; pt.y = q.y;
   }
   e3dSync();   // сцену НЕ пересобираем: тяжёлая сборка идёт один раз, на отпускании
@@ -843,12 +874,6 @@ function _e3dDrawClick(np) {
   if (!E3D.draw || E3D.draw.name !== name) { E3D.draw = { name, start: p, cursor: null }; e3dSync(); return; }
   const a = E3D.draw.start;
   if (Math.hypot(p.x - a.x, p.y - a.y) < SNAP / GRID) { E3D.draw = null; e3dSync(); return; }  // клик в ту же точку
-  // Дорожка не ложится на террасу, ступени, грядки и дом (ТЗ п. 14): начатый
-  // отрезок при этом не бросаем — пользователь доведёт его до свободного места.
-  if (name === 'paths' && typeof pathSegCollides === 'function' && pathSegCollides(a, p)) {
-    if (typeof dToast === 'function') dToast('Дорожка не ставится на дом и другие объекты');
-    return;
-  }
   E3D.draw = null;
   _e3dLineCommit(name, a, p);
   _lineSel = { name, idx: null };
@@ -997,24 +1022,45 @@ function _e3dOnKey(ev) {
 // сохраняется — меняются только угол подъёма и дистанция.
 const E3D_TOP_SECS = new Set(['terrace', 'pool_terrace', 'steps', 'paths', 'fence', 'beds']);
 const E3D_TOP_PITCH = 58 * Math.PI / 180;   // угол над горизонтом
-// Дорожки и забор идут по всему участку, остальное — вокруг дома.
-const E3D_TOP_WIDE = new Set(['paths', 'fence']);
+const E3D_TOP_MARGIN = 1.08;                // поля вокруг участка, чтобы сетка не упиралась в рамку
 
-function e3dTopView(sec) {
+// Дистанция, с которой квадрат участка целиком попадает в кадр при заданных
+// азимуте и подъёме. Камера смотрит в центр участка с расстояния d, поэтому для
+// точки v (от центра, по земле) глубина в кадре равна d + v·f, а смещения по
+// осям кадра — v·right и v·up. Условие «точка внутри кадра» разворачивается в
+// нижнюю границу для d, и берём наибольшую по всем четырём углам.
+function _e3dFitDist(cam, az, pitch, half) {
+  const tanY = Math.tan(cam.fov * Math.PI / 360);
+  const tanX = tanY * (cam.aspect || 1);
+  const f     = new THREE.Vector3(-Math.sin(az) * Math.cos(pitch), -Math.sin(pitch),
+                                  -Math.cos(az) * Math.cos(pitch));
+  const right = new THREE.Vector3(Math.cos(az), 0, -Math.sin(az));
+  const up    = new THREE.Vector3().crossVectors(right, f);
+  let dist = 0;
+  for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    const v = new THREE.Vector3(sx * half, 0, sz * half);
+    const depth = v.dot(f);
+    dist = Math.max(dist,
+                    Math.abs(v.dot(right)) / tanX - depth,
+                    Math.abs(v.dot(up))    / tanY - depth);
+  }
+  return dist;
+}
+
+function e3dTopView() {
   if (!threeState || !threeState.camera || !threeState.controls) return;
   const cam = threeState.camera, ctr = threeState.controls;
-  const sz = (typeof lastHouseSize === 'function') ? lastHouseSize() : { L: 0, W: 0 };
   // Цель — центр участка (он же центр плана): разметка любого раздела лежит
   // внутри него, а центр дома увёл бы вид к краю.
   const c = _e3dToWorld({ x: 0.5, y: 0.5 });
-  const span = E3D_TOP_WIDE.has(sec) ? GRID * 0.62
-                                     : Math.max(sz.L, sz.W, 8) + 12;
-  const dist = Math.min(ctr.maxDistance || 50,
-                        Math.max(ctr.minDistance || 4,
-                                 span / (2 * Math.tan(cam.fov * Math.PI / 360))));
   // Азимут оставляем прежний: пользователь сам развернул сцену как ему удобно.
   const dx = cam.position.x - ctr.target.x, dz = cam.position.z - ctr.target.z;
   const az = (Math.hypot(dx, dz) > 0.01) ? Math.atan2(dx, dz) : Math.PI / 4;
+  // В кадр берём весь участок, а не окрестность дома: размечать дорожку или
+  // забор по краю иначе приходится вслепую, подтягивая камеру руками.
+  const dist = Math.min(ctr.maxDistance || 80,
+                        Math.max(ctr.minDistance || 4,
+                                 _e3dFitDist(cam, az, E3D_TOP_PITCH, GRID / 2) * E3D_TOP_MARGIN));
   const horiz = Math.cos(E3D_TOP_PITCH) * dist;
   ctr.target.set(c.x, 0, c.z);
   cam.position.set(c.x + Math.sin(az) * horiz,
@@ -1034,7 +1080,7 @@ function e3dSetSection(secId) {
     threeState.controls.enabled = true;
     threeState.renderer.domElement.style.cursor = '';
   }
-  if (changed && E3D.sec && E3D_TOP_SECS.has(E3D.sec)) e3dTopView(E3D.sec);
+  if (changed && E3D.sec && E3D_TOP_SECS.has(E3D.sec)) e3dTopView();
   e3dSync();
   // Панель раздела рисуется РАНЬШЕ этого вызова, и состояние кнопки «Удалить
   // выбранную» там считалось по ещё не обновлённому разделу: при первом открытии
@@ -1043,4 +1089,4 @@ function e3dSetSection(secId) {
 }
 
 // Кадровый хук: подписи следуют за камерой. Вызывается из animate (см. _onAnimFrame).
-function e3dOnFrame() { _e3dPlaceLabels(); }
+function e3dOnFrame() { _e3dPlaceLabels(); _e3dScaleMarkers(); }
