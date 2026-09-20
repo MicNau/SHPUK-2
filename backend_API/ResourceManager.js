@@ -527,12 +527,35 @@ class ResourceManager {
         return this.#flatCache?.find(s => s.code === code) || null;
     }
 
-    async saveProject(name, email, data) {
+    // calculation - необязательные данные для сметы: то же тело, что у
+    // calculation_report. Передали - клиенту придёт письмо со сметой в PDF,
+    // не передали - письмо уйдёт с одной ссылкой на проект.
+    async saveProject(name, email, data, calculation = null) {
         try {
             const response = await fetch(`${this.#api_domain}/api/v1/create_project/`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({name, email, data}),
+                body: JSON.stringify({name, email, data, calculation}),
+            });
+            if (!response.ok) {
+                console.error(`HTTP ${response.status}`);
+                return null;
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to save project:', error);
+            return null;
+        }
+    }
+
+    // Тот же приём заявки, но без писем: проект сохраняется и открывается
+    // по своему коду, никто ничего не получает. Для проверок.
+    async saveProjectTest(name, email, data, calculation = null) {
+        try {
+            const response = await fetch(`${this.#api_domain}/api/v1/create_project_test/`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name, email, data, calculation}),
             });
             if (!response.ok) {
                 console.error(`HTTP ${response.status}`);
