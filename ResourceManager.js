@@ -557,7 +557,15 @@ class ResourceManager {
     // calculation — необязательные данные для сметы: то же тело, что у
     // calculation_report. Передали — клиенту придёт письмо со сметой в PDF,
     // не передали — письмо уйдёт с одной ссылкой на проект.
+    // Отличие от копии бэкенда: причину отказа не выбрасываем. Сервер присылает
+    // её текстом ({"error": "Неверный формат проекта — elements.fence.points[0].x:
+    // нужно число"}), а пользователь видел только «попробуйте ещё раз» — понять,
+    // что именно не так, было нельзя (правка 2026-09-20). Ответ кладётся в
+    // lastSaveError; возвращаемое значение прежнее.
+    lastSaveError = null;
+
     async saveProject(name, email, data, calculation = null) {
+        this.lastSaveError = null;
         try {
             const response = await fetch(`${this.#api_domain}/api/v1/create_project/`, {
                 method: 'POST',
@@ -565,11 +573,17 @@ class ResourceManager {
                 body: JSON.stringify({ name, email, data, calculation }),
             });
             if (!response.ok) {
-                console.error(`HTTP ${response.status}`);
+                let text = '';
+                try { text = await response.text(); } catch (_) {}
+                let message = '';
+                try { message = (JSON.parse(text) || {}).error || ''; } catch (_) {}
+                this.lastSaveError = { status: response.status, message, body: text };
+                console.error(`[create_project] HTTP ${response.status}`, message || text);
                 return null;
             }
             return await response.json();
         } catch (error) {
+            this.lastSaveError = { status: 0, message: '', body: String(error) };
             console.error('Failed to save project:', error);
             return null;
         }

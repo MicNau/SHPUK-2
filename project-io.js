@@ -287,12 +287,33 @@ function _pioCalculation() {
   return { type, ...req.payload };
 }
 
+// Текст отказа для окна заявки: сервер объясняет причину, и молчать о ней
+// нельзя — иначе «попробуйте ещё раз» уводит от настоящей проблемы.
+function _pioSaveErrorText(rm) {
+  const e = rm && rm.lastSaveError;
+  if (!e) return 'Не удалось отправить заявку. Попробуйте ещё раз.';
+  if (e.status === 429) return 'Слишком много заявок подряд. Попробуйте через несколько минут.';
+  if (e.status === 413) return 'Проект слишком большой для отправки. Напишите нам, разберёмся.';
+  if (e.message) return 'Сервер не принял заявку: ' + e.message;
+  if (!e.status) return 'Сервис недоступен. Проверьте связь и попробуйте ещё раз.';
+  return `Не удалось отправить заявку (ошибка ${e.status}). Попробуйте ещё раз.`;
+}
+
 async function saveProjectToServer(name, email) {
   const rm = (typeof _getRM === 'function') ? _getRM() : null;
   if (!rm || typeof rm.saveProject !== 'function') return { error: 'Сервис недоступен.' };
   const data = buildProjectSnapshot();
-  const res = await rm.saveProject(name, email, data, _pioCalculation());
-  if (!res) return { error: 'Не удалось отправить заявку. Попробуйте ещё раз.' };
+  let res = await rm.saveProject(name, email, data, _pioCalculation());
+  // Смета к письму — приятное дополнение, а ссылка на проект — суть заявки.
+  // Если сервер забраковал именно данные для расчёта (он проверяет их теми же
+  // правилами, что и сам расчёт), повторяем без них: клиент получит письмо со
+  // ссылкой, а причина останется в консоли.
+  const err = rm.lastSaveError;
+  if (!res && err && err.status === 400 && /calculation/i.test(err.message || err.body || '')) {
+    console.warn('[project] смета не принята сервером, отправляем заявку без неё:', err.message);
+    res = await rm.saveProject(name, email, data, null);
+  }
+  if (!res) return { error: _pioSaveErrorText(rm) };
   return { saveId: res.saveId || res.save_id || res.id || res.key || null, raw: res };
 }
 
