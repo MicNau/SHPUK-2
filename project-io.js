@@ -299,11 +299,64 @@ function _pioSaveErrorText(rm) {
   return `Не удалось отправить заявку (ошибка ${e.status}). Попробуйте ещё раз.`;
 }
 
+// Тело запроса заявки целиком — им же отправляем и его же кладём в файл.
+function pioRequestBody(name, email) {
+  return { name: name || '', email: email || '',
+           data: buildProjectSnapshot(), calculation: _pioCalculation() };
+}
+
+// Последняя попытка отправки: тело и ответ сервера. Нужна выгрузке в файл —
+// в ней должно лежать ровно то, что ушло, а не собранное заново.
+let _pioLastAttempt = null;
+
+// Запрос в JSON-файл: с сайта заявка не уходит, а из репозитория уходит, и
+// разбираться в этом бэкенду проще по тому, что реально отправлялось.
+// В файле три части: request — тело как есть (его можно послать серверу
+// повторно), response — ответ (код 0 значит, что ответа не было вовсе: сеть,
+// CORS или заблокированный запрос), meta — откуда и куда отправляли.
+function pioDumpRequest(name, email) {
+  const a = _pioLastAttempt || { body: pioRequestBody(name, email), response: null,
+                                 at: new Date().toISOString() };
+  const domain = (typeof RESOURCE_API_DOMAIN !== 'undefined') ? RESOURCE_API_DOMAIN : null;
+  const dump = {
+    request: a.body,
+    response: a.response,
+    meta: {
+      at: a.at,
+      page: (typeof location !== 'undefined') ? location.href : '',
+      apiDomain: (domain === '') ? '(тот же домен, локальный прокси)'
+                                 : (domain || '(не задан)'),
+      endpoint: (domain || '') + '/api/v1/create_project/',
+      formatVersion: PROJECT_FORMAT_VERSION,
+      userAgent: (typeof navigator !== 'undefined') ? navigator.userAgent : '',
+    },
+  };
+  try {
+    const stamp = dump.meta.at.replace(/[:T]/g, '-').slice(0, 16);
+    const blob = new Blob([JSON.stringify(dump, null, 1)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a2 = document.createElement('a');
+    a2.href = url;
+    a2.download = `shpuk-request-${stamp}.json`;
+    document.body.appendChild(a2);
+    a2.click();
+    a2.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) { console.warn('[project] файл не сохранился', e); }
+  console.info('[project] запрос заявки:', dump);
+  return dump;
+}
+
 async function saveProjectToServer(name, email) {
   const rm = (typeof _getRM === 'function') ? _getRM() : null;
   if (!rm || typeof rm.saveProject !== 'function') return { error: 'Сервис недоступен.' };
-  const data = buildProjectSnapshot();
-  let res = await rm.saveProject(name, email, data, _pioCalculation());
+  const body = pioRequestBody(name, email);
+  const data = body.data;
+  _pioLastAttempt = { body, response: null, at: new Date().toISOString() };
+  let res = await rm.saveProject(name, email, data, body.calculation);
+  _pioLastAttempt.response = res
+    ? { status: 'ok', body: res }
+    : (rm.lastSaveError || { status: 0, message: '', body: '' });
   // Смета к письму — приятное дополнение, а ссылка на проект — суть заявки.
   // Если сервер забраковал именно данные для расчёта (он проверяет их теми же
   // правилами, что и сам расчёт), повторяем без них: клиент получит письмо со
@@ -312,8 +365,12 @@ async function saveProjectToServer(name, email) {
   if (!res && err && err.status === 400 && /calculation/i.test(err.message || err.body || '')) {
     console.warn('[project] смета не принята сервером, отправляем заявку без неё:', err.message);
     res = await rm.saveProject(name, email, data, null);
+    _pioLastAttempt.retriedWithoutCalculation = true;
+    _pioLastAttempt.response = res
+      ? { status: 'ok', body: res, note: 'принято со второй попытки, без calculation' }
+      : (rm.lastSaveError || _pioLastAttempt.response);
   }
-  if (!res) return { error: _pioSaveErrorText(rm) };
+  if (!res) return { error: _pioSaveErrorText(rm), canDump: true };
   return { saveId: res.saveId || res.save_id || res.id || res.key || null, raw: res };
 }
 

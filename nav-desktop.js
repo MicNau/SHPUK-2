@@ -3456,11 +3456,18 @@ async function dSendRequest() {
   if (typeof saveProjectToServer !== 'function') { say('Сервис недоступен.'); return; }
   say('');
   if (btn) { btn.disabled = true; btn.textContent = 'Отправляем…'; }
+  const dump = document.getElementById('d-req-dump');
+  if (dump) dump.hidden = true;
   let res = null;
   try { res = await saveProjectToServer(name, email); }
-  catch (e) { console.warn('[project] save failed', e); res = { error: 'Не удалось отправить заявку.' }; }
+  catch (e) { console.warn('[project] save failed', e); res = { error: 'Не удалось отправить заявку.', canDump: true }; }
   if (btn) { btn.disabled = false; btn.textContent = 'Отправить'; }
-  if (!res || res.error) { say((res && res.error) || 'Не удалось отправить заявку.'); return; }
+  if (!res || res.error) {
+    say((res && res.error) || 'Не удалось отправить заявку.');
+    // Отказ разбирает бэкенд — даём выгрузить то, что реально ушло.
+    if (dump && typeof pioDumpRequest === 'function') dump.hidden = false;
+    return;
+  }
   dCloseRequest();
   dCloseSummary();
   const done = document.getElementById('d-req-done');

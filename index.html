@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=47">
+<link rel="stylesheet" href="styles-desktop.css?v=48">
 <!-- Мобильная раскладка: правила действуют только при body.m-mode (nav-mobile.js). -->
 <link rel="stylesheet" href="styles-mobile.css?v=2">
 </head>
@@ -225,6 +225,10 @@
     <div class="d-req-note">Нажимая кнопку «Отправить» я даю согласие на обработку
       персональных данных</div>
     <div class="d-req-err" id="d-req-err"></div>
+    <!-- Появляется только после отказа сервера: файл с тем, что реально ушло, —
+         по нему бэкенд разбирает причину. -->
+    <button class="d-req-dump" id="d-req-dump" hidden
+            onclick="pioDumpRequest()">Сохранить запрос в файл</button>
     <div class="d-req-actions">
       <button class="d-btn d-btn-back" onclick="dCloseRequest()">Отменить</button>
       <button class="d-btn d-btn-next" id="d-req-send" onclick="dSendRequest()">Отправить</button>
@@ -281,11 +285,11 @@
      Идёт после viewer3d-*, потому что опирается на threeState и worldToCanvas. -->
 <script src="editor3d.js?v=17"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=134"></script>
+<script src="nav-desktop.js?v=135"></script>
 <!-- Вертикальная раскладка телефона: переставляет те же узлы и ведёт свои
      четыре экрана. Идёт ПОСЛЕ nav-desktop.js — опирается на его функции. -->
 <script src="nav-mobile.js?v=3"></script>
 <!-- Снимок проекта: отправка заявки и открытие по ссылке из письма. -->
-<script src="project-io.js?v=5"></script>
+<script src="project-io.js?v=6"></script>
 </body>
 </html>
