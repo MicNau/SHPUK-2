@@ -274,11 +274,24 @@ function pioApplyPendingFloors() {
 // ── Сохранение и загрузка ────────────────────────────────────────────────
 // Ошибку ResourceManager глотает (возвращает null), поэтому причину показываем
 // общими словами: детали видны в консоли.
+// Тело для сметы в письме (ревизия API 2026-09-20): то же, что уходит в
+// calculate_project, плюс тип. Прислали — к письму приложится смета в PDF, не
+// прислали — письмо уйдёт с одной ссылкой на проект. Сам расчёт бэкенд делает
+// сам: в описании проекта (data) его по-прежнему нет.
+function _pioCalculation() {
+  if (typeof buildProjectCalcRequest !== 'function') return null;
+  let req = null;
+  try { req = buildProjectCalcRequest(); } catch (_) { return null; }
+  if (!req || !req.payload) return null;                   // нечего считать — шлём без сметы
+  const type = (typeof CalculationType !== 'undefined') ? CalculationType.PROJECT : 'project';
+  return { type, ...req.payload };
+}
+
 async function saveProjectToServer(name, email) {
   const rm = (typeof _getRM === 'function') ? _getRM() : null;
   if (!rm || typeof rm.saveProject !== 'function') return { error: 'Сервис недоступен.' };
   const data = buildProjectSnapshot();
-  const res = await rm.saveProject(name, email, data);
+  const res = await rm.saveProject(name, email, data, _pioCalculation());
   if (!res) return { error: 'Не удалось отправить заявку. Попробуйте ещё раз.' };
   return { saveId: res.saveId || res.save_id || res.id || res.key || null, raw: res };
 }
