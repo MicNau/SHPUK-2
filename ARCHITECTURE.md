@@ -183,10 +183,10 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 
 ```
 styles-desktop.css?v=47   styles-mobile.css?v=2      state.js?v=74
-canvas.js?v=63            shared/house-builder.js?v=89  ResourceManager.js?v=10
+canvas.js?v=63            shared/house-builder.js?v=89  ResourceManager.js?v=11
 viewer3d-core.js?v=160    viewer3d-builders.js?v=65   viewer3d-railing.js?v=18
-viewer3d-entourage.js?v=14   editor3d.js?v=17         nav-desktop.js?v=133
-nav-mobile.js?v=3         project-io.js?v=2          backend_API/Calculator.js?v=3
+viewer3d-entourage.js?v=14   editor3d.js?v=17         nav-desktop.js?v=134
+nav-mobile.js?v=3         project-io.js?v=4          backend_API/Calculator.js?v=3
 ```
 
 `viewer3d-entourage.js` автоматически детектит `IS_MOBILE` (UA + `innerWidth<768`)
@@ -946,6 +946,53 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Ветка **Mobile**: менеджер ресурсов ревизии 2026-09-20.
+
+- **`saveProject(name, email, data, calculation)`** — у заявки появилось
+  необязательное четвёртое поле: то же тело, что принимает `calculation_report`.
+  Прислали — к письму клиенту приложится смета в PDF, не прислали — уйдёт одна
+  ссылка на проект. Окно подтверждения обещает смету, поэтому шлём:
+  `_pioCalculation` собирает `{type: 'project', objects, mergeMaterials}` тем же
+  `buildProjectCalcRequest`, что и блок «Расчёт по спецификации». Считать смету
+  на клиенте по-прежнему не нужно — в описании проекта (`data`) расчёта нет.
+  Нечего считать (разметки нет) — поле уходит пустым, заявка не ломается.
+- **`saveProjectTest`** — тот же приём заявки по адресу `create_project_test/`,
+  но без писем: для отладки сохранения. В приложении не используется.
+- Сервер теперь ПРОВЕРЯЕТ формат описания: неизвестное поле или раздел — отказ
+  целиком (`catalog_api.md`). Состав снимка сверен с `PROJECT_FORMAT.md` —
+  корень `version/app/savedAt/units/plot/house/elements`, дом
+  `typeId/areaM2/foundationMm/floors/materials`, разделы ровно теми полями, что
+  описаны. Лимит частоты стал 20 сохранений в час.
+- Замеры: запрос `create_project` уходит с полями `name/email/data/calculation`;
+  в `calculation` — `type: project` и 5 объектов (terrace, path, railing, fence,
+  facade). Проверить ответ живого сервера из песочницы нельзя: `sollersdev.ru`
+  отсюда недоступен.
+- Cache-bust: `ResourceManager.js?v=11`, `project-io.js?v=4`.
+
+Ветка **Mobile**: у проекта по ссылке возвращаются товары.
+
+- **В снимке лежат только идентификаторы товаров**, а материалу нужны текстуры,
+  модель и характеристики: раньше восстановление ставило одну строку сметы
+  (`S.estimate[sec]`), а `S.elementMat[sec]` оставался пустым — вся геометрия
+  строилась в запасной серый цвет, забор и мебель теряли свои GLB (баг
+  2026-09-20). Теперь `dRestoreProducts` догружает товары с бэкенда
+  (`_loadProduct` — сперва кэш каталога, потом `getProductById`), собирает из них
+  тот же образец, что «Применить» в каталоге (`_sampleFromProduct`), и раздаёт по
+  разделам.
+- **Применение образца отвязано от активного пункта меню**: `_applySampleTo(secId,
+  sample)` — прежняя `_applySampleToActive` стала обёрткой над ним, то же с
+  `_setEstimateFor`. При открытии проекта интерфейс ни на чём не стоит, а
+  материалы разделам назначить надо.
+- **Мебель** получает товар в самом предмете (`f.product.modelUrl`), а не через
+  `_assignFurnitureProduct` — тот поставил бы НОВЫЙ предмет поверх восстановленных.
+- Товары догружаются ПОСЛЕ первой сборки: сцена появляется сразу, а текстуры и
+  модели приезжают следом и запускают одну пересборку на все разделы.
+- Замеры: проект с террасой, забором и скамьёй, открытый по `?project=KEY42`,
+  получил у террасы товар 196500 с текстурой, у забора — 201100 с текстурой и
+  моделью `mod_fence_005.glb`, у мебели — ту же модель в самом предмете; цены в
+  смете вернулись (1850 и 3200 ₽ вместо нулей). Ошибок консоли нет.
+- Cache-bust: `nav-desktop.js?v=134`, `project-io.js?v=3`.
 
 Ветка **Mobile**: проект по ссылке открывается сразу видимым.
 

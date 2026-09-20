@@ -1622,6 +1622,33 @@ function _activeIsDeck() {
   return DECK_MAT_ELEMENTS.includes(dActiveItem);
 }
 
+// Образец из товара каталога — ровно тот набор полей, который дальше разбирает
+// _applySampleTo. Собирается в двух местах: при «Применить» в каталоге и при
+// открытии проекта по ссылке (в снимке лежит только productId).
+function _sampleFromProduct(product) {
+  return { id: product.id, name: product.name, color: null,
+           textures: product.textures, modelUrl: product.modelUrl || '',
+           colorName: product.color || '',
+           properties: product.properties || null,
+           previewText: product.previewText || '',
+           price: _productPrice(product) };
+}
+
+// Товар по id с загруженными текстурами: сперва из кэша каталога, иначе с бэкенда.
+async function _loadProduct(pid) {
+  if (!pid) return null;
+  let product = null;
+  for (const k in _catalogCache) {
+    const arr = _catalogCache[k];
+    if (Array.isArray(arr)) { const f = arr.find(p => p.id === pid); if (f) { product = f; break; } }
+  }
+  const rm = _getRM();
+  if (!product && rm) { try { product = await rm.getProductById(pid); } catch (_) {} }
+  if (!product) return null;
+  try { await product.loadTextures(); } catch (_) {}
+  return product;
+}
+
 // Применяет образец (текстуры/цвет) к АКТИВНОМУ элементу. Деко-элементы — через
 // S.elementMat[el] + пересборку (каждый независимо); прочие (фасад/забор/ограждение)
 // — прежним способом (цвет live / глобально).
@@ -1679,9 +1706,14 @@ function _syncDefaultStepsProduct() {
 
 function _rebuild3d() { if (typeof buildScene3d === 'function') buildScene3d(); }
 
-function _applySampleToActive(sample) {
-  _setEstimateForActive(sample);           // смета обновляется вместе с материалом
-  if (_activeIsDeck()) {
+function _applySampleToActive(sample) { _applySampleTo(dActiveItem, sample); }
+
+// Тот же разбор образца, но для ЛЮБОГО раздела, а не только активного: при
+// открытии проекта по ссылке интерфейс ни на чём не стоит, а материалы разделам
+// назначить надо (иначе всё строится в запасной цвет — баг 2026-09-20).
+function _applySampleTo(secId, sample) {
+  _setEstimateFor(secId, sample);          // смета обновляется вместе с материалом
+  if (DECK_MAT_ELEMENTS.includes(secId)) {
     // productId/name сохраняем рядом с текстурами: по ним расчёт террасы на бэкенде
     // узнаёт выбранную доску (_deckingBoardProductId), 3D-слой их игнорирует.
     // colorName — имя цвета товара из каталога (пригождается 3D-слою).
@@ -1693,12 +1725,12 @@ function _applySampleToActive(sample) {
                    previewText: sample.previewText || '',
                    // modelUrl: у забора по нему берётся GLB товара (TODO.md → ЗАБОР 2).
                    modelUrl: sample.modelUrl || '' };
-    S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures, ...meta }
+    S.elementMat[secId] = sample.textures ? { textures: sample.textures, ...meta }
                               : (sample.color ? { color: sample.color, ...meta } : null);
     // Грядки: высота борта — свойство ТОВАРА (150/200/225/270/300 мм, см. TODO.md),
     // забираем её из названия и отдаём в 3D. Фильтр высоты сюда не вмешивается: он
     // отбирает каталог, а рисуется то, что выбрано (TODO п.15).
-    if (dActiveItem === 'beds') {
+    if (secId === 'beds') {
       const h = _bedHeightFromProduct(sample);
       if (h) S.bedH = h;
       // Крепёж грядки тоже свойство ТОВАРА: у грядок с УГЛОМ (металлическим или
@@ -1707,21 +1739,21 @@ function _applySampleToActive(sample) {
     }
     // Ограждение: сечение столба (100/125 мм) — тоже свойство товара, фильтр
     // раздела только отбирает каталог (TODO п.1).
-    if (dActiveItem === 'railing') S.railPostW = _railPostWFromProduct(sample);
+    if (secId === 'railing') S.railPostW = _railPostWFromProduct(sample);
     // Доска террасы задаёт ступень по умолчанию (default_steps_id).
-    if (dActiveItem === 'terrace') _syncDefaultStepsProduct();
+    if (secId === 'terrace') _syncDefaultStepsProduct();
     if (typeof buildScene3d === 'function') buildScene3d();
-  } else if (dActiveItem === 'furniture') {
+  } else if (secId === 'furniture') {
     // Мебель СТАВИТСЯ выбором товара (ТЗ п. 10): предмет появляется перед
     // камерой на ближайшем свободном месте, повторный клик по карточке ставит
     // ещё один. Точек размещения больше нет.
     _assignFurnitureProduct(sample);
-  } else if (dActiveItem === 'facade' || dActiveItem === 'facade2') {
+  } else if (secId === 'facade' || secId === 'facade2') {
     // Фасад: материал панелей ложится на выбранные сегменты СВОЕГО раздела
     // (facadeZones) без пересборки сцены. Отделок две, и у каждой свой материал,
     // поэтому «пустой выбор = весь фасад» больше не действует: вторая отделка
     // залила бы собой всё.
-    S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures }
+    S.elementMat[secId] = sample.textures ? { textures: sample.textures }
                               : (sample.color ? { color: sample.color } : null);
     if (typeof _applyFacadeSelection === 'function' && typeof threeState !== 'undefined' && threeState) {
       _applyFacadeSelection();
@@ -1729,6 +1761,44 @@ function _applySampleToActive(sample) {
   } else if (sample.color && typeof applyMaterialToScene === 'function') {
     applyMaterialToScene(sample.color);    // забор/ограждение — цвет
   }
+}
+
+// Восстановление товаров проекта, открытого по ссылке: в снимке лежат только
+// идентификаторы, а материалу нужны текстуры, модель и характеристики товара.
+// Раньше восстанавливалась одна строка сметы, и вся геометрия строилась в
+// запасной серый цвет (баг 2026-09-20). Разделы грузятся параллельно; сцена
+// пересобирается ОДИН раз в конце, а не на каждый товар.
+async function dRestoreProducts(byId, furnitureIds) {
+  const jobs = [];
+  for (const secId of Object.keys(byId || {})) {
+    const pid = byId[secId];
+    if (!pid) continue;
+    jobs.push(_loadProduct(pid).then(product => {
+      if (!product) { console.warn('[project] товар не найден:', secId, pid); return; }
+      // Мебель ставится не так: у неё товар лежит в самом предмете (ниже).
+      if (secId === 'furniture') return;
+      _applySampleTo(secId, _sampleFromProduct(product));
+    }));
+  }
+  // Мебель: у каждого предмета свой товар, и ему нужен modelUrl, иначе вместо
+  // модели остаётся условная коробка.
+  const uniq = [...new Set((furnitureIds || []).filter(Boolean))];
+  const models = {};
+  for (const pid of uniq) {
+    jobs.push(_loadProduct(pid).then(product => {
+      if (product) models[pid] = { id: product.id, name: product.name || '', modelUrl: product.modelUrl || '' };
+    }));
+  }
+  await Promise.all(jobs);
+  for (const f of (S.furniture || [])) {
+    const m = f.product && models[f.product.id];
+    if (m) f.product = { ...m };
+  }
+  if (typeof buildScene3d === 'function') buildScene3d();
+  if (typeof _applyFacadeSelection === 'function' && typeof threeState !== 'undefined' && threeState) {
+    _applyFacadeSelection();
+  }
+  if (typeof _dSyncSummaryBtn === 'function') _dSyncSummaryBtn();
 }
 
 // Назначает товар точке мебели: активной, иначе первой без товара (по номерам),
@@ -2597,12 +2667,14 @@ function _parsePriceNum(s) {
 // Записывает товар в смету активного элемента. Вызывается из «Применить»:
 // отдельной кнопки «В смету» больше нет — применённый материал И ЕСТЬ выбор
 // для сметы, а два действия на карточке путали (материал в 3D один, в смете другой).
-function _setEstimateForActive(sample) {
-  if (!dActiveItem) return;
+function _setEstimateForActive(sample) { _setEstimateFor(dActiveItem, sample); }
+
+function _setEstimateFor(secId, sample) {
+  if (!secId) return;
   if (!('price' in sample)) return;   // источник цены не передал — строку сметы не трогаем
   const price = _parsePriceNum(sample.price);
-  if (price == null) { delete S.estimate[dActiveItem]; _dSyncSummaryBtn(); return; }
-  S.estimate[dActiveItem] = { id: sample.id, name: sample.name, price };
+  if (price == null) { delete S.estimate[secId]; _dSyncSummaryBtn(); return; }
+  S.estimate[secId] = { id: sample.id, name: sample.name, price };
   _dSyncSummaryBtn();
 }
 
