@@ -161,9 +161,17 @@ function applyProjectSnapshot(snap) {
   _pioPendingFloors = (h.floors || []).slice();
 
   const el = snap.elements || {};
+  // Идентификаторы товаров копим здесь: сами товары (с текстурами, моделью и
+  // характеристиками) подтягиваются с бэкенда уже после применения снимка —
+  // см. _pioProductIds и dRestoreProducts.
+  _pioProductIds = {};
+  _pioFurnitureIds = [];
   const useProduct = (sec, p) => {
     if (!p) return;
-    if (p.productId) S.estimate[sec] = { id: p.productId, name: p.name || '', price: 0 };
+    if (p.productId) {
+      S.estimate[sec] = { id: p.productId, name: p.name || '', price: 0 };
+      _pioProductIds[sec] = p.productId;
+    }
     if (p.color) S.elementMat[sec] = { color: p.color };
   };
 
@@ -222,6 +230,7 @@ function applyProjectSnapshot(snap) {
       x: _pioNorm(f.x), y: _pioNorm(f.y), rot: (f.rotDeg || 0) * Math.PI / 180,
       product: f.productId ? { id: f.productId, name: f.name || '' } : null,
     }));
+    for (const f of S.furniture) if (f.product) _pioFurnitureIds.push(f.product.id);
     if (!S.sections.includes('furniture')) S.sections.push('furniture');
   }
   for (const sec of (typeof FACADE_SECS !== 'undefined' ? FACADE_SECS : ['facade'])) {
@@ -239,6 +248,11 @@ function applyProjectSnapshot(snap) {
 // Поэтажные поля появляются после _dRenderFloorParams — дописываем значения,
 // когда поля уже есть (иначе дом соберётся с площадями по умолчанию).
 let _pioPendingFloors = null;
+
+// Товары снимка: раздел → productId и список идентификаторов мебели. Сами товары
+// (текстуры, модель, характеристики) догружаются с бэкенда после применения.
+let _pioProductIds = {};
+let _pioFurnitureIds = [];
 
 function pioApplyPendingFloors() {
   if (!_pioPendingFloors || !_pioPendingFloors.length) return false;
@@ -316,6 +330,13 @@ async function pioRestoreFromUrl() {
     return true;
   };
   setTimeout(() => { if (!frame()) setTimeout(frame, 600); }, 400);
+  // Товары догружаем ПОСЛЕ первой сборки: сцена появляется сразу, а текстуры,
+  // модели и характеристики приезжают следом и запускают пересборку. Ждать их до
+  // показа нельзя — каталог отвечает не мгновенно.
+  if (typeof dRestoreProducts === 'function') {
+    try { await dRestoreProducts(_pioProductIds, _pioFurnitureIds); }
+    catch (e) { console.warn('[project] товары не восстановились', e); }
+  }
   return true;
 }
 
