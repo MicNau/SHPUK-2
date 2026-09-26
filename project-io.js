@@ -90,7 +90,13 @@ function buildProjectSnapshot() {
       el[sec].pool = { kind: S.pool.kind || 'rect', ..._pioRect(S.pool) };
     }
   }
-  const stairs = (typeof stepsAll === 'function') ? stepsAll() : [];
+  // Ступени и ограждение пишем, только если раздел ВКЛЮЧЁН в проект. У ступеней
+  // в состоянии всегда лежит заготовка (DEFAULT_STEPS_RECT), у ограждения могут
+  // остаться старые разрывы — без этой проверки они уходили в снимок, и при
+  // открытии проекта по ссылке появлялись ступени, которых никто не строил
+  // (баг 2026-09-26). Рисует сцена их тоже только для включённого раздела.
+  const inProject = sec => (S.sections || []).includes(sec);
+  const stairs = (inProject('steps') && typeof stepsAll === 'function') ? stepsAll() : [];
   if (stairs.length) {
     el.steps = {
       product: _pioProduct('steps'),
@@ -107,7 +113,7 @@ function buildProjectSnapshot() {
                  points: _pioPts(S.pts.fence) };
     if (S.fenceGate) el.fence.gate = { x: _pioMm(S.fenceGate.x), y: _pioMm(S.fenceGate.y) };
   }
-  if ((S.railingEntries || []).length || (S.sections || []).includes('railing')) {
+  if (inProject('railing')) {
     el.railing = { product: _pioProduct('railing'),
                    postWidthMm: S.railPostW || null,
                    entries: (S.railingEntries || []).map(e => (e ? { t0: e.t0, t1: e.t1 } : null)) };

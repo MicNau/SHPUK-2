@@ -433,6 +433,63 @@ function _fenceTooClose(p) {
   return false;
 }
 
+// Пересекаются ли отрезки плана ab и cd (касание концом тоже считаем).
+function _planSegsCross(a, b, c, d) {
+  const cr = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  const d1 = cr(a, b, c), d2 = cr(a, b, d), d3 = cr(c, d, a), d4 = cr(c, d, b);
+  return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+}
+
+function _planPointInPoly(p, poly) {
+  let hit = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) hit = !hit;
+  }
+  return hit;
+}
+
+// Контуры, через которые не проходит линия забора: дом и террасы.
+function _fenceBlockerPolys() {
+  const out = [];
+  if (typeof isEmptyLot !== 'function' || !isEmptyLot()) {
+    const hp = getHousePolygonNorm();
+    if (hp && hp.corners && hp.corners.length >= 3) out.push(hp.corners);
+  }
+  for (const sec of ['terrace', 'pool_terrace']) {
+    for (const r of (typeof secRects === 'function' ? secRects(sec) : [])) {
+      if (!r || r.w <= 0 || r.h <= 0) continue;
+      out.push([{ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y },
+                { x: r.x + r.w, y: r.y + r.h }, { x: r.x, y: r.y + r.h }]);
+    }
+  }
+  return out;
+}
+
+// Отрезок забора ab недопустим: проходит сквозь дом или террасу, либо подходит
+// к ним ближе FENCE_MIN_CLEAR (правка 2026-09-26). Концы проверяет
+// _fenceTooClose, но отрезок между двумя разрешёнными точками мог пересечь дом
+// насквозь. Возвращает 'cross' | 'near' | null.
+function fenceSegBlocked(a, b) {
+  const lim = FENCE_MIN_CLEAR / GRID;
+  for (const poly of _fenceBlockerPolys()) {
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    if (_planPointInPoly(mid, poly)) return 'cross';
+    for (let i = 0; i < poly.length; i++) {
+      const c = poly[i], d = poly[(i + 1) % poly.length];
+      if (_planSegsCross(a, b, c, d)) return 'cross';
+    }
+    // Ближе допуска: расстояние между отрезками — наименьшее из расстояний
+    // от концов одного до другого (пересечения уже отсеяны выше).
+    for (let i = 0; i < poly.length; i++) {
+      const c = poly[i], d = poly[(i + 1) % poly.length];
+      if (Math.min(_planDistToSeg(c, a, b), _planDistToSeg(d, a, b),
+                   _planDistToSeg(a, c, d), _planDistToSeg(b, c, d)) < lim - 1e-9) return 'near';
+    }
+  }
+  return null;
+}
+
 function _planDistToSeg(p, a, b) {
   const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
   if (l2 < 1e-12) return Math.hypot(p.x - a.x, p.y - a.y);
@@ -511,7 +568,12 @@ function _collideBlockers(secId, idx) {
     const list = (typeof secRects === 'function') ? secRects(sec) : [];
     list.forEach((r, i) => { if (r && !(sec === secId && i === idx)) add(r.x, r.y, r.w, r.h); });
   }
-  if (!_collideIgnores(secId, 'steps')) {
+  // Ступени мешают, только если раздел ВКЛЮЧЁН: в состоянии всегда лежит их
+  // заготовка (DEFAULT_STEPS_RECT) — невидимая, но раньше она участвовала в
+  // проверке. Грядка по умолчанию вставала прямо на неё, считалась «в коллизии»
+  // с самого начала и упиралась в пустое место (баг 2026-09-26). Сама лестница
+  // проверяет себя всегда: её раздел в этот момент открыт.
+  if (!_collideIgnores(secId, 'steps') && (secId === 'steps' || S.sections.includes('steps'))) {
     const list = (typeof stepsAll === 'function') ? stepsAll() : [];
     list.forEach((st, i) => { if (st && !(secId === 'steps' && i === idx)) add(st.x, st.y, st.w, st.h); });
   }
@@ -2273,8 +2335,14 @@ function _nearestTarget(coord, targets) {
 // Принцип: к стене/террасе липнет ТОЛЬКО движущаяся кромка; противоположная остаётся
 // на сетке. Поэтому wall-snap НЕ перетирается финальным snapNorm, и дальние углы
 // не уносит с сетки (исправление «снапается целиком»).
+// Минимальная сторона прямоугольника по разделам, м. Террасу меньше 1×1 м не
+// строят (правка 2026-09-26), остальным хватает шага снапа. Берётся только при
+// ЯВНО переданном secId: ступени и грядки зовут без него, и прежде по умолчанию
+// снапались как терраса — минимум террасы им не нужен.
+const RECT_MIN_M = { terrace: 1.0, pool_terrace: 1.0 };
+
 function snapDraggedRect(kind, ds, dx, dy, excludeIdx, secId) {
-  const mn = SNAP / GRID;
+  const mn = Math.max(SNAP, (secId && RECT_MIN_M[secId]) || 0) / GRID;
   const { xs, ys } = _snapTargets(excludeIdx, secId);
 
   if (kind === 'move') {
@@ -2957,14 +3025,32 @@ function delActiveBed() {
 }
 
 // Поворот активной грядки на 90° вокруг её центра (swap w↔h).
+// Развёрнутая грядка не должна налезть на соседей: раньше поворот коллизии не
+// проверял вовсе, и грядка у стены или у соседней грядки разворачивалась прямо
+// в неё (баг 2026-09-26). Сначала пробуем поворот вокруг центра, затем — вокруг
+// каждого из углов (грядка «перекладывается» от препятствия). Мешает везде —
+// остаётся как была, с подсказкой.
 function rotateActiveBed() {
   if (S.activeBed === null || !S.beds[S.activeBed]) return;
   const b = S.beds[S.activeBed];
-  const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
   const nw = b.h, nh = b.w;
-  const c = _clampBedPos(snapNorm(cx - nw / 2), snapNorm(cy - nh / 2), nw, nh);
-  b.w = nw; b.h = nh; b.x = c.x; b.y = c.y;
-  _secChanged('beds');
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+  const tries = [
+    { x: cx - nw / 2, y: cy - nh / 2 },          // вокруг центра
+    { x: b.x,             y: b.y },               // от левого верхнего угла
+    { x: b.x + b.w - nw,  y: b.y },               // от правого верхнего
+    { x: b.x,             y: b.y + b.h - nh },    // от левого нижнего
+    { x: b.x + b.w - nw,  y: b.y + b.h - nh },    // от правого нижнего
+  ];
+  for (const t of tries) {
+    const c = _clampBedPos(snapNorm(t.x), snapNorm(t.y), nw, nh);
+    const r = { x: c.x, y: c.y, w: nw, h: nh };
+    if (typeof rectCollides === 'function' && rectCollides(r, 'beds', S.activeBed)) continue;
+    b.w = nw; b.h = nh; b.x = c.x; b.y = c.y;
+    _secChanged('beds');
+    return;
+  }
+  if (typeof dToast === 'function') dToast('Здесь грядку не развернуть — мешают соседние объекты');
 }
 
 function hitBeds(wx, wy, W) {
