@@ -490,6 +490,33 @@ function fenceSegBlocked(a, b) {
   return null;
 }
 
+// Отрезок ОСИ дорожки ab проходит через дом или террасу (правка 2026-09-26:
+// пересечение запрещено, как у забора). В отличие от забора, подходить к ним
+// вплотную можно: дорожка ведёт к террасе и к крыльцу, а вдоль стены идёт
+// отмосткой. Поэтому проверяем только, заходит ли ось ВНУТРЬ контура — точки
+// оси с шагом 10 см, без самих концов (конец на кромке — это примыкание).
+// Полоса по ширине, которая всё же легла под стену или настил, не строится
+// (pathLinesVisible).
+const PATH_PROBE_STEP_M = 0.1;
+
+function pathSegBlocked(a, b) {
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  if (len < 1e-9) return false;
+  const n = Math.max(2, Math.ceil(len * GRID / PATH_PROBE_STEP_M));
+  const eps = 0.02 / GRID;                     // 2 см: кромку считаем снаружи
+  for (const poly of _fenceBlockerPolys()) {
+    for (let i = 1; i < n; i++) {
+      const t = i / n;
+      const q = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      if (!_planPointInPoly(q, poly)) continue;
+      let edge = Infinity;
+      for (let k = 0; k < poly.length; k++) edge = Math.min(edge, _planDistToSeg(q, poly[k], poly[(k + 1) % poly.length]));
+      if (edge > eps) return true;
+    }
+  }
+  return false;
+}
+
 function _planDistToSeg(p, a, b) {
   const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
   if (l2 < 1e-12) return Math.hypot(p.x - a.x, p.y - a.y);

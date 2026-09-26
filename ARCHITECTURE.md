@@ -183,10 +183,10 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 
 ```
 styles-desktop.css?v=49   styles-mobile.css?v=3      state.js?v=75
-canvas.js?v=64            shared/house-builder.js?v=89  ResourceManager.js?v=12
+canvas.js?v=65            shared/house-builder.js?v=89  ResourceManager.js?v=12
 viewer3d-core.js?v=161    viewer3d-builders.js?v=65   viewer3d-railing.js?v=18
-viewer3d-entourage.js?v=14   editor3d.js?v=18         nav-desktop.js?v=136
-nav-mobile.js?v=4         project-io.js?v=7          backend_API/Calculator.js?v=3
+viewer3d-entourage.js?v=14   editor3d.js?v=19         nav-desktop.js?v=137
+nav-mobile.js?v=5         project-io.js?v=7          backend_API/Calculator.js?v=3
 ```
 
 `viewer3d-entourage.js` автоматически детектит `IS_MOBILE` (UA + `innerWidth<768`)
@@ -974,6 +974,14 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
 - **Забор не проходит через дом и террасу** (`fenceSegBlocked`): отрезок
   проверяется на пересечение контуров и на те же 3 м допуска, что и точки;
   при протяжке точка забора упирается.
+- **Дорожка тоже не проходит через дом и террасу** (`pathSegBlocked`; 19.09 было
+  решено наоборот — вести насквозь и обрезать скрытое). В отличие от забора,
+  подходить к ним вплотную можно: дорожка к ним и ведёт. Проверяется только ось —
+  заходит ли она ВНУТРЬ контура (точки через 10 см, без концов, кромка считается
+  снаружи). Полоса по ширине, легшая под стену или настил, по-прежнему не
+  строится (`pathLinesVisible`) — это же выручает старые проекты с дорожкой
+  насквозь. Замеры: насквозь через дом и через террасу — отказ; к стене и к
+  террасе вплотную, вдоль стены и мимо — можно.
 - **Коллизии грядок.** Невидимая заготовка ступеней (`DEFAULT_STEPS_RECT` лежит в
   состоянии всегда) участвовала в проверке, даже когда ступеней нет: грядка по
   умолчанию вставала прямо на неё и считалась «в коллизии» с самого начала.
@@ -1015,8 +1023,8 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   `default_steps_id`), с ценой в смете; ручной выбор сохраняется. Терраса не
   меньше 1×1 м. Плашка террасы — на 14 px ниже нижнего угла, ни одна ручка под
   ней. Галочка: без неё кнопка заблокирована.
-- Cache-bust: `state.js?v=75`, `canvas.js?v=64`, `viewer3d-core.js?v=161`,
-  `editor3d.js?v=18`, `nav-desktop.js?v=136`, `nav-mobile.js?v=4`,
+- Cache-bust: `state.js?v=75`, `canvas.js?v=65`, `viewer3d-core.js?v=161`,
+  `editor3d.js?v=19`, `nav-desktop.js?v=137`, `nav-mobile.js?v=5`,
   `project-io.js?v=7`, `styles-desktop.css?v=49`, `styles-mobile.css?v=3`.
 
 Ветка **Mobile**: запрос заявки выгружается в файл.

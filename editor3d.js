@@ -827,8 +827,13 @@ function _e3dDragMove(np) {
         if (nb && !nb.break && fenceSegBlocked(nb, q)) return;
       }
     }
-    // Дорожке пересечения разрешены (ТЗ 2026-09-19): полосу можно вести сквозь
-    // дом и настил, скрытая часть просто не строится (pathLinesVisible).
+    // Дорожке пересекать дом и террасу тоже нельзя (правка 2026-09-26; 19.09
+    // было решено наоборот — вести насквозь и обрезать скрытое).
+    if (sec === 'paths' && typeof pathSegBlocked === 'function') {
+      for (const nb of [pts[d.idx - 1], pts[d.idx + 1]]) {
+        if (nb && !nb.break && pathSegBlocked(nb, q)) return;
+      }
+    }
     pt.x = q.x; pt.y = q.y;
   }
   e3dSync();   // сцену НЕ пересобираем: тяжёлая сборка идёт один раз, на отпускании
@@ -943,6 +948,12 @@ function _e3dDrawClick(np) {
       dToast(why === 'cross' ? 'Забор не может проходить через дом или террасу'
                              : 'Ближе 3 м к дому и террасе забор не ставится');
     }
+    return;
+  }
+  // Дорожка тоже не проходит через дом и террасу (правка 2026-09-26), но
+  // подходить к ним вплотную может — она к ним и ведёт.
+  if (name === 'paths' && typeof pathSegBlocked === 'function' && pathSegBlocked(a, p)) {
+    if (typeof dToast === 'function') dToast('Дорожка не может проходить через дом или террасу');
     return;
   }
   _e3dLineCommit(name, a, p);
