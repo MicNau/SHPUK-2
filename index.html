@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=47">
+<link rel="stylesheet" href="styles-desktop.css?v=49">
 <!-- Мобильная раскладка: правила действуют только при body.m-mode (nav-mobile.js). -->
-<link rel="stylesheet" href="styles-mobile.css?v=2">
+<link rel="stylesheet" href="styles-mobile.css?v=3">
 </head>
 <body>
 
@@ -222,9 +222,19 @@
     <label class="d-req-field">E-mail:
       <input class="d-req-input" id="d-req-email" type="email" autocomplete="email">
     </label>
-    <div class="d-req-note">Нажимая кнопку «Отправить» я даю согласие на обработку
-      персональных данных</div>
+    <!-- Согласие — явной галочкой: без неё «Отправить» заблокирована
+         (dSyncRequestConsent). -->
+    <label class="d-req-consent">
+      <input type="checkbox" id="d-req-consent" onchange="dSyncRequestConsent()">
+      <span>Я даю согласие на обработку персональных данных в соответствии с
+        <a href="https://outdoor-mebel.ru/include/licenses_detail.php"
+           target="_blank" rel="noopener">политикой компании</a></span>
+    </label>
     <div class="d-req-err" id="d-req-err"></div>
+    <!-- Появляется только после отказа сервера: файл с тем, что реально ушло, —
+         по нему бэкенд разбирает причину. -->
+    <button class="d-req-dump" id="d-req-dump" hidden
+            onclick="pioDumpRequest()">Сохранить запрос в файл</button>
     <div class="d-req-actions">
       <button class="d-btn d-btn-back" onclick="dCloseRequest()">Отменить</button>
       <button class="d-btn d-btn-next" id="d-req-send" onclick="dSendRequest()">Отправить</button>
@@ -250,8 +260,8 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=74"></script>
-<script src="canvas.js?v=63"></script>
+<script src="state.js?v=75"></script>
+<script src="canvas.js?v=65"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=89"></script>
 <!-- Каталожный API: домен выбирается по хосту.
@@ -265,7 +275,7 @@
     (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
       ? '' : 'https://sollersdev.ru';
 </script>
-<script src="ResourceManager.js?v=11"></script>
+<script src="ResourceManager.js?v=12"></script>
 <!-- Расчёты на бэкенде: обёртка бэкендера, подключается как есть, без local-правок.
      Лежит в backend_API/ — это их выгрузка (см. calculation_api.md, calculator.md).
      NB: backend_API/ResourceManager.js — их копия каталожного менеджера, она НЕ
@@ -273,19 +283,19 @@
 <script src="backend_API/Calculator.js?v=3"></script>
 <!-- 3D viewer: core (сцена/материалы/оркестратор) → builders (конструкции) →
      railing (ограждение/навесы). Общая глобальная область, порядок важен. -->
-<script src="viewer3d-core.js?v=160"></script>
+<script src="viewer3d-core.js?v=161"></script>
 <script src="viewer3d-builders.js?v=65"></script>
 <script src="viewer3d-railing.js?v=18"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
 <!-- Редактирование прямо в 3D (версия 3D-UI): выбор объектов, сетка, подписи.
      Идёт после viewer3d-*, потому что опирается на threeState и worldToCanvas. -->
-<script src="editor3d.js?v=17"></script>
+<script src="editor3d.js?v=19"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=134"></script>
+<script src="nav-desktop.js?v=137"></script>
 <!-- Вертикальная раскладка телефона: переставляет те же узлы и ведёт свои
      четыре экрана. Идёт ПОСЛЕ nav-desktop.js — опирается на его функции. -->
-<script src="nav-mobile.js?v=3"></script>
+<script src="nav-mobile.js?v=5"></script>
 <!-- Снимок проекта: отправка заявки и открытие по ссылке из письма. -->
-<script src="project-io.js?v=4"></script>
+<script src="project-io.js?v=7"></script>
 </body>
 </html>

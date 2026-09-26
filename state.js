@@ -494,12 +494,22 @@ function facadeOtherSec(secId) {
   return (secId === 'facade2') ? 'facade' : 'facade2';
 }
 
+// Выбор фильтров, с которым раздел открывается впервые. У террасы по умолчанию
+// включена «Пустотелая» (правка 2026-09-26): ходовая доска для настила, а
+// полнотелую пользователь включит сам. Снять выбор можно — это только старт.
+const CAT_FILTER_DEFAULTS = {
+  terrace: { core: ['hollow'] },
+};
+
 function catFilter(secId) {
   const key = secId || '_';
   let f = S.catFilters[key];
   // core — сечение доски (полнотелая / пустотелая), характеристика core_type:
   // отбирает бэкенд, как и ценовую категорию.
-  if (!f) { f = S.catFilters[key] = { colors: new Set(), prices: new Set(), core: new Set() }; }
+  if (!f) {
+    const d = CAT_FILTER_DEFAULTS[key] || {};
+    f = S.catFilters[key] = { colors: new Set(), prices: new Set(), core: new Set(d.core || []) };
+  }
   if (!f.core) f.core = new Set();
   return f;
 }

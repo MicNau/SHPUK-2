@@ -1641,19 +1641,98 @@ function _collectFacadeSegments(root) {
   if (pillars.length && segs.length) {
     root.updateMatrixWorld(true);
     const segBoxes = segs.map(s => ({ id: s.userData.segId, box: new THREE.Box3().setFromObject(s) }));
+    // Стена соседа идёт вдоль той оси, по которой он длиннее: стена вдоль X лежит
+    // в плоскости ±Z-граней столба, вдоль Z — в плоскости ±X-граней. Фронтон —
+    // плоскость, у него один горизонтальный размер нулевой, правило то же.
+    const runsAlongX = box => (box.max.x - box.min.x) >= (box.max.z - box.min.z);
+    const followBoxes = pillars.filter(p => p.userData.facadeFollow)
+                               .map(p => ({ obj: p, box: new THREE.Box3().setFromObject(p) }));
+    const c = new THREE.Vector3(), cs = new THREE.Vector3();
     for (const p of pillars) {
       const follow = !!p.userData.facadeFollow;
       const pb = new THREE.Box3().setFromObject(p);
-      const adj = new Set();
+      pb.getCenter(c);
+      const adj = new Set(), alongX = new Set(), alongZ = new Set();
       for (const sb of segBoxes) {
         const hit = follow ? _facadeStackedOn(pb, sb.box) : _facadeSideBy(pb, sb.box);
-        if (hit) adj.add(sb.id);
+        if (!hit) continue;
+        adj.add(sb.id);
+        // Сосед СБОКУ: сторону даёт смещение центров — узкий простенок у угла
+        // может оказаться уже толщины стены, и правило «по длине» его перепутало бы.
+        sb.box.getCenter(cs);
+        (Math.abs(cs.x - c.x) >= Math.abs(cs.z - c.z) ? alongX : alongZ).add(sb.id);
       }
       p.userData._adjIds = [...adj];
+      p.userData._adjAlongX = [...alongX];
+      p.userData._adjAlongZ = [...alongZ];
+      p.userData._followAlongX = [];
+      p.userData._followAlongZ = [];
+      if (follow) continue;
+      // Угловой столб на уровне карниза мансарды (баг 2026-09-26): сбоку у него
+      // только пояс карниза — он сам не сегмент, а над и под столбом фронтон и
+      // простенок лишь касаются его торцами. Соседей по правилу выше нет, и
+      // столб не красился никогда. Поэтому грань в плоскости пояса следует за
+      // поясом, а грань в плоскости фронтона — за фронтоном над столбом или за
+      // простенком под ним.
+      for (const fb of followBoxes) {
+        if (!_facadeSideBy(pb, fb.box)) continue;
+        (runsAlongX(fb.box) ? p.userData._followAlongX : p.userData._followAlongZ).push(fb.obj);
+      }
+      if (!adj.size) {
+        for (const sb of segBoxes) {
+          if (!_facadeStackedOn(pb, sb.box)) continue;
+          (runsAlongX(sb.box) ? p.userData._adjAlongX : p.userData._adjAlongZ).push(sb.id);
+          p.userData._adjIds.push(sb.id);
+        }
+      }
     }
   } else {
-    for (const p of pillars) p.userData._adjIds = [];
+    for (const p of pillars) {
+      p.userData._adjIds = []; p.userData._adjAlongX = []; p.userData._adjAlongZ = [];
+      p.userData._followAlongX = []; p.userData._followAlongZ = [];
+    }
   }
+}
+
+// Угловой столб — один меш на оба фасада угла, и красился он целиком: отделка
+// одной стены выходила на грань соседней (баг 2026-09-26). Геометрию столба
+// один раз перекладываем по группам граней: 0 — грани, смотрящие вдоль ±X,
+// 1 — вдоль ±Z, 2 — прочие (верх и низ). Дальше каждой группе свой материал.
+function _facadeFaceGroups(mesh) {
+  if (mesh.userData._faceGroups) return;
+  mesh.updateMatrixWorld(true);
+  const src = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+  const pos = src.attributes.position;
+  const nm = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), cc = new THREE.Vector3();
+  const buckets = [[], [], []];
+  for (let t = 0; t < pos.count; t += 3) {
+    a.fromBufferAttribute(pos, t); b.fromBufferAttribute(pos, t + 1); cc.fromBufferAttribute(pos, t + 2);
+    const n = new THREE.Vector3().subVectors(cc, b).cross(new THREE.Vector3().subVectors(a, b));
+    n.applyMatrix3(nm);
+    const ax = Math.abs(n.x), ay = Math.abs(n.y), az = Math.abs(n.z);
+    buckets[(ax >= az && ax >= ay) ? 0 : (az >= ax && az >= ay) ? 1 : 2].push(t);
+  }
+  // Пересобираем атрибуты в порядке групп, чтобы каждая группа шла подряд.
+  const order = [...buckets[0], ...buckets[1], ...buckets[2]];
+  const geo = new THREE.BufferGeometry();
+  for (const name of Object.keys(src.attributes)) {
+    const attr = src.attributes[name], sz = attr.itemSize;
+    const out = new attr.array.constructor(order.length * 3 * sz);
+    order.forEach((t, k) => {
+      for (let v = 0; v < 3; v++) for (let i = 0; i < sz; i++) {
+        out[(k * 3 + v) * sz + i] = attr.array[(t + v) * sz + i];
+      }
+    });
+    geo.setAttribute(name, new THREE.BufferAttribute(out, sz, attr.normalized));
+  }
+  let start = 0;
+  buckets.forEach((bk, gi) => { if (bk.length) geo.addGroup(start * 3, bk.length * 3, gi); start += bk.length; });
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+  src.dispose();
+  mesh.geometry = geo;
+  mesh.userData._faceGroups = true;
 }
 
 // Материал панелей отделки из S.elementMat[secId]: PBR-текстуры товара каталога
@@ -1717,11 +1796,39 @@ function _applyFacadeSelection() {
   // _facadeSec читает facadeSelectedAreaM2 (площадь столба идёт в смету своего
   // раздела). Прежнее правило «пустой выбор = весь фасад» с двумя отделками не
   // работает: вторая залила бы собой весь дом.
-  for (const p of (threeState.facadePillars || [])) {
+  // Угловой столб красится ПО ГРАНЯМ (правка 2026-09-26): грань в плоскости
+  // стены берёт отделку этой стены, а соседняя грань остаётся родной, если её
+  // стена не выбрана. Пояс карниза (facadeFollow) — полоса одной стены, он
+  // красится целиком, как раньше.
+  // Сначала пояса карниза: по ним потом красятся угловые столбы на уровне карниза.
+  const pillars = threeState.facadePillars || [];
+  for (const p of pillars) {
+    if (!p.userData.facadeFollow) continue;
     const sec = (p.userData._adjIds || []).map(secOf).find(Boolean) || null;
     p.userData._facadeSec = sec;
     p.userData._facadeOn = !!sec;
     paint(p, sec ? mats[sec] : null);
+  }
+  const bandSec = list => (list || []).map(o => o.userData._facadeSec).find(Boolean) || null;
+  for (const p of pillars) {
+    if (p.userData.facadeFollow) continue;
+    const secZf = (p.userData._adjAlongX || []).map(secOf).find(Boolean)
+               || bandSec(p.userData._followAlongX) || null;                         // грани ±Z
+    const secXf = (p.userData._adjAlongZ || []).map(secOf).find(Boolean)
+               || bandSec(p.userData._followAlongZ) || null;                         // грани ±X
+    p.userData._facadeSecX = secXf;
+    p.userData._facadeSecZ = secZf;
+    p.userData._facadeSec = secXf || secZf;
+    p.userData._facadeOn = !!(secXf || secZf);
+    p.traverse(o => {
+      if (!o.isMesh || !o.material) return;
+      if (!o.userData._baseMat) o.userData._baseMat = o.material;
+      const base = o.userData._baseMat;
+      if (!secXf && !secZf) { o.material = base; return; }
+      _facadeFaceGroups(o);
+      if (!o.userData._facadeUV) { _applyWorldBoxUV(o, HOUSE_WALL_TILE); o.userData._facadeUV = true; }
+      o.material = [secXf ? mats[secXf] : base, secZf ? mats[secZf] : base, base];
+    });
   }
 }
 
@@ -1740,8 +1847,13 @@ function facadeSelectedAreaM2(secId) {
   let a = list.reduce((s, o) => s + (o.userData.segArea !== undefined
     ? o.userData.segArea
     : (o.userData.segW || 0) * (o.userData.segH || 0)), 0);
+  // Угловой столб: у него две наружные грани (segW — их общая ширина), и каждая
+  // идёт в смету СВОЕЙ отделки — той, что выбрана на стене в её плоскости.
   for (const p of ((threeState && threeState.facadePillars) || [])) {
-    if (p.userData._facadeSec === sec) a += (p.userData.segW || 0) * (p.userData.segH || 0);
+    const face = (p.userData.segW || 0) * (p.userData.segH || 0);
+    if (p.userData.facadeFollow) { if (p.userData._facadeSec === sec) a += face; continue; }
+    if (p.userData._facadeSecX === sec) a += face / 2;
+    if (p.userData._facadeSecZ === sec) a += face / 2;
   }
   return a;
 }
