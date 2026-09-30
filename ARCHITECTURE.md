@@ -182,10 +182,10 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-styles-desktop.css?v=49   styles-mobile.css?v=3      state.js?v=76
-canvas.js?v=65            shared/house-builder.js?v=89  ResourceManager.js?v=13
+styles-desktop.css?v=49   styles-mobile.css?v=3      state.js?v=77
+canvas.js?v=65            shared/house-builder.js?v=89  ResourceManager.js?v=14
 viewer3d-core.js?v=161    viewer3d-builders.js?v=65   viewer3d-railing.js?v=18
-viewer3d-entourage.js?v=14   editor3d.js?v=19         nav-desktop.js?v=138
+viewer3d-entourage.js?v=14   editor3d.js?v=19         nav-desktop.js?v=139
 nav-mobile.js?v=5         project-io.js?v=7          backend_API/Calculator.js?v=3
 ```
 
@@ -947,18 +947,23 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
 
-Ветка **Mobile**: фильтр направления доски у фасада.
+Ветка **Mobile**: фильтры направления доски у фасада и заполнения у забора.
 
 - **«Направление доски: Вертикальная / Горизонтальная»** в левой панели обеих
   отделок фасада (`D_DIR_FILTER`, `_dRenderDirFilter`, `dSelectDir`). Отбор — на
   бэкенде предикатом по характеристике `board_direction` (ревизия бэкенда
   2026-09-30): одно направление уходит как `eq`, оба — как `in`. Выбор входит в
   ключ кэша каталога, у каждой отделки он свой (`catFilter(sec).dir`).
-- **Имя пути и значения — по образцу соседних**: `PropertyPath.BOARD_DIRECTION =
-  'board_direction'`, `BoardDirection = {VERTICAL: 'vertical', HORIZONTAL:
-  'horizontal'}`. Бэкенд прислал пример кода с этими константами, но
-  обновлённой копии менеджера в `backend_API/` ещё нет, а сам сервер из
-  песочницы недоступен — строки сверить, когда копия придёт.
+- **«Заполнение: Плетёные / Доски ДПК»** в левой панели забора — характеристика
+  `fence_type` (`FenceType.WOVEN = 'woven'`, `FenceType.BOARD = 'board'`).
+- **Менеджер ресурсов сверен с копией бэкенда**: `PropertyPath.BOARD_DIRECTION`,
+  `PropertyPath.FENCE_TYPE`, `BoardDirection`, `FenceType` перенесены как есть;
+  строки направления доски совпали с теми, что стояли до прихода копии.
+- **Фильтры по характеристикам сведены в одну таблицу** (`D_PROP_FILTERS`: ключ
+  набора в `catFilter`, сетка в панели, варианты, путь характеристики). Сечение
+  доски, направление и тип забора рисуются (`_dRenderPropFilters`), выбираются
+  (`dSelectProp`) и уходят в запрос одним кодом; ключ кэша и предикаты строятся
+  по таблице. Новый такой фильтр — одна строка в таблице и разметка сетки.
 - **Повторный запрос каталога по тегу сохраняет фильтры.** Если раздел по
   `section_id` пуст, каталог перезапрашивается одним тегом — на случай, когда
   товары тега лежат в соседнем разделе. Этот повтор шёл без предикатов, и выбор,
@@ -967,8 +972,10 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
 - Замеры (ответ сервера подменён): «Вертикальная» —
   `properties=[{board_direction eq vertical}]`, обе —
   `{board_direction in [vertical, horizontal]}`; вторая отделка с тем же выбором
-  берёт выдачу из кэша; повтор по тегу уходит с тем же предикатом.
-- Cache-bust: `state.js?v=76`, `ResourceManager.js?v=13`, `nav-desktop.js?v=138`.
+  берёт выдачу из кэша; «Плетёные» — `{fence_type eq woven}`, обе — `in`; повтор
+  по тегу уходит с тем же предикатом. Сечение у террасы работает как раньше,
+  «Пустотелая» выбрана по умолчанию.
+- Cache-bust: `state.js?v=77`, `ResourceManager.js?v=14`, `nav-desktop.js?v=139`.
 
 Ветка **Mobile**: правки 2026-09-26 — фасад на углах, рисование линий, мелочи.
 

@@ -765,7 +765,7 @@ const D_TERRACE_H_PARAM = `
 
 // Сечение доски — специфический фильтр каталога (ТЗ п. 5): живёт в левой панели,
 // рядом с настройками раздела, как высота борта у грядок. Разметку наполняет
-// _dRenderCoreFilter, отбор идёт на бэкенде по характеристике core_type.
+// _dRenderPropFilters, отбор идёт на бэкенде по характеристике core_type.
 const D_CORE_FILTER = `
   <div class="d-color-section">
     <div class="d-color-title">Доска:</div>
@@ -774,11 +774,19 @@ const D_CORE_FILTER = `
 
 // Направление доски фасадных панелей — специфический фильтр отделки фасада
 // (правка 2026-09-26, п. 11): как «Доска» у террасы, живёт в левой панели, отбор
-// на бэкенде по характеристике board_direction. Наполняет _dRenderDirFilter.
+// на бэкенде по характеристике board_direction. Наполняет _dRenderPropFilters.
 const D_DIR_FILTER = `
   <div class="d-color-section">
     <div class="d-color-title">Направление доски:</div>
     <div class="d-price-grid" id="d-dir-grid"></div>
+  </div>`;
+
+// Заполнение забора (правка 2026-09-26, п. 10): плетёные или из доски ДПК,
+// характеристика fence_type.
+const D_FENCE_FILTER = `
+  <div class="d-color-section">
+    <div class="d-color-title">Заполнение:</div>
+    <div class="d-price-grid" id="d-fence-grid"></div>
   </div>`;
 
 const D_SECTION_UI = {
@@ -845,7 +853,7 @@ const D_SECTION_UI = {
   },
   fence: {
     // Высота полотна одна — 1920 мм (правка 2026-08-30), подпись справочная.
-    params: `<div class="d-param-note">Высота забора: 1920 мм</div>`,
+    params: D_FENCE_FILTER + `<div class="d-param-note">Высота забора: 1920 мм</div>`,
     actions: [
       { lbl: 'Калитка',       fn: 'dFenceGate()' },
       { lbl: 'Удалить точку', fn: 'dDeleteSelected()', sel: true },
@@ -966,8 +974,7 @@ function _dRenderSidebar() {
   // как разметка панели создана заново.
   _dRenderRailFilters();
   _dRenderBedFilters();
-  _dRenderCoreFilter();
-  _dRenderDirFilter();
+  _dRenderPropFilters();
   // Поля параметров рисуются заново — вернуть в них значения из состояния.
   if (dActiveItem === 'terrace') _dSyncTerraceHeight();
   if (dActiveItem === 'paths') {
@@ -1105,40 +1112,43 @@ function dSetBedFilter(kind, value) {
 // ── Фильтр сечения доски (полнотелая / пустотелая) ──
 // Мультивыбор, как у ценовых категорий; отбор делает бэкенд предикатом по
 // характеристике core_type, поэтому выбор входит в ключ кэша каталога.
-function _dRenderCoreFilter() {
-  const grid = document.getElementById('d-core-grid');
-  if (!grid || typeof CORE_TYPES === 'undefined') return;
-  const on = catFilter(dActiveItem).core;
-  grid.innerHTML = CORE_TYPES.map(c =>
-    `<button class="d-price-btn ${on.has(c.id) ? 'selected' : ''}"
-             onclick="dSelectCore('${c.id}')">
-       <span class="d-radio"></span><span class="d-price-txt">${c.lbl}</span>
-     </button>`).join('');
+// Фильтры каталога по характеристикам товара — сечение доски, направление
+// фасадной доски, заполнение забора. Механика у всех одна: набор выбранных
+// значений в catFilter(раздел)[key], кнопки в своей сетке левой панели,
+// отбор на бэкенде предикатом по пути характеристики (одно значение — eq,
+// несколько — in). Разделу, где сетки нет, фильтр просто не показывается.
+const D_PROP_FILTERS = {
+  core:  { grid: 'd-core-grid',  opts: () => CORE_TYPES,       path: () => PropertyPath.CORE_TYPE },
+  dir:   { grid: 'd-dir-grid',   opts: () => BOARD_DIRECTIONS, path: () => PropertyPath.BOARD_DIRECTION },
+  fence: { grid: 'd-fence-grid', opts: () => FENCE_TYPES,      path: () => PropertyPath.FENCE_TYPE },
+};
+
+function _dRenderPropFilters() {
+  for (const key of Object.keys(D_PROP_FILTERS)) {
+    const cfg = D_PROP_FILTERS[key];
+    const grid = document.getElementById(cfg.grid);
+    if (!grid) continue;
+    const on = catFilter(dActiveItem)[key];
+    grid.innerHTML = cfg.opts().map(c =>
+      `<button class="d-price-btn ${on.has(c.id) ? 'selected' : ''}"
+               onclick="dSelectProp('${key}', '${c.id}')">
+         <span class="d-radio"></span><span class="d-price-txt">${c.lbl}</span>
+       </button>`).join('');
+  }
 }
 
-function dSelectCore(id) {
-  const on = catFilter(dActiveItem).core;
+function dSelectProp(key, id) {
+  const on = catFilter(dActiveItem)[key];
   if (on.has(id)) on.delete(id); else on.add(id);
-  _dRenderCoreFilter();
+  _dRenderPropFilters();
   dShowResults();
 }
 
-function _dRenderDirFilter() {
-  const grid = document.getElementById('d-dir-grid');
-  if (!grid || typeof BOARD_DIRECTIONS === 'undefined') return;
-  const on = catFilter(dActiveItem).dir;
-  grid.innerHTML = BOARD_DIRECTIONS.map(c =>
-    `<button class="d-price-btn ${on.has(c.id) ? 'selected' : ''}"
-             onclick="dSelectDir('${c.id}')">
-       <span class="d-radio"></span><span class="d-price-txt">${c.lbl}</span>
-     </button>`).join('');
-}
-
-function dSelectDir(id) {
-  const on = catFilter(dActiveItem).dir;
-  if (on.has(id)) on.delete(id); else on.add(id);
-  _dRenderDirFilter();
-  dShowResults();
+// Выбранные значения фильтра key у активного раздела — в порядке вариантов.
+function _selectedProp(key) {
+  const sel = (typeof catFilter === 'function') ? catFilter(dActiveItem)[key] : null;
+  if (!sel || !sel.size) return [];
+  return D_PROP_FILTERS[key].opts().filter(c => sel.has(c.id)).map(c => c.id);
 }
 
 // Крепёж грядки по характеристике каталога components.corner_bracket.type
@@ -2297,8 +2307,8 @@ async function _ensureCatalogSection(sectionId, opts) {
     // на клиенте больше не считаются. Несколько выбранных категорий идут одним
     // предикатом IN.
     const cats = raw ? [] : _selectedPriceCats();
-    const cores = raw ? [] : _selectedCoreTypes();
-    const dirs = raw ? [] : _selectedDirections();
+    const props = {};
+    for (const k of Object.keys(D_PROP_FILTERS)) props[k] = raw ? [] : _selectedProp(k);
     const preds = [];
     if (typeof PropertyPath !== 'undefined' && typeof PropertyOp !== 'undefined') {
       const pred = (path, list) => ({
@@ -2307,11 +2317,13 @@ async function _ensureCatalogSection(sectionId, opts) {
         value: list.length > 1 ? list : list[0],
       });
       if (cats.length)  preds.push(pred(PropertyPath.PRICE_CATEGORY, cats));
-      // Сечение доски — та же механика: фильтр отбирает только товары, у которых
-      // характеристика заполнена (у ступеней solid, у доски ДПК и МПК hollow).
-      if (cores.length) preds.push(pred(PropertyPath.CORE_TYPE, cores));
-      // Направление доски фасадных панелей — то же: отбирает сервер.
-      if (dirs.length && PropertyPath.BOARD_DIRECTION) preds.push(pred(PropertyPath.BOARD_DIRECTION, dirs));
+      // Характеристики товара (сечение доски, направление, тип забора) — та же
+      // механика: фильтр отбирает только товары, у которых характеристика
+      // заполнена (у ступеней core_type solid, у доски ДПК и МПК hollow).
+      for (const k of Object.keys(D_PROP_FILTERS)) {
+        const path = D_PROP_FILTERS[k].path();
+        if (props[k].length && path) preds.push(pred(path, props[k]));
+      }
     }
     if (preds.length) filters.push(new Filter(FilterType.PROPERTIES, preds));
     const res = await rm.getResources(...filters);
@@ -2339,8 +2351,7 @@ async function _ensureCatalogSection(sectionId, opts) {
     console.info('[catalog] раздел', sectionId,
                  tags.length ? `(тег${tags.length > 1 ? 'и' : ''} «${tags.join(', ')}»)` : '(без тега)',
                  cats.length ? `(категор${cats.length > 1 ? 'ии' : 'ия'} «${cats.join(', ')}»)` : '',
-                 cores.length ? `(сечение «${cores.join(', ')}»)` : '',
-                 dirs.length ? `(направление «${dirs.join(', ')}»)` : '',
+                 ...Object.keys(props).filter(k => props[k].length).map(k => `(${k} «${props[k].join(', ')}»)`),
                  '→', products === null ? 'ошибка запроса' : products.length + ' товар(ов)');
     _catalogCache[key] = products;
     if (products === null) _catalogNoteFail(sectionId);
@@ -2408,25 +2419,11 @@ function _selectedPriceCats() {
   return Object.keys(PRICE_TIER_CATEGORY).filter(t => sel.has(t)).map(t => PRICE_TIER_CATEGORY[t]);
 }
 
-// Сечение доски, выбранное пользователем: значения характеристики core_type.
-function _selectedCoreTypes() {
-  const sel = (typeof catFilter === 'function') ? catFilter(dActiveItem).core : null;
-  if (!sel || !sel.size) return [];
-  return (typeof CORE_TYPES !== 'undefined' ? CORE_TYPES : []).filter(c => sel.has(c.id)).map(c => c.id);
-}
-
-// Направление доски фасада, выбранное пользователем: значения board_direction.
-function _selectedDirections() {
-  const sel = (typeof catFilter === 'function') ? catFilter(dActiveItem).dir : null;
-  if (!sel || !sel.size) return [];
-  return (typeof BOARD_DIRECTIONS !== 'undefined' ? BOARD_DIRECTIONS : []).filter(c => sel.has(c.id)).map(c => c.id);
-}
-
-// Ключ кэша каталога: раздел плюс выбранные категории, сечение и направление —
-// выдачи для разных наборов разные, потому что фильтрует сервер.
+// Ключ кэша каталога: раздел плюс выбранные категории и значения фильтров по
+// характеристикам — выдачи для разных наборов разные, потому что фильтрует сервер.
 function _catKey(sectionId) {
-  const parts = [String(sectionId), _selectedPriceCats().join(','), _selectedCoreTypes().join(','),
-                 _selectedDirections().join(',')];
+  const parts = [String(sectionId), _selectedPriceCats().join(','),
+                 ...Object.keys(D_PROP_FILTERS).map(k => _selectedProp(k).join(','))];
   while (parts.length > 1 && !parts[parts.length - 1]) parts.pop();
   return parts.join('|');
 }
