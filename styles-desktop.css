@@ -883,8 +883,27 @@ button, input, select, textarea { font-family: inherit; }
 }
 .d-req-input:focus { border-color: var(--accent); }
 .d-req-note { font-size: 13px; font-weight: 400; color: #888; line-height: 1.35; }
+/* Галочка согласия: флажок акцентного цвета, текст в две строки рядом с ним,
+   ссылка на политику — подчёркнутая, в цвет акцента. */
+.d-req-consent {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%; cursor: pointer;
+  font-size: 13px; font-weight: 400; color: #666; line-height: 1.35;
+}
+.d-req-consent input {
+  flex: none; width: 18px; height: 18px; margin: 1px 0 0; cursor: pointer;
+  accent-color: var(--accent);
+}
+.d-req-consent a { color: var(--accent); text-decoration: underline; }
 .d-req-err { font-size: 14px; color: #c0392b; min-height: 18px; }
 .d-req-err:empty { min-height: 0; }
+/* Ссылка-кнопка под ошибкой: обычный путь её не показывает (hidden снимается
+   только после отказа сервера), поэтому оформлена скромно. */
+.d-req-dump {
+  align-self: flex-start; background: none; border: none; padding: 0;
+  font: inherit; font-size: 13px; color: var(--accent, #e8730a);
+  text-decoration: underline; cursor: pointer;
+}
+.d-req-dump[hidden] { display: none; }
 .d-req-actions { display: flex; gap: 8px; width: 100%; }
 .d-req-actions .d-btn { flex: 1; height: 44px; font-size: 16px; cursor: pointer; }
 

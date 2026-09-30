@@ -551,15 +551,52 @@ class ResourceManager {
         return this.#flatCache?.find(s => s.code === code) || null;
     }
 
-    // Сохранение и загрузка проекта (backend_API/ResourceManager.js, 2026-09-18).
+    // Сохранение и загрузка проекта (backend_API/ResourceManager.js, 2026-09-20).
     // Сервер кладёт присланный data как есть и возвращает ключ; по ключу проект
     // отдаётся обратно. Ошибку методы не поднимают — возвращают null.
-    async saveProject(name, email, data) {
+    // calculation — необязательные данные для сметы: то же тело, что у
+    // calculation_report. Передали — клиенту придёт письмо со сметой в PDF,
+    // не передали — письмо уйдёт с одной ссылкой на проект.
+    // Отличие от копии бэкенда: причину отказа не выбрасываем. Сервер присылает
+    // её текстом ({"error": "Неверный формат проекта — elements.fence.points[0].x:
+    // нужно число"}), а пользователь видел только «попробуйте ещё раз» — понять,
+    // что именно не так, было нельзя (правка 2026-09-20). Ответ кладётся в
+    // lastSaveError; возвращаемое значение прежнее.
+    lastSaveError = null;
+
+    async saveProject(name, email, data, calculation = null) {
+        this.lastSaveError = null;
         try {
             const response = await fetch(`${this.#api_domain}/api/v1/create_project/`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, email, data }),
+                body: JSON.stringify({ name, email, data, calculation }),
+            });
+            if (!response.ok) {
+                let text = '';
+                try { text = await response.text(); } catch (_) {}
+                let message = '';
+                try { message = (JSON.parse(text) || {}).error || ''; } catch (_) {}
+                this.lastSaveError = { status: response.status, message, body: text };
+                console.error(`[create_project] HTTP ${response.status}`, message || text);
+                return null;
+            }
+            return await response.json();
+        } catch (error) {
+            this.lastSaveError = { status: 0, message: '', body: String(error) };
+            console.error('Failed to save project:', error);
+            return null;
+        }
+    }
+
+    // Тот же приём заявки, но без писем: проект сохраняется и открывается
+    // по своему коду, никто ничего не получает. Для проверок.
+    async saveProjectTest(name, email, data, calculation = null) {
+        try {
+            const response = await fetch(`${this.#api_domain}/api/v1/create_project_test/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email, data, calculation }),
             });
             if (!response.ok) {
                 console.error(`HTTP ${response.status}`);

@@ -22,7 +22,9 @@ const D_SIDEBAR_ITEMS = [
   { id: 'facade2',       lbl: 'Отделка фасада 2',    hasEditor: true },
   { id: 'beds',          lbl: 'Грядки',              hasEditor: true  },
   { id: 'furniture',     lbl: 'Садовая мебель',      hasEditor: true  },
-  { id: 'pool_terrace',  lbl: 'Терраса у бассейна',  hasEditor: true  },
+  // Убран из интерфейса (правка 2026-09-26). Код раздела оставлен: снимки
+  // проектов с бассейном по-прежнему открываются и считаются.
+  { id: 'pool_terrace',  lbl: 'Терраса у бассейна',  hasEditor: true, hidden: true },
 ];
 // Пункты, реально попадающие в меню (и в замер ширины левой панели).
 const D_MENU_ITEMS = D_SIDEBAR_ITEMS.filter(i => !i.hidden);
@@ -752,7 +754,7 @@ function _dInit3dSlot(slotId, step, after) {
 const D_TERRACE_H_PARAM = `
   <div class="d-param-group">
     <div class="d-param-head">
-      <span class="d-param-label">Высота настила, см.</span>
+      <span class="d-param-label">Высота террасы, см.</span>
       <input class="d-param-input" type="number" id="v-terrace-h" min="15" step="5"
              oninput="dSetTerraceHeight(this.value)">
     </div>
@@ -1330,14 +1332,13 @@ function dRailingEntry() {
 // открывает редактор заново, как при первом заходе (TODO п.3). Раньше редактор
 // оставался открытым и сразу подставлял стартовую разметку — «удалить всё» на
 // экране выглядело как «переставить заново».
+// «Удалить всё» работает сразу, без окна «Подтвердите действие…» (правка
+// 2026-09-26): цена ошибки невысока — раздел размечается заново за минуту, — а
+// системное окно браузера пугало.
 function dResetSection(secId) {
-  const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
-  const label = item ? item.lbl : secId;
-  if (!window.confirm(`Удалить всё в разделе «${label}»?`)) return;
-
   if (S.pts && S.pts[secId]) S.pts[secId] = [];
   if (RECT_SECTIONS[secId]) { secRects(secId).length = 0; setSecActiveIdx(secId, null); }
-  if (secId === 'steps')     S.stepsList = [{ ...DEFAULT_STEPS_RECT }]; S.activeSteps = 0;
+  if (secId === 'steps')     { S.stepsList = [{ ...DEFAULT_STEPS_RECT }]; S.activeSteps = 0; }
   if (secId === 'beds')      { S.beds = []; S.activeBed = null; }
   if (secId === 'furniture') { S.furniture = []; S.activeFurniture = null; }
   if (secId === 'facade')    S.wallZones = {};
@@ -1384,6 +1385,9 @@ function _dSelectItem(secId) {
 
   if (!S.sections.includes(secId)) S.sections.push(secId);
   _dSeedSection(secId);
+  // Ступени при создании сразу получают материал под доску террасы — той же фирмы
+  // и цвета. Если пользователь уже выбрал свой, подбор его не тронет.
+  if (secId === 'steps') _syncDefaultStepsProduct();
   // Раздел считается настроенным, как только в нём есть объекты: подтверждать
   // («Дальше») больше нечего.
   if (_dSectionHasContent(secId)) dConfigured.add(secId);
@@ -1450,8 +1454,8 @@ const D_SECTION_HINTS = {
   pool_terrace: 'Отдельно стоящая терраса: тяните за углы или за тело. «БАССЕЙН ▭» и «БАССЕЙН ○» ставят бассейн — в настиле на его месте будет вырез; повторное нажатие убирает.',
   steps: 'Лестницу двигают за середину, ширину меняют маркерами по краям. Разворачивается к террасе автоматически, количество ступеней считается от высоты.',
   beds: 'Грядку перетаскивайте мышью; клик по ней разворачивает на 90°.',
-  paths: 'Дорожка рисуется отрезками: клик — начало, второй клик — конец. Следующий отрезок — снова клик. Клик по уже поставленной точке склеивает отрезки, Esc отменяет начатый.',
-  fence: 'Забор рисуется отрезками: клик — начало, второй клик — конец. Клик по уже поставленной точке склеивает. Ближе 3 м к дому и террасе забор не ставится. «КАЛИТКА» ставит готовую калитку — маркер двигают по линии.',
+  paths: 'Дорожка рисуется кликами: каждый клик добавляет точку, линия тянется дальше. Закончить — правой кнопкой мыши, Esc или повторным кликом в последнюю точку. Клик по готовой точке выделяет её — её можно перетащить или удалить. Через дом и террасу дорожка не проходит.',
+  fence: 'Забор рисуется кликами: каждый клик добавляет точку, линия тянется дальше. Закончить — правой кнопкой мыши, Esc или повторным кликом в последнюю точку. Клик по готовой точке выделяет её. Через дом и террасу и ближе 3 м к ним забор не проходит. «КАЛИТКА» ставит готовую калитку — маркер двигают по линии.',
   railing: 'Ограждение строится по периметру террасы само и разрывается под лестницей. Нужен разрыв без лестницы — «ОБОЗНАЧИТЬ ВХОД», затем тяните маркеры разрыва по периметру.',
   furniture: 'Мебель появляется в сцене при выборе товара в каталоге. Перетаскивайте её мышью, клик разворачивает на 90°; на террасе она встаёт на настил.',
   facade: 'Кликайте по стенам дома, отмечая места под отделку. Повторный клик снимает выбор. Простенок и фронтон делятся по границам окна; пояс по линии карниза отделывается вместе с соседней стеной.',
@@ -1463,6 +1467,9 @@ const D_SECTION_HINTS = {
 // смену текста в углу легко не заметить, а первый заход требует прочитать жесты.
 // Помним показанные разделы в рамках сессии.
 const _dHintShown = new Set();
+// Редакции подсказок разделов. Дорожки и забор: 2 — рисование непрерывное, до
+// правой кнопки; дорожки: 3 — через дом и террасу не проходят (правки 2026-09-26).
+const D_HINT_REV = { paths: 3, fence: 2 };
 
 // Текст подсказки раздела. На телефоне жесты другие («касание» вместо «клик»),
 // поэтому мобильная раскладка подменяет формулировки через mHintText.
@@ -1479,8 +1486,11 @@ function _dShowEditorHint(secId) {
   // На телефоне окна показываются очередью (mHintTake): при первом заходе их
   // может совпасть несколько, и они перекрывали бы друг друга.
   const item0 = D_SIDEBAR_ITEMS.find(i => i.id === secId);
+  // Номер редакции подсказки входит в ключ памяти: изменилась логика раздела —
+  // подсказку надо показать заново тем, кто видел старую.
+  const rev = D_HINT_REV[secId] ? '@' + D_HINT_REV[secId] : '';
   if (typeof mHintTake === 'function'
-      && mHintTake('sec:' + secId, item0 ? item0.lbl : '', text)) return;
+      && mHintTake('sec:' + secId + rev, item0 ? item0.lbl : '', text)) return;
   const ov = document.getElementById('d-hint-overlay');
   const body = document.getElementById('d-hint-text');
   const title = document.getElementById('d-hint-title');
@@ -1622,6 +1632,33 @@ function _activeIsDeck() {
   return DECK_MAT_ELEMENTS.includes(dActiveItem);
 }
 
+// Образец из товара каталога — ровно тот набор полей, который дальше разбирает
+// _applySampleTo. Собирается в двух местах: при «Применить» в каталоге и при
+// открытии проекта по ссылке (в снимке лежит только productId).
+function _sampleFromProduct(product) {
+  return { id: product.id, name: product.name, color: null,
+           textures: product.textures, modelUrl: product.modelUrl || '',
+           colorName: product.color || '',
+           properties: product.properties || null,
+           previewText: product.previewText || '',
+           price: _productPrice(product) };
+}
+
+// Товар по id с загруженными текстурами: сперва из кэша каталога, иначе с бэкенда.
+async function _loadProduct(pid) {
+  if (!pid) return null;
+  let product = null;
+  for (const k in _catalogCache) {
+    const arr = _catalogCache[k];
+    if (Array.isArray(arr)) { const f = arr.find(p => p.id === pid); if (f) { product = f; break; } }
+  }
+  const rm = _getRM();
+  if (!product && rm) { try { product = await rm.getProductById(pid); } catch (_) {} }
+  if (!product) return null;
+  try { await product.loadTextures(); } catch (_) {}
+  return product;
+}
+
 // Применяет образец (текстуры/цвет) к АКТИВНОМУ элементу. Деко-элементы — через
 // S.elementMat[el] + пересборку (каждый независимо); прочие (фасад/забор/ограждение)
 // — прежним способом (цвет live / глобально).
@@ -1647,41 +1684,85 @@ function _bedHeightFromProduct(sample) {
   return m ? parseInt(m[1], 10) / 1000 : null;
 }
 
-// Товар ступеней «по умолчанию» подтягивается за доской террасы: если пользователь
-// сам ступени не выбирал, берём товар из default_steps_id и красим ими 3D. Пометка
-// auto:true отличает автоматический выбор от ручного — ручной не перетираем.
+// Ступени по умолчанию — ТОЙ ЖЕ ФИРМЫ И ЦВЕТА, что доска террасы (правка
+// 2026-09-26). Порядок выбора:
+//   1) товар из default_steps_id террасы, если он той же фирмы и цвета —
+//      связка, которую ведёт бэкенд;
+//   2) иначе — ступени той же фирмы и цвета из каталога раздела ступеней;
+//   3) иначе — default_steps_id как есть (хоть та же линейка).
+// Фирма — первое слово названия товара («TalverWood Стандарт 150×25»): отдельного
+// поля производителя в API нет. Выбор пользователя не отключается: ручной
+// выбор помечен без auto, и автоматический его не перетирает.
 let _defStepsBusy = null;
-function _syncDefaultStepsProduct() {
-  const id = _defaultStepsProductId();
+
+function _productBrand(p) {
+  const m = /^\s*(\S+)/.exec((p && p.name) || '');
+  return m ? m[1].toLowerCase() : '';
+}
+function _productColor(p) {
+  return String((p && (p.colorName || p.color)) || '').trim().toLowerCase();
+}
+
+async function _syncDefaultStepsProduct() {
+  const t = S.elementMat && S.elementMat.terrace;
   const cur = S.elementMat && S.elementMat.steps;
   if (cur && !cur.auto) return;                       // ступени выбраны вручную
-  if (!id) { if (cur && cur.auto) { delete S.elementMat.steps; _rebuild3d(); } return; }
-  if (cur && cur.auto && cur.productId === id) return; // уже стоит нужный
-  if (_defStepsBusy === id) return;
-  const rm = _getRM();
-  if (!rm) return;
-  _defStepsBusy = id;
-  rm.getProductById(id).then(async product => {
-    _defStepsBusy = null;
-    if (!product) return;
+  if (!t || !t.productId) {
+    if (cur && cur.auto) { delete S.elementMat.steps; delete S.estimate.steps; _rebuild3d(); }
+    return;
+  }
+  if (cur && cur.auto && cur.forTerrace === t.productId) return;   // уже подобраны под эту доску
+  if (_defStepsBusy === t.productId) return;
+  _defStepsBusy = t.productId;
+  try {
+    const brand = _productBrand(t), color = _productColor(t);
+    const same = p => !!p && _productBrand(p) === brand && (!color || _productColor(p) === color);
+    const defId = _defaultStepsProductId();
+    const def = defId ? await _loadProduct(defId) : null;
+    let product = same(def) ? def : null;
+    if (!product) {
+      const list = await _loadCatalogRaw(CONSTRUCTION_TO_SECTION.steps);
+      const hit = (list || []).find(same);
+      if (hit) product = await _loadProduct(hit.id);
+    }
+    if (!product) product = def;
+    if (!product) { console.info('[steps] ступеней той же фирмы и цвета не нашлось'); return; }
     const now = S.elementMat && S.elementMat.steps;
     if (now && !now.auto) return;                     // пока грузили, выбрали вручную
-    try { await product.loadTextures(); } catch (_) {}
-    const meta = { productId: product.id, name: product.name || '',
-                   colorName: product.color || '', properties: product.properties || null,
-                   previewText: product.previewText || '', modelUrl: product.modelUrl || '',
-                   auto: true };
-    S.elementMat.steps = product.textures ? { textures: product.textures, ...meta } : meta;
-    console.info('[steps] ступень по умолчанию из доски террасы:', product.name || id);
-    _rebuild3d();
-  }).catch(() => { _defStepsBusy = null; });
+    const tNow = S.elementMat && S.elementMat.terrace;
+    if (!tNow || tNow.productId !== t.productId) return;   // доску уже сменили
+    _applySampleTo('steps', _sampleFromProduct(product));
+    S.elementMat.steps.auto = true;
+    S.elementMat.steps.forTerrace = t.productId;
+    console.info('[steps] ступени по умолчанию под доску террасы:', product.name || product.id,
+                 same(product) ? '(та же фирма и цвет)' : '(по связке default_steps_id)');
+  } finally {
+    _defStepsBusy = null;
+  }
+}
+
+// Каталог раздела БЕЗ пользовательских фильтров: для подбора ступеней под террасу
+// фильтры активного раздела (например «Пустотелая» у террасы) неприменимы — они
+// отсекли бы полнотелые ступени целиком. Пока раздел грузится, ждём.
+async function _loadCatalogRaw(sectionId) {
+  for (let i = 0; i < 20; i++) {
+    const list = await _ensureCatalogSection(sectionId, { raw: true });
+    if (list !== undefined) return list;
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return null;
 }
 
 function _rebuild3d() { if (typeof buildScene3d === 'function') buildScene3d(); }
 
-function _applySampleToActive(sample) {
-  _setEstimateForActive(sample);           // смета обновляется вместе с материалом
-  if (_activeIsDeck()) {
+function _applySampleToActive(sample) { _applySampleTo(dActiveItem, sample); }
+
+// Тот же разбор образца, но для ЛЮБОГО раздела, а не только активного: при
+// открытии проекта по ссылке интерфейс ни на чём не стоит, а материалы разделам
+// назначить надо (иначе всё строится в запасной цвет — баг 2026-09-20).
+function _applySampleTo(secId, sample) {
+  _setEstimateFor(secId, sample);          // смета обновляется вместе с материалом
+  if (DECK_MAT_ELEMENTS.includes(secId)) {
     // productId/name сохраняем рядом с текстурами: по ним расчёт террасы на бэкенде
     // узнаёт выбранную доску (_deckingBoardProductId), 3D-слой их игнорирует.
     // colorName — имя цвета товара из каталога (пригождается 3D-слою).
@@ -1693,12 +1774,12 @@ function _applySampleToActive(sample) {
                    previewText: sample.previewText || '',
                    // modelUrl: у забора по нему берётся GLB товара (TODO.md → ЗАБОР 2).
                    modelUrl: sample.modelUrl || '' };
-    S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures, ...meta }
+    S.elementMat[secId] = sample.textures ? { textures: sample.textures, ...meta }
                               : (sample.color ? { color: sample.color, ...meta } : null);
     // Грядки: высота борта — свойство ТОВАРА (150/200/225/270/300 мм, см. TODO.md),
     // забираем её из названия и отдаём в 3D. Фильтр высоты сюда не вмешивается: он
     // отбирает каталог, а рисуется то, что выбрано (TODO п.15).
-    if (dActiveItem === 'beds') {
+    if (secId === 'beds') {
       const h = _bedHeightFromProduct(sample);
       if (h) S.bedH = h;
       // Крепёж грядки тоже свойство ТОВАРА: у грядок с УГЛОМ (металлическим или
@@ -1707,21 +1788,21 @@ function _applySampleToActive(sample) {
     }
     // Ограждение: сечение столба (100/125 мм) — тоже свойство товара, фильтр
     // раздела только отбирает каталог (TODO п.1).
-    if (dActiveItem === 'railing') S.railPostW = _railPostWFromProduct(sample);
+    if (secId === 'railing') S.railPostW = _railPostWFromProduct(sample);
     // Доска террасы задаёт ступень по умолчанию (default_steps_id).
-    if (dActiveItem === 'terrace') _syncDefaultStepsProduct();
+    if (secId === 'terrace') _syncDefaultStepsProduct();
     if (typeof buildScene3d === 'function') buildScene3d();
-  } else if (dActiveItem === 'furniture') {
+  } else if (secId === 'furniture') {
     // Мебель СТАВИТСЯ выбором товара (ТЗ п. 10): предмет появляется перед
     // камерой на ближайшем свободном месте, повторный клик по карточке ставит
     // ещё один. Точек размещения больше нет.
     _assignFurnitureProduct(sample);
-  } else if (dActiveItem === 'facade' || dActiveItem === 'facade2') {
+  } else if (secId === 'facade' || secId === 'facade2') {
     // Фасад: материал панелей ложится на выбранные сегменты СВОЕГО раздела
     // (facadeZones) без пересборки сцены. Отделок две, и у каждой свой материал,
     // поэтому «пустой выбор = весь фасад» больше не действует: вторая отделка
     // залила бы собой всё.
-    S.elementMat[dActiveItem] = sample.textures ? { textures: sample.textures }
+    S.elementMat[secId] = sample.textures ? { textures: sample.textures }
                               : (sample.color ? { color: sample.color } : null);
     if (typeof _applyFacadeSelection === 'function' && typeof threeState !== 'undefined' && threeState) {
       _applyFacadeSelection();
@@ -1729,6 +1810,44 @@ function _applySampleToActive(sample) {
   } else if (sample.color && typeof applyMaterialToScene === 'function') {
     applyMaterialToScene(sample.color);    // забор/ограждение — цвет
   }
+}
+
+// Восстановление товаров проекта, открытого по ссылке: в снимке лежат только
+// идентификаторы, а материалу нужны текстуры, модель и характеристики товара.
+// Раньше восстанавливалась одна строка сметы, и вся геометрия строилась в
+// запасной серый цвет (баг 2026-09-20). Разделы грузятся параллельно; сцена
+// пересобирается ОДИН раз в конце, а не на каждый товар.
+async function dRestoreProducts(byId, furnitureIds) {
+  const jobs = [];
+  for (const secId of Object.keys(byId || {})) {
+    const pid = byId[secId];
+    if (!pid) continue;
+    jobs.push(_loadProduct(pid).then(product => {
+      if (!product) { console.warn('[project] товар не найден:', secId, pid); return; }
+      // Мебель ставится не так: у неё товар лежит в самом предмете (ниже).
+      if (secId === 'furniture') return;
+      _applySampleTo(secId, _sampleFromProduct(product));
+    }));
+  }
+  // Мебель: у каждого предмета свой товар, и ему нужен modelUrl, иначе вместо
+  // модели остаётся условная коробка.
+  const uniq = [...new Set((furnitureIds || []).filter(Boolean))];
+  const models = {};
+  for (const pid of uniq) {
+    jobs.push(_loadProduct(pid).then(product => {
+      if (product) models[pid] = { id: product.id, name: product.name || '', modelUrl: product.modelUrl || '' };
+    }));
+  }
+  await Promise.all(jobs);
+  for (const f of (S.furniture || [])) {
+    const m = f.product && models[f.product.id];
+    if (m) f.product = { ...m };
+  }
+  if (typeof buildScene3d === 'function') buildScene3d();
+  if (typeof _applyFacadeSelection === 'function' && typeof threeState !== 'undefined' && threeState) {
+    _applyFacadeSelection();
+  }
+  if (typeof _dSyncSummaryBtn === 'function') _dSyncSummaryBtn();
 }
 
 // Назначает товар точке мебели: активной, иначе первой без товара (по номерам),
@@ -2111,11 +2230,14 @@ function _activeSectionId() {
 //   [] — раздел реально пуст (fallback на заглушки, не перезапрашиваем);
 //   null — ошибка/недоступно (перезапросим, но не больше CATALOG_MAX_TRIES раз);
 //   undefined — ещё не грузили.
-async function _ensureCatalogSection(sectionId) {
+async function _ensureCatalogSection(sectionId, opts) {
   // Ключ кэша учитывает выбранные ценовые категории: их отбирает сервер, и для
   // разных наборов выдачи разные. Счётчик ошибок остаётся на разделе — не
   // отвечает именно он, а не отдельный фильтр.
-  const key = _catKey(sectionId);
+  // opts.raw — выдача без пользовательских фильтров (фильтры берутся у АКТИВНОГО
+  // раздела, а зовут нас и для чужого: подбор ступеней под террасу).
+  const raw = !!(opts && opts.raw);
+  const key = raw ? String(sectionId) : _catKey(sectionId);
   if (Array.isArray(_catalogCache[key])) return _catalogCache[key];
   if (_catalogLoading[key]) return undefined;
   // Сервер не отвечает вовсе — запросы прекращены совсем (см. _catalogNoteFail).
@@ -2144,8 +2266,8 @@ async function _ensureCatalogSection(sectionId) {
     // Ценовая категория — предикат по характеристике товара (ТЗ п. 4): вилки цен
     // на клиенте больше не считаются. Несколько выбранных категорий идут одним
     // предикатом IN.
-    const cats = _selectedPriceCats();
-    const cores = _selectedCoreTypes();
+    const cats = raw ? [] : _selectedPriceCats();
+    const cores = raw ? [] : _selectedCoreTypes();
     const preds = [];
     if (typeof PropertyPath !== 'undefined' && typeof PropertyOp !== 'undefined') {
       const pred = (path, list) => ({
@@ -2597,12 +2719,14 @@ function _parsePriceNum(s) {
 // Записывает товар в смету активного элемента. Вызывается из «Применить»:
 // отдельной кнопки «В смету» больше нет — применённый материал И ЕСТЬ выбор
 // для сметы, а два действия на карточке путали (материал в 3D один, в смете другой).
-function _setEstimateForActive(sample) {
-  if (!dActiveItem) return;
+function _setEstimateForActive(sample) { _setEstimateFor(dActiveItem, sample); }
+
+function _setEstimateFor(secId, sample) {
+  if (!secId) return;
   if (!('price' in sample)) return;   // источник цены не передал — строку сметы не трогаем
   const price = _parsePriceNum(sample.price);
-  if (price == null) { delete S.estimate[dActiveItem]; _dSyncSummaryBtn(); return; }
-  S.estimate[dActiveItem] = { id: sample.id, name: sample.name, price };
+  if (price == null) { delete S.estimate[secId]; _dSyncSummaryBtn(); return; }
+  S.estimate[secId] = { id: sample.id, name: sample.name, price };
   _dSyncSummaryBtn();
 }
 
@@ -3344,17 +3468,27 @@ function dShowSummary() {
 
 // ── Заявка: имя, почта, согласие ──────────────────────────────────────────
 // «Отправить заявку» в смете открывает это окно; по «Отправить» на сервер уходит
-// имя, почта и ОПИСАНИЕ проекта (project-io.js). Смету бэкенд считает сам, в
-// запрос она не входит. Ключ проекта возвращается в ответе — по нему приходит
-// ссылка в письме.
+// имя, почта, ОПИСАНИЕ проекта и данные для расчёта (project-io.js): по ним
+// бэкенд сам собирает смету в PDF к письму — посчитанной сметы в запросе нет.
+// Ключ проекта возвращается в ответе — по нему приходит ссылка в письме.
 function dOpenRequest() {
   const ov = document.getElementById('d-req-overlay');
   if (!ov) return;
   const err = document.getElementById('d-req-err');
   if (err) err.textContent = '';
+  dSyncRequestConsent();
   ov.classList.add('active');
   const name = document.getElementById('d-req-name');
   if (name) setTimeout(() => name.focus(), 50);
+}
+
+// Без галочки согласия «Отправить» заблокирована (правка 2026-09-26). Галочка
+// между открытиями окна не сбрасывается: однажды данное согласие переспрашивать
+// незачем, а снять его пользователь может сам.
+function dSyncRequestConsent() {
+  const box = document.getElementById('d-req-consent');
+  const btn = document.getElementById('d-req-send');
+  if (btn) btn.disabled = !(box && box.checked);
 }
 
 function dCloseRequest() {
@@ -3381,14 +3515,24 @@ async function dSendRequest() {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     say('Проверьте адрес почты.'); if (mailEl) mailEl.focus(); return;
   }
+  const consent = document.getElementById('d-req-consent');
+  if (consent && !consent.checked) { say('Отметьте согласие на обработку данных.'); return; }
   if (typeof saveProjectToServer !== 'function') { say('Сервис недоступен.'); return; }
   say('');
   if (btn) { btn.disabled = true; btn.textContent = 'Отправляем…'; }
+  const dump = document.getElementById('d-req-dump');
+  if (dump) dump.hidden = true;
   let res = null;
   try { res = await saveProjectToServer(name, email); }
-  catch (e) { console.warn('[project] save failed', e); res = { error: 'Не удалось отправить заявку.' }; }
-  if (btn) { btn.disabled = false; btn.textContent = 'Отправить'; }
-  if (!res || res.error) { say((res && res.error) || 'Не удалось отправить заявку.'); return; }
+  catch (e) { console.warn('[project] save failed', e); res = { error: 'Не удалось отправить заявку.', canDump: true }; }
+  if (btn) btn.textContent = 'Отправить';
+  dSyncRequestConsent();                   // доступность кнопки — снова по галочке
+  if (!res || res.error) {
+    say((res && res.error) || 'Не удалось отправить заявку.');
+    // Отказ разбирает бэкенд — даём выгрузить то, что реально ушло.
+    if (dump && typeof pioDumpRequest === 'function') dump.hidden = false;
+    return;
+  }
   dCloseRequest();
   dCloseSummary();
   const done = document.getElementById('d-req-done');

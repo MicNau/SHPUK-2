@@ -594,7 +594,9 @@ function e3dSync() {
 
 function _e3dOverlayEl() { return document.getElementById('d-3d-overlay'); }
 
-let _e3dLabels = [];   // [{ np, text, cls }] — что показывать в этом кадре
+// Что показывать в этом кадре: [{ text, corners }] — прямоугольник (подпись под
+// ним), [{ text, a, b }] — отрезок (подпись сбоку), [{ text, np }] — точка.
+let _e3dLabels = [];
 
 function _fmtM3d(m) {
   return (Math.round(m * 100) / 100).toFixed(m < 10 ? 2 : 1).replace(/\.?0+$/, '') + ' м';
@@ -617,7 +619,11 @@ function _e3dSyncOverlay() {
         const txt = kind === 'rect'
           ? `${_fmtM3d(wm)} × ${_fmtM3d(hm)}  ·  ${(wm * hm).toFixed(1)} м²`
           : `${_fmtM3d(wm)} × ${_fmtM3d(hm)}`;
-        _e3dLabels.push({ np: { x: r.x + r.w / 2, y: r.y + r.h / 2 }, text: txt });
+        // Подпись ставится ПОД объектом, а не на нём: над центром она закрывала
+        // угловые ручки, особенно у маленькой террасы и при виде сверху издалека.
+        _e3dLabels.push({ text: txt, corners: [
+          { x: r.x, y: r.y }, { x: r.x + r.w, y: r.y },
+          { x: r.x + r.w, y: r.y + r.h }, { x: r.x, y: r.y + r.h }] });
       });
     } else if (kind === 'railing') {
       // Ширина разрыва — таким же числом, как остальные размеры: на глаз её было
@@ -626,8 +632,7 @@ function _e3dSyncOverlay() {
         for (const e of railingEntryPointsNorm()) {
           const len = Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y) * GRID;
           if (len < 0.05) continue;
-          _e3dLabels.push({ np: { x: (e.a.x + e.b.x) / 2, y: (e.a.y + e.b.y) / 2 },
-                            text: _fmtM3d(len) });
+          _e3dLabels.push({ a: e.a, b: e.b, text: _fmtM3d(len) });
         }
       }
     } else if (kind === 'line') {
@@ -638,7 +643,7 @@ function _e3dSyncOverlay() {
           const a = seg[i - 1], b = seg[i];
           const len = Math.hypot(b.x - a.x, b.y - a.y) * GRID;
           if (len < 0.3) continue;
-          _e3dLabels.push({ np: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, text: _fmtM3d(len) });
+          _e3dLabels.push({ a, b, text: _fmtM3d(len) });
         }
       }
     }
@@ -657,6 +662,18 @@ function _e3dSyncOverlay() {
 // Проекция подписей в экранные координаты — вызывается и из кадра анимации.
 const _e3dProj = new THREE.Vector3();
 
+// Подписи НЕ садятся на сам объект (правка 2026-09-26): над центром они закрывали
+// ручки. Прямоугольник подписывается под своим экранным габаритом (у края кадра —
+// над ним), отрезок — сбоку, со сдвигом поперёк линии на экране. Зазор берётся
+// с запасом на радиус ручки.
+const E3D_LABEL_GAP = 14;   // px от объекта до края плашки
+
+function _e3dScreen(np, W, H) {
+  const w = _e3dToWorld(np);
+  _e3dProj.set(w.x, E3D_LIFT, w.z).project(threeState.camera);   // та же отметка, что маркеры
+  return { x: (_e3dProj.x * 0.5 + 0.5) * W, y: (-_e3dProj.y * 0.5 + 0.5) * H, behind: _e3dProj.z > 1 };
+}
+
 function _e3dPlaceLabels() {
   const host = _e3dOverlayEl();
   if (!host || !threeState || !_e3dLabels.length) return;
@@ -665,12 +682,36 @@ function _e3dPlaceLabels() {
   _e3dLabels.forEach((l, i) => {
     const node = host.children[i];
     if (!node) return;
-    const w = _e3dToWorld(l.np);
-    _e3dProj.set(w.x, E3D_LIFT, w.z).project(threeState.camera);   // подписи на той же отметке, что маркеры
-    if (_e3dProj.z > 1) { node.style.display = 'none'; return; }
+    const lw = node.offsetWidth || 0, lh = node.offsetHeight || 0;
+    let cx, cy;
+    if (l.corners) {
+      const pts = l.corners.map(c => _e3dScreen(c, W, H));
+      if (pts.some(p => p.behind)) { node.style.display = 'none'; return; }
+      const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+      cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+      const below = Math.max(...ys) + E3D_LABEL_GAP + lh / 2;
+      const above = Math.min(...ys) - E3D_LABEL_GAP - lh / 2;
+      cy = (below + lh / 2 <= H || above - lh / 2 < 0) ? below : above;
+    } else if (l.a && l.b) {
+      const pa = _e3dScreen(l.a, W, H), pb = _e3dScreen(l.b, W, H);
+      if (pa.behind || pb.behind) { node.style.display = 'none'; return; }
+      const dx = pb.x - pa.x, dy = pb.y - pa.y, len = Math.hypot(dx, dy) || 1;
+      // Нормаль к отрезку на экране — в сторону «вниз» (или вправо у вертикали),
+      // чтобы подписи вдоль ломаной ложились на одну сторону.
+      let nx = -dy / len, ny = dx / len;
+      if (ny < 0 || (Math.abs(ny) < 1e-3 && nx < 0)) { nx = -nx; ny = -ny; }
+      // Сдвиг — на полгабарита плашки поперёк линии плюс зазор.
+      const reach = Math.abs(nx) * lw / 2 + Math.abs(ny) * lh / 2 + E3D_LABEL_GAP;
+      cx = (pa.x + pb.x) / 2 + nx * reach;
+      cy = (pa.y + pb.y) / 2 + ny * reach;
+    } else {
+      const p = _e3dScreen(l.np, W, H);
+      if (p.behind) { node.style.display = 'none'; return; }
+      cx = p.x; cy = p.y;
+    }
     node.style.display = '';
-    node.style.left = ((_e3dProj.x * 0.5 + 0.5) * W) + 'px';
-    node.style.top  = ((-_e3dProj.y * 0.5 + 0.5) * H) + 'px';
+    node.style.left = cx + 'px';
+    node.style.top  = cy + 'px';
   });
 }
 
@@ -779,8 +820,20 @@ function _e3dDragMove(np) {
     const snapTo = (typeof _lineCloseTarget === 'function') ? _lineCloseTarget(sec, d.idx, q) : null;
     if (snapTo) q = { x: snapTo.x, y: snapTo.y };
     else if (sec === 'fence' && typeof _fenceTooClose === 'function' && _fenceTooClose(q)) return;
-    // Дорожке пересечения разрешены (ТЗ 2026-09-19): полосу можно вести сквозь
-    // дом и настил, скрытая часть просто не строится (pathLinesVisible).
+    // Точка забора тянет за собой два своих отрезка — ни один не должен пройти
+    // сквозь дом или террасу (правка 2026-09-26): точка упирается, как объекты.
+    if (sec === 'fence' && typeof fenceSegBlocked === 'function') {
+      for (const nb of [pts[d.idx - 1], pts[d.idx + 1]]) {
+        if (nb && !nb.break && fenceSegBlocked(nb, q)) return;
+      }
+    }
+    // Дорожке пересекать дом и террасу тоже нельзя (правка 2026-09-26; 19.09
+    // было решено наоборот — вести насквозь и обрезать скрытое).
+    if (sec === 'paths' && typeof pathSegBlocked === 'function') {
+      for (const nb of [pts[d.idx - 1], pts[d.idx + 1]]) {
+        if (nb && !nb.break && pathSegBlocked(nb, q)) return;
+      }
+    }
     pt.x = q.x; pt.y = q.y;
   }
   e3dSync();   // сцену НЕ пересобираем: тяжёлая сборка идёт один раз, на отпускании
@@ -863,7 +916,14 @@ function _e3dLineCommit(name, a, b) {
   _e3dLineWrite(name, segs);
 }
 
-// Клик по земле в разделе линии: начать или закончить отрезок.
+// Рисование линии НЕПРЕРЫВНОЕ (правка 2026-09-26): первый клик начинает линию,
+// каждый следующий добавляет вершину, и линия тянется дальше, пока её не
+// закончат — правой кнопкой мыши, Esc или повторным кликом в последнюю точку
+// (на телефоне правой кнопки нет). Клик по существующей точке, пока ничего не
+// рисуем, только выделяет её: раньше он сразу заводил новую линию, и чтобы
+// передвинуть или удалить точку, приходилось сперва сбрасывать построение
+// через Esc. Во время рисования клик по существующей точке соединяет с ней;
+// если это начало самой рисуемой линии — контур замкнут, рисование кончается.
 function _e3dDrawClick(np) {
   const name = E3D.sec;
   const p = _e3dDrawPoint(name, np);
@@ -871,15 +931,50 @@ function _e3dDrawClick(np) {
     if (typeof dToast === 'function') dToast('Ближе 3 м к дому и террасе забор не ставится');
     return;
   }
-  if (!E3D.draw || E3D.draw.name !== name) { E3D.draw = { name, start: p, cursor: null }; e3dSync(); return; }
+  if (!E3D.draw || E3D.draw.name !== name) {
+    E3D.draw = { name, start: { x: p.x, y: p.y }, first: { x: p.x, y: p.y }, cursor: null };
+    _lineSel = { name, idx: null };
+    e3dSync();
+    return;
+  }
   const a = E3D.draw.start;
-  if (Math.hypot(p.x - a.x, p.y - a.y) < SNAP / GRID) { E3D.draw = null; e3dSync(); return; }  // клик в ту же точку
-  E3D.draw = null;
+  if (Math.hypot(p.x - a.x, p.y - a.y) < SNAP / GRID) { _e3dDrawFinish(); return; }  // повторный клик в последнюю точку
+  // Линия забора не проходит сквозь дом и террасу (правка 2026-09-26): концы
+  // уже держатся в 3 м от них, но отрезок между двумя разрешёнными точками мог
+  // пересечь дом насквозь.
+  const why = (name === 'fence' && typeof fenceSegBlocked === 'function') ? fenceSegBlocked(a, p) : null;
+  if (why) {
+    if (typeof dToast === 'function') {
+      dToast(why === 'cross' ? 'Забор не может проходить через дом или террасу'
+                             : 'Ближе 3 м к дому и террасе забор не ставится');
+    }
+    return;
+  }
+  // Дорожка тоже не проходит через дом и террасу (правка 2026-09-26), но
+  // подходить к ним вплотную может — она к ним и ведёт.
+  if (name === 'paths' && typeof pathSegBlocked === 'function' && pathSegBlocked(a, p)) {
+    if (typeof dToast === 'function') dToast('Дорожка не может проходить через дом или террасу');
+    return;
+  }
   _e3dLineCommit(name, a, p);
+  const f = E3D.draw.first;
+  const closed = p.glue && f && Math.hypot(p.x - f.x, p.y - f.y) < 1e-9;
+  E3D.draw.start = { x: p.x, y: p.y };        // дальше тянемся от новой вершины
+  E3D.draw.cursor = null;
+  if (closed) E3D.draw = null;                // замкнули контур — построение закончено
   _lineSel = { name, idx: null };
   e3dSync();
   if (typeof onParamChange === 'function') onParamChange();
   if (typeof _dSyncSectionActions === 'function') _dSyncSectionActions();
+}
+
+// Закончить начатую линию: правая кнопка, Esc или клик в последнюю точку.
+// Одиночная стартовая точка без отрезков ничего не оставляет.
+function _e3dDrawFinish() {
+  if (!E3D.draw) return false;
+  E3D.draw = null;
+  e3dSync();
+  return true;
 }
 
 // ── События ──────────────────────────────────────────────────────────────
@@ -901,7 +996,13 @@ function e3dSetTouch(on) {
   c.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
 }
 
+// Правая кнопка заканчивает рисуемую линию. Правой же кнопкой двигают вид
+// (OrbitControls, панорама), поэтому линия заканчивается только КЛИКОМ — без
+// протяжки; протяжка правой по-прежнему двигает вид.
+let _e3dRightPress = null;
+
 function _e3dOnDown(ev) {
+  if (ev.button === 2) { _e3dRightPress = { x: ev.clientX, y: ev.clientY }; return; }
   if (ev.button !== 0 || !E3D.sec || !threeState) return;
   // Второй палец — это жест камеры (два пальца крутят и масштабируют вид):
   // начатую протяжку бросаем, иначе объект уехал бы вместе с видом.
@@ -935,6 +1036,13 @@ function _e3dOnMove(ev) {
 }
 
 function _e3dOnUp(ev) {
+  if (ev.button === 2) {
+    const r = _e3dRightPress;
+    _e3dRightPress = null;
+    if (r && E3D.draw && Math.abs(ev.clientX - r.x) <= E3D_MOVE_TOL
+                      && Math.abs(ev.clientY - r.y) <= E3D_MOVE_TOL) _e3dDrawFinish();
+    return;
+  }
   if (!E3D.press) return;
   const pr = E3D.press;
   E3D.press = null;
@@ -949,14 +1057,18 @@ function _e3dOnUp(ev) {
   }
 
   if (pr.hit) {
+    // Во время рисования клик по точке линии — это вершина (соединение с
+    // точкой), а не выбор: построение продолжается.
+    if (E3D_KIND[E3D.sec] === 'line' && E3D.draw && pr.hit.idx !== 'gate' && pr.np) {
+      _e3dDrawClick(pr.np);
+      return;
+    }
     e3dSelect(pr.hit);
     // Грядка и мебель поворачиваются на 90° тем же кликом, которым выбираются
     // (как было на плане): отдельной ручки у них нет.
     if (pr.hit.kind === 'beds' || pr.hit.kind === 'point') { _e3dRotate(pr.hit); return; }
-    // В линиях клик по точке ещё и начинает отрезок от неё — так соседний
-    // отрезок приклеивается к существующей ломаной (ТЗ: «клик по существующей
-    // точке — склейка»).
-    if (E3D_KIND[E3D.sec] === 'line' && pr.hit.idx !== 'gate' && pr.np) _e3dDrawClick(pr.np);
+    // В линиях клик по точке только выделяет её (правка 2026-09-26) — дальше
+    // её можно тянуть или удалить; новую линию он не начинает.
     return;
   }
   // Клик по пустому месту: в линиях — рисуем, в остальных разделах — снимаем выбор.
@@ -992,6 +1104,9 @@ function e3dAttach() {
   window.addEventListener('pointerup', _e3dOnUp);
   el.addEventListener('pointermove', _e3dOnHover);
   window.addEventListener('keydown', _e3dOnKey);
+  // Меню браузера по правой кнопке над видом не нужно: правая кнопка здесь
+  // заканчивает линию и двигает вид.
+  el.addEventListener('contextmenu', ev => { if (E3D.sec) ev.preventDefault(); });
   E3D.bound = true;
   // Сцена могла родиться позже, чем включился мобильный режим — переносим на
   // неё настройку жестов (touches у OrbitControls живут в самой сцене).
@@ -1005,8 +1120,7 @@ function _e3dOnKey(ev) {
   const t = ev.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
   if (ev.key === 'Escape') {
-    if (!E3D.draw) return;
-    E3D.draw = null; ev.preventDefault(); e3dSync();
+    if (_e3dDrawFinish()) ev.preventDefault();
     return;
   }
   if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
