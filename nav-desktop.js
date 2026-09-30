@@ -772,6 +772,15 @@ const D_CORE_FILTER = `
     <div class="d-price-grid" id="d-core-grid"></div>
   </div>`;
 
+// Направление доски фасадных панелей — специфический фильтр отделки фасада
+// (правка 2026-09-26, п. 11): как «Доска» у террасы, живёт в левой панели, отбор
+// на бэкенде по характеристике board_direction. Наполняет _dRenderDirFilter.
+const D_DIR_FILTER = `
+  <div class="d-color-section">
+    <div class="d-color-title">Направление доски:</div>
+    <div class="d-price-grid" id="d-dir-grid"></div>
+  </div>`;
+
 const D_SECTION_UI = {
   terrace: {
     params: D_TERRACE_H_PARAM + D_CORE_FILTER,
@@ -865,12 +874,14 @@ const D_SECTION_UI = {
     ],
   },
   facade2: {
+    params: D_DIR_FILTER,
     actions: [
       { lbl: 'Сбросить',    fn: "dFacadeClear('facade2')" },
       { lbl: 'Удалить всё', fn: "dResetSection('facade2')" },
     ],
   },
   facade: {
+    params: D_DIR_FILTER,
     actions: [
       { lbl: 'Сбросить',    fn: "dFacadeClear('facade')" },
       { lbl: 'Удалить всё', fn: "dResetSection('facade')" },
@@ -956,6 +967,7 @@ function _dRenderSidebar() {
   _dRenderRailFilters();
   _dRenderBedFilters();
   _dRenderCoreFilter();
+  _dRenderDirFilter();
   // Поля параметров рисуются заново — вернуть в них значения из состояния.
   if (dActiveItem === 'terrace') _dSyncTerraceHeight();
   if (dActiveItem === 'paths') {
@@ -1108,6 +1120,24 @@ function dSelectCore(id) {
   const on = catFilter(dActiveItem).core;
   if (on.has(id)) on.delete(id); else on.add(id);
   _dRenderCoreFilter();
+  dShowResults();
+}
+
+function _dRenderDirFilter() {
+  const grid = document.getElementById('d-dir-grid');
+  if (!grid || typeof BOARD_DIRECTIONS === 'undefined') return;
+  const on = catFilter(dActiveItem).dir;
+  grid.innerHTML = BOARD_DIRECTIONS.map(c =>
+    `<button class="d-price-btn ${on.has(c.id) ? 'selected' : ''}"
+             onclick="dSelectDir('${c.id}')">
+       <span class="d-radio"></span><span class="d-price-txt">${c.lbl}</span>
+     </button>`).join('');
+}
+
+function dSelectDir(id) {
+  const on = catFilter(dActiveItem).dir;
+  if (on.has(id)) on.delete(id); else on.add(id);
+  _dRenderDirFilter();
   dShowResults();
 }
 
@@ -2268,6 +2298,7 @@ async function _ensureCatalogSection(sectionId, opts) {
     // предикатом IN.
     const cats = raw ? [] : _selectedPriceCats();
     const cores = raw ? [] : _selectedCoreTypes();
+    const dirs = raw ? [] : _selectedDirections();
     const preds = [];
     if (typeof PropertyPath !== 'undefined' && typeof PropertyOp !== 'undefined') {
       const pred = (path, list) => ({
@@ -2279,6 +2310,8 @@ async function _ensureCatalogSection(sectionId, opts) {
       // Сечение доски — та же механика: фильтр отбирает только товары, у которых
       // характеристика заполнена (у ступеней solid, у доски ДПК и МПК hollow).
       if (cores.length) preds.push(pred(PropertyPath.CORE_TYPE, cores));
+      // Направление доски фасадных панелей — то же: отбирает сервер.
+      if (dirs.length && PropertyPath.BOARD_DIRECTION) preds.push(pred(PropertyPath.BOARD_DIRECTION, dirs));
     }
     if (preds.length) filters.push(new Filter(FilterType.PROPERTIES, preds));
     const res = await rm.getResources(...filters);
@@ -2288,8 +2321,13 @@ async function _ensureCatalogSection(sectionId, opts) {
     // с мебелью, из-за чего появился SECTION_TAG_ONLY). Перезапрашиваем только по
     // тегу: лучше показать товары из соседнего раздела, чем пустой список и заглушки.
     if (tag && !tagOnly && products && products.length === 0) {
-      const byTag = await rm.getResources(new Filter(FilterType.TAGS, tags),
-                                          new Filter(FilterType.LIMIT, 50));
+      // Фильтры пользователя (цена, сечение, направление) повтор СОХРАНЯЕТ: он
+      // нужен, когда товары тега лежат в соседнем разделе, а не чтобы обойти
+      // фильтр. Раньше повтор шёл без них, и выбор, под который товаров нет,
+      // показывал весь раздел без отбора.
+      const retry = [new Filter(FilterType.TAGS, tags), new Filter(FilterType.LIMIT, 50)];
+      if (preds.length) retry.push(new Filter(FilterType.PROPERTIES, preds));
+      const byTag = await rm.getResources(...retry);
       const alt = byTag ? (byTag.products || []) : [];
       if (alt.length) {
         console.info(`[catalog] раздел ${sectionId}: по section_id+тегу пусто, взяли ${alt.length} товар(ов) по тегу «${tag}»`);
@@ -2302,6 +2340,7 @@ async function _ensureCatalogSection(sectionId, opts) {
                  tags.length ? `(тег${tags.length > 1 ? 'и' : ''} «${tags.join(', ')}»)` : '(без тега)',
                  cats.length ? `(категор${cats.length > 1 ? 'ии' : 'ия'} «${cats.join(', ')}»)` : '',
                  cores.length ? `(сечение «${cores.join(', ')}»)` : '',
+                 dirs.length ? `(направление «${dirs.join(', ')}»)` : '',
                  '→', products === null ? 'ошибка запроса' : products.length + ' товар(ов)');
     _catalogCache[key] = products;
     if (products === null) _catalogNoteFail(sectionId);
@@ -2376,10 +2415,18 @@ function _selectedCoreTypes() {
   return (typeof CORE_TYPES !== 'undefined' ? CORE_TYPES : []).filter(c => sel.has(c.id)).map(c => c.id);
 }
 
-// Ключ кэша каталога: раздел плюс выбранные категории и сечение — выдачи для
-// разных наборов разные, потому что фильтрует сервер.
+// Направление доски фасада, выбранное пользователем: значения board_direction.
+function _selectedDirections() {
+  const sel = (typeof catFilter === 'function') ? catFilter(dActiveItem).dir : null;
+  if (!sel || !sel.size) return [];
+  return (typeof BOARD_DIRECTIONS !== 'undefined' ? BOARD_DIRECTIONS : []).filter(c => sel.has(c.id)).map(c => c.id);
+}
+
+// Ключ кэша каталога: раздел плюс выбранные категории, сечение и направление —
+// выдачи для разных наборов разные, потому что фильтрует сервер.
 function _catKey(sectionId) {
-  const parts = [String(sectionId), _selectedPriceCats().join(','), _selectedCoreTypes().join(',')];
+  const parts = [String(sectionId), _selectedPriceCats().join(','), _selectedCoreTypes().join(','),
+                 _selectedDirections().join(',')];
   while (parts.length > 1 && !parts[parts.length - 1]) parts.pop();
   return parts.join('|');
 }

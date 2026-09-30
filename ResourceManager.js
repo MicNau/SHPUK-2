@@ -53,6 +53,11 @@ const PropertyPath = Object.freeze({
     PRICE_CATEGORY: 'price_category',
 
     CORE_TYPE: 'core_type',
+
+    // Направление доски фасадных панелей (тег walls), ревизия бэкенда 2026-09-30.
+    // Имя пути и значения взяты по образцу соседних (core_type, price_category):
+    // обновлённой копии менеджера в backend_API/ пока нет — сверить, когда придёт.
+    BOARD_DIRECTION: 'board_direction',
 });
 
 // Ценовая категория товара: значение характеристики по пути
@@ -70,6 +75,12 @@ const PriceCategory = Object.freeze({
 const CoreType = Object.freeze({
     SOLID: 'solid',    // полнотелая
     HOLLOW: 'hollow',  // пустотелая
+});
+
+// Направление доски: значение характеристики по пути PropertyPath.BOARD_DIRECTION.
+const BoardDirection = Object.freeze({
+    VERTICAL: 'vertical',      // вертикальная
+    HORIZONTAL: 'horizontal',  // горизонтальная
 });
 
 const PROPERTY_PATH = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)*$/;

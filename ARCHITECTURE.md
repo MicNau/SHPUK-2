@@ -182,10 +182,10 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-styles-desktop.css?v=49   styles-mobile.css?v=3      state.js?v=75
-canvas.js?v=65            shared/house-builder.js?v=89  ResourceManager.js?v=12
+styles-desktop.css?v=49   styles-mobile.css?v=3      state.js?v=76
+canvas.js?v=65            shared/house-builder.js?v=89  ResourceManager.js?v=13
 viewer3d-core.js?v=161    viewer3d-builders.js?v=65   viewer3d-railing.js?v=18
-viewer3d-entourage.js?v=14   editor3d.js?v=19         nav-desktop.js?v=137
+viewer3d-entourage.js?v=14   editor3d.js?v=19         nav-desktop.js?v=138
 nav-mobile.js?v=5         project-io.js?v=7          backend_API/Calculator.js?v=3
 ```
 
@@ -946,6 +946,29 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Ветка **Mobile**: фильтр направления доски у фасада.
+
+- **«Направление доски: Вертикальная / Горизонтальная»** в левой панели обеих
+  отделок фасада (`D_DIR_FILTER`, `_dRenderDirFilter`, `dSelectDir`). Отбор — на
+  бэкенде предикатом по характеристике `board_direction` (ревизия бэкенда
+  2026-09-30): одно направление уходит как `eq`, оба — как `in`. Выбор входит в
+  ключ кэша каталога, у каждой отделки он свой (`catFilter(sec).dir`).
+- **Имя пути и значения — по образцу соседних**: `PropertyPath.BOARD_DIRECTION =
+  'board_direction'`, `BoardDirection = {VERTICAL: 'vertical', HORIZONTAL:
+  'horizontal'}`. Бэкенд прислал пример кода с этими константами, но
+  обновлённой копии менеджера в `backend_API/` ещё нет, а сам сервер из
+  песочницы недоступен — строки сверить, когда копия придёт.
+- **Повторный запрос каталога по тегу сохраняет фильтры.** Если раздел по
+  `section_id` пуст, каталог перезапрашивается одним тегом — на случай, когда
+  товары тега лежат в соседнем разделе. Этот повтор шёл без предикатов, и выбор,
+  под который товаров нет, показывал весь раздел без отбора. Касалось и цены, и
+  сечения доски.
+- Замеры (ответ сервера подменён): «Вертикальная» —
+  `properties=[{board_direction eq vertical}]`, обе —
+  `{board_direction in [vertical, horizontal]}`; вторая отделка с тем же выбором
+  берёт выдачу из кэша; повтор по тегу уходит с тем же предикатом.
+- Cache-bust: `state.js?v=76`, `ResourceManager.js?v=13`, `nav-desktop.js?v=138`.
 
 Ветка **Mobile**: правки 2026-09-26 — фасад на углах, рисование линий, мелочи.
 
