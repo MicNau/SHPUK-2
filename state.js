@@ -463,6 +463,20 @@ const CORE_TYPES = [
   { id: 'hollow', lbl: 'Пустотелая' },
 ];
 
+// Направление доски фасадных панелей — фильтр разделов отделки фасада.
+// Отбирает бэкенд по характеристике board_direction (ревизия 2026-09-30).
+const BOARD_DIRECTIONS = [
+  { id: 'vertical',   lbl: 'Вертикальная' },
+  { id: 'horizontal', lbl: 'Горизонтальная' },
+];
+
+// Заполнение забора — фильтр раздела «Забор». Отбирает бэкенд по характеристике
+// fence_type (ревизия 2026-09-30).
+const FENCE_TYPES = [
+  { id: 'woven', lbl: 'Плетёные' },
+  { id: 'board', lbl: 'Доски ДПК' },
+];
+
 const BED_MOUNTS = [
   { id: 'plastic_hinge', lbl: 'Пластиковый шарнир', prop: 'plastic_joint',
     re: /шарнир|hinge/i },
@@ -508,9 +522,12 @@ function catFilter(secId) {
   // отбирает бэкенд, как и ценовую категорию.
   if (!f) {
     const d = CAT_FILTER_DEFAULTS[key] || {};
-    f = S.catFilters[key] = { colors: new Set(), prices: new Set(), core: new Set(d.core || []) };
+    f = S.catFilters[key] = { colors: new Set(), prices: new Set(), core: new Set(d.core || []),
+                              dir: new Set(), fence: new Set() };
   }
   if (!f.core) f.core = new Set();
+  if (!f.dir) f.dir = new Set();      // направление доски (фасад), см. BOARD_DIRECTIONS
+  if (!f.fence) f.fence = new Set();  // заполнение забора, см. FENCE_TYPES
   return f;
 }
 

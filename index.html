@@ -260,7 +260,7 @@
 <script src="vendor/three/EXRLoader.js"></script>
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
-<script src="state.js?v=75"></script>
+<script src="state.js?v=77"></script>
 <script src="canvas.js?v=65"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
 <script src="shared/house-builder.js?v=89"></script>
@@ -275,7 +275,7 @@
     (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
       ? '' : 'https://sollersdev.ru';
 </script>
-<script src="ResourceManager.js?v=12"></script>
+<script src="ResourceManager.js?v=14"></script>
 <!-- Расчёты на бэкенде: обёртка бэкендера, подключается как есть, без local-правок.
      Лежит в backend_API/ — это их выгрузка (см. calculation_api.md, calculator.md).
      NB: backend_API/ResourceManager.js — их копия каталожного менеджера, она НЕ
@@ -291,7 +291,7 @@
      Идёт после viewer3d-*, потому что опирается на threeState и worldToCanvas. -->
 <script src="editor3d.js?v=19"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=137"></script>
+<script src="nav-desktop.js?v=139"></script>
 <!-- Вертикальная раскладка телефона: переставляет те же узлы и ведёт свои
      четыре экрана. Идёт ПОСЛЕ nav-desktop.js — опирается на его функции. -->
 <script src="nav-mobile.js?v=5"></script>
