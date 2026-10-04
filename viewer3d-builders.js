@@ -2590,7 +2590,13 @@ function _wicketNormalizeProto(scene) {
   const box = _wicketClosedBox(scene, post);
   if (!box || !isFinite(box.min.x) || !isFinite(box.max.x)) return proto;
   const pb = post ? new THREE.Box3().setFromObject(post) : box;
-  scene.position.x -= box.min.x;                       // начало проёма — в нуле
+  // Столб калитки встаёт ЦЕНТРОМ на начало проёма — как столбы секций забора
+  // (_fenceProtoPosts: секция ставится по оси стартового столба). Раньше в ноль
+  // уходил край столба, и он отъезжал от соседней секции на полсечения
+  // (правка 2026-10-04). Ширина проёма от этого не меняется: от оси столба до
+  // дальнего края закрытой створки плюс полсечения — ровно до грани столба
+  // следующей секции, который стоит центром на конце проёма.
+  scene.position.x -= post ? (pb.min.x + pb.max.x) / 2 : box.min.x;
   scene.position.y -= box.min.y;                       // низ — на земле
   scene.position.z -= (pb.min.z + pb.max.z) / 2;       // столб — на линии забора
   const w = box.max.x - box.min.x, h = box.max.y - box.min.y;
@@ -3444,6 +3450,29 @@ function _wicketPanelFlags(proto) {
                                                    : (o.material && o.material.name)) || '';
   let flags = meshes.map(o => WICKET_PANEL_MAT_RE.test(matName(o)));
   let how = 'по материалам файла';
+  // Материалы без говорящих имён (файл с сервера может отличаться от нашего):
+  // у створки из нескольких примитивов полотно — самый детальный из них. Доски
+  // и плетёнка намного «тяжелее» рамы и ручек: в 003 — 680 вершин против
+  // 48…216, в 005 — 17 050 против 404. Разбор по площади, как у секции, здесь
+  // не годится: габарит рамы почти равен габариту полотна.
+  if (!flags.some(Boolean)) {
+    const post = _wicketPost(proto);
+    let leaf = null;
+    proto.traverse(o => {
+      if (leaf || o.isMesh || !o.children) return;
+      const kids = o.children.filter(c => c.isMesh && c !== post);
+      if (kids.length >= 2) leaf = kids;
+    });
+    if (leaf) {
+      const cnt = o => (o.geometry && o.geometry.attributes.position) ? o.geometry.attributes.position.count : 0;
+      const best = leaf.reduce((a, b) => (cnt(b) > cnt(a) ? b : a));
+      const rest = Math.max(...leaf.filter(o => o !== best).map(cnt));
+      if (cnt(best) >= rest * 2) {
+        flags = meshes.map(o => o === best);
+        how = 'по детальности примитивов створки';
+      }
+    }
+  }
   if (!flags.some(Boolean)) {
     const panels = (typeof _fenceProtoPanels === 'function') ? _fenceProtoPanels(proto) : new Set();
     flags = panels.size ? meshes.map(o => panels.has(o)) : null;
