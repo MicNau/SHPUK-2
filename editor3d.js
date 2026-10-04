@@ -1139,6 +1139,9 @@ function _e3dOnKey(ev) {
   if (!E3D.sec || dStep !== 3) return;
   const t = ev.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  // Открыто окно (размеры, заявка, подсказка) — клавиши его, а не сцены: Delete
+  // с фокусом на кнопке окна удалял бы выбранную террасу.
+  if (document.querySelector('.d-hint-overlay.active')) return;
   if (ev.key === 'Escape') {
     if (_e3dDrawFinish()) ev.preventDefault();
     return;

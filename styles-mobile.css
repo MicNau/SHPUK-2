@@ -132,6 +132,7 @@ body.m-mode .d-hint-title { font-size: 19px; }
 body.m-mode .d-hint-text { font-size: 15px; }
 body.m-mode .d-hint-box .d-btn { min-width: 120px; height: 44px; font-size: 16px; }
 body.m-mode .d-req-box { width: 100%; max-width: calc(100vw - 32px); }
+body.m-mode .d-size-box { width: 100%; }
 body.m-mode .d-req-input { height: 44px; font-size: 16px; }
 /* Флажок под палец: 18 px мыши на телефоне мимо не промахнёшься только случайно. */
 body.m-mode .d-req-consent { font-size: 14px; gap: 12px; }
