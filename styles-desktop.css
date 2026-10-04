@@ -903,6 +903,11 @@ button, input, select, textarea { font-family: inherit; }
 }
 .d-req-dump[hidden] { display: none; }
 .d-req-actions { display: flex; gap: 8px; width: 100%; }
+/* Окно «Размеры террасы»: два поля в ряд через «×». */
+.d-size-box { width: 380px; }
+.d-size-row { display: flex; align-items: flex-end; gap: 10px; width: 100%; }
+.d-size-row .d-req-field { flex: 1; }
+.d-size-x { font-size: 20px; color: #888; padding-bottom: 10px; }
 .d-req-actions .d-btn { flex: 1; height: 44px; font-size: 16px; cursor: pointer; }
 
 .d-summary-overlay {

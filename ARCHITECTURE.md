@@ -182,11 +182,11 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-styles-desktop.css?v=50   styles-mobile.css?v=3      state.js?v=77
-canvas.js?v=65            shared/house-builder.js?v=89  ResourceManager.js?v=14
+styles-desktop.css?v=51   styles-mobile.css?v=4      state.js?v=77
+canvas.js?v=66            shared/house-builder.js?v=89  ResourceManager.js?v=14
 viewer3d-core.js?v=161    viewer3d-builders.js?v=67   viewer3d-railing.js?v=18
-viewer3d-entourage.js?v=14   editor3d.js?v=20         nav-desktop.js?v=140
-nav-mobile.js?v=5         project-io.js?v=7          backend_API/Calculator.js?v=3
+viewer3d-entourage.js?v=14   editor3d.js?v=21         nav-desktop.js?v=141
+nav-mobile.js?v=6         project-io.js?v=7          backend_API/Calculator.js?v=3
 ```
 
 `viewer3d-entourage.js` автоматически детектит `IS_MOBILE` (UA + `innerWidth<768`)
@@ -948,6 +948,26 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Ветка **Mobile**: размеры террасы числами.
+
+- **Кнопка «Задать размеры»** у террасы (работает при выбранном блоке) открывает
+  окно с длиной и шириной в метрах — в том же порядке, что подпись под блоком в
+  сцене (`dOpenRectSize` / `dApplyRectSize`, разметка `#d-size-overlay`). Поля
+  текстовые с `inputmode="decimal"`: дробь принимается и через запятую (`number`
+  её не берёт). Диапазон — от минимума раздела (`RECT_MIN_M`, 1 м) до 30 м,
+  точность — сантиметр.
+- **Какой угол держать на месте, решает `resizeRectTo`** (canvas.js): кромка,
+  прижатая к дому или к соседнему блоку того же раздела, не отрывается — терраса
+  у нижней стены растёт вниз, у левой — влево. Из четырёх углов берётся первый,
+  при котором прижатые кромки на месте и блок ни на что не налезает
+  (`rectCollides`, те же правила, что при перетаскивании). Не поместился — блок не
+  меняется, окно пишет причину.
+- Пока открыто любое окно (`.d-hint-overlay.active`), Delete/Backspace/Esc не
+  доходят до сцены: Delete с фокусом на кнопке окна удалял бы выбранную террасу.
+  Esc закрывает окно размеров. Подсказка террасы — редакция 2 (`D_HINT_REV`).
+- Cache-bust: `styles-desktop.css?v=51`, `styles-mobile.css?v=4`, `canvas.js?v=66`,
+  `editor3d.js?v=21`, `nav-desktop.js?v=141`, `nav-mobile.js?v=6`.
 
 Ветка **Mobile**: калитка — столб по оси, запасной разбор полотна.
 

@@ -824,6 +824,7 @@ const D_SECTION_UI = {
     params: D_TERRACE_H_PARAM,
     actions: [
       { lbl: 'Ещё одна',          fn: "addRect('terrace')" },
+      { lbl: 'Задать размеры',    fn: 'dOpenRectSize()', sel: true },
       { lbl: 'Удалить выбранную', fn: 'dDeleteSelected()', sel: true },
       { lbl: 'Удалить всё',       fn: "dResetSection('terrace')" },
     ],
@@ -1493,7 +1494,7 @@ function _dSeedSection(secId) {
 // планом): всплывающее окно «один раз за сессию» пользователь не мог вернуть,
 // а работа в сцене без напоминания о жестах неочевидна.
 const D_SECTION_HINTS = {
-  terrace: 'Тяните террасу за угловые маркеры или за тело. «ЕЩЁ ОДНА» добавляет блок, «УДАЛИТЬ ВЫБРАННУЮ» убирает выбранный.',
+  terrace: 'Тяните террасу за угловые маркеры или за тело. «ЗАДАТЬ РАЗМЕРЫ» — длина и ширина выбранного блока числами. «ЕЩЁ ОДНА» добавляет блок, «УДАЛИТЬ ВЫБРАННУЮ» убирает выбранный.',
   pool_terrace: 'Отдельно стоящая терраса: тяните за углы или за тело. «БАССЕЙН ▭» и «БАССЕЙН ○» ставят бассейн — в настиле на его месте будет вырез; повторное нажатие убирает.',
   steps: 'Лестницу двигают за середину, ширину меняют маркерами по краям. Разворачивается к террасе автоматически, количество ступеней считается от высоты.',
   beds: 'Грядку перетаскивайте мышью; клик по ней разворачивает на 90°.',
@@ -1512,7 +1513,8 @@ const D_SECTION_HINTS = {
 const _dHintShown = new Set();
 // Редакции подсказок разделов. Дорожки и забор: 2 — рисование непрерывное, до
 // правой кнопки; дорожки: 3 — через дом и террасу не проходят (правки 2026-09-26).
-const D_HINT_REV = { paths: 3, fence: 2 };
+// Терраса: 2 — кнопка «Задать размеры» (правка 2026-10-04).
+const D_HINT_REV = { paths: 3, fence: 2, terrace: 2 };
 
 // Текст подсказки раздела. На телефоне жесты другие («касание» вместо «клик»),
 // поэтому мобильная раскладка подменяет формулировки через mHintText.
@@ -2542,7 +2544,7 @@ function dHidePhoto() {
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') dHidePhoto();
+  if (e.key === 'Escape') { dHidePhoto(); dCloseRectSize(); }
 });
 
 // URL картинки из поля каталога. Битрикс отдаёт такие поля по-разному: строкой-URL,
@@ -3499,6 +3501,63 @@ function dSyncRequestConsent() {
   const box = document.getElementById('d-req-consent');
   const btn = document.getElementById('d-req-send');
   if (btn) btn.disabled = !(box && box.checked);
+}
+
+// ── Размеры террасы числами (правка 2026-10-04) ──────────────────────────
+// «Задать размеры» открывает окно с длиной и шириной выбранного блока — в том
+// же порядке, что подпись под ним в сцене. Применяет resizeRectTo (canvas.js):
+// прижатая к дому кромка остаётся на месте, наложения запрещены, как при
+// перетаскивании. Не поместилось — блок не меняется, окно объясняет почему.
+const D_RECT_SIZE_MAX = 30;      // м — участок 32 × 32 м
+
+function dOpenRectSize() {
+  const sec = dActiveItem;
+  const idx = (typeof e3dSelectedIdx === 'function') ? e3dSelectedIdx() : null;
+  const r = (sec && idx !== null) ? secRects(sec)[idx] : null;
+  const ov = document.getElementById('d-size-overlay');
+  if (!r || !ov) return;
+  const min = (RECT_MIN_M[sec] || SNAP);
+  // Поля текстовые, а не number: в русской раскладке дробь пишут через запятую,
+  // а number её не принимает. Показываем тоже с запятой.
+  const fmt = v => String(Math.round(v * 100) / 100).replace('.', ',');
+  document.getElementById('d-size-w').value = fmt(r.w * GRID);
+  document.getElementById('d-size-h').value = fmt(r.h * GRID);
+  document.getElementById('d-size-note').textContent =
+    `От ${fmt(min)} до ${D_RECT_SIZE_MAX} м, в том же порядке, что подпись под террасой.`;
+  document.getElementById('d-size-err').textContent = '';
+  ov.dataset.sec = sec;
+  ov.dataset.idx = idx;
+  ov.classList.add('active');
+  setTimeout(() => { const w = document.getElementById('d-size-w'); w.focus(); w.select(); }, 50);
+}
+
+function dCloseRectSize() {
+  const ov = document.getElementById('d-size-overlay');
+  if (ov) ov.classList.remove('active');
+}
+
+function dApplyRectSize() {
+  const ov = document.getElementById('d-size-overlay');
+  const err = document.getElementById('d-size-err');
+  if (!ov) return;
+  const sec = ov.dataset.sec, idx = +ov.dataset.idx;
+  const min = (RECT_MIN_M[sec] || SNAP);
+  const fmt = v => String(v).replace('.', ',');
+  const read = id => Number(String(document.getElementById(id).value).trim().replace(',', '.') || NaN);
+  const w = read('d-size-w'), h = read('d-size-h');
+  if (!(w >= min && w <= D_RECT_SIZE_MAX && h >= min && h <= D_RECT_SIZE_MAX)) {
+    err.textContent = `Размеры — числа от ${fmt(min)} до ${D_RECT_SIZE_MAX} м.`;
+    return;
+  }
+  // До сантиметра: точнее разметку никто не задаёт, а ровные числа легче проверять.
+  const res = resizeRectTo(sec, idx, Math.round(w * 100) / 100, Math.round(h * 100) / 100);
+  if (!res) {
+    err.textContent = 'Терраса таких размеров здесь не помещается: мешает дом, другой объект или граница участка.';
+    return;
+  }
+  Object.assign(secRects(sec)[idx], res);
+  dCloseRectSize();
+  _secChanged(sec);
 }
 
 function dCloseRequest() {

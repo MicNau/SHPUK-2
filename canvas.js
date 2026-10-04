@@ -2565,6 +2565,49 @@ function addRect(secId) {
   _secChanged(secId);
 }
 
+// Задать размеры блока числами (кнопка «Задать размеры», правка 2026-10-04).
+// wM × hM — в метрах, в том же порядке, что подпись в сцене (по X × по Y плана).
+// Какой угол держать на месте, решают соседи: кромка, прижатая к дому или к
+// другому блоку того же раздела, не должна отрываться — иначе терраса у стены
+// при увеличении уезжала бы от неё или заходила внутрь дома. Из четырёх углов
+// берётся первый, при котором прижатые кромки остаются на месте и блок ни на
+// что не налезает (те же правила, что при перетаскивании). Возвращает новый
+// прямоугольник или null, если блок с такими размерами не помещается.
+function resizeRectTo(secId, idx, wM, hM) {
+  const rects = secRects(secId);
+  const r = rects[idx];
+  if (!r) return null;
+  const w = wM / GRID, h = hM / GRID;
+  const e = 0.1 / GRID;
+  const others = rects.filter((o, i) => i !== idx && o && o.w > 0 && o.h > 0);
+  const touches = strip => _houseCovers(strip) || others.some(o => _rectsOverlap(strip, o, 0));
+  const glued = {
+    left:   touches({ x: r.x - e,   y: r.y, w: e, h: r.h }),
+    right:  touches({ x: r.x + r.w, y: r.y, w: e, h: r.h }),
+    top:    touches({ x: r.x, y: r.y - e,   w: r.w, h: e }),
+    bottom: touches({ x: r.x, y: r.y + r.h, w: r.w, h: e }),
+  };
+  const cands = [];
+  for (const keepX of ['left', 'right']) {
+    for (const keepY of ['top', 'bottom']) {
+      const x = keepX === 'left' ? r.x : r.x + r.w - w;
+      const y = keepY === 'top' ? r.y : r.y + r.h - h;
+      // Сколько прижатых кромок этот угол оставляет на месте (у прижатой с обеих
+      // сторон оси — ни один вариант не сохранит обе, берём любой).
+      const kept = (glued[keepX] ? 1 : 0) + (glued[keepY] ? 1 : 0)
+                 - (glued[keepX === 'left' ? 'right' : 'left'] ? 1 : 0)
+                 - (glued[keepY === 'top' ? 'bottom' : 'top'] ? 1 : 0);
+      cands.push({ rect: { x, y, w, h }, kept });
+    }
+  }
+  // Стабильная сортировка: при равенстве — левый верхний угол, как у протяжки.
+  cands.sort((a, b) => b.kept - a.kept);
+  for (const c of cands) {
+    if (!rectCollides(c.rect, secId, idx)) return c.rect;
+  }
+  return null;
+}
+
 function delActiveRect(secId) {
   const rects = secRects(secId);
   const act = secActiveIdx(secId);
