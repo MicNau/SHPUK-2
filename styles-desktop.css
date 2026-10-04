@@ -447,12 +447,7 @@ button, input, select, textarea { font-family: inherit; }
   display: flex; flex-direction: column; gap: 4px; padding-top: 6px;
 }
 .d-sb-accordion .d-canvas-btn { width: 100%; height: 38px; font-size: 15px; white-space: nowrap; }
-/* Специфические фильтры раздела (крышка и сечение столба, высота борта, крепёж)
-   стоят здесь же, среди его настроек (ТЗ п. 8). В одну колонку: панель узкая,
-   в два столбца подписи ломались на три строки. */
-.d-sb-accordion .d-color-section { margin-bottom: 12px; }
-.d-sb-accordion .d-color-section:last-of-type { margin-bottom: 4px; }
-.d-sb-accordion .d-price-grid { grid-template-columns: 1fr; gap: 6px; margin-bottom: 0; }
+/* Специфические фильтры раздела с правки 2026-10-04 — в правой панели (.d-filters-box). */
 /* Справочная строка раздела (например «Высота забора: 1920 мм»). */
 .d-param-note { font-size: 14px; color: var(--muted, #666); padding: 2px 2px 6px; }
 .d-sidebar-actions { display: flex; gap: 8px; padding: 10px 12px; flex-shrink: 0; }
@@ -668,6 +663,9 @@ button, input, select, textarea { font-family: inherit; }
 .d-filters-box.open { display: block; }
 .d-filters-box .d-color-section { margin-bottom: 12px; }
 .d-filters-box .d-color-section:last-child { margin-bottom: 0; }
+/* Специфические фильтры раздела — над цветом и ценой; пустой блок не занимает места. */
+.d-filters-box .d-spec-filters:empty { display: none; }
+.d-filters-box .d-spec-filters .d-color-section:last-child { margin-bottom: 12px; }
 .d-filters-box .d-color-grid { grid-template-columns: repeat(8, 1fr); }
 .d-filters-box .d-price-grid { grid-template-columns: 1fr; gap: 6px; margin-bottom: 0; }
 .d-panel-footer { flex-shrink: 0; padding: 12px 20px; }
@@ -962,26 +960,16 @@ button, input, select, textarea { font-family: inherit; }
   text-align:center; font-size:16px; outline:none; flex-shrink:0; transition:background .15s; }
 .p-inp:focus { background:#c0c0c0; }
 
-/* Summary reuse */
-.sum-row { display:flex; justify-content:space-between; padding:10px 0;
-  border-bottom:1px solid #eee; font-size:14px; }
-.sum-row:last-child { border-bottom:none; }
-.sum-k { font-weight:300; color:#666; }
-.sum-v { font-weight:700; text-align:right; max-width:60%; }
-
-/* Смета в окне «Итог» */
-.est-title { font-size:16px; font-weight:700; margin:20px 0 10px; }
+/* Смета: только расчёт по спецификации (правка 2026-10-04) */
+.est-title { font-size:16px; font-weight:700; margin:4px 0 10px; }
 .est-empty { font-size:13px; color:#999; padding:8px 0; }
 .est-table { width:100%; border-collapse:collapse; font-size:13px; }
 .est-table th, .est-table td { padding:8px 8px; border-bottom:1px solid #eee; text-align:left; vertical-align:top; }
 .est-table thead th { font-weight:700; color:#555; font-size:12px; text-transform:uppercase; letter-spacing:.02em; }
 .est-table .est-r { text-align:right; white-space:nowrap; }
 .est-mat { color:#333; }
-.est-nomat { color:#bbb; font-style:italic; }
 .est-table tfoot td { border-top:2px solid #333; border-bottom:none; font-weight:700; padding-top:10px; }
 .est-total { font-size:16px; }
-.est-note { font-size:11px; color:#999; margin-top:8px; }
-/* Кнопка выгрузки сметы в PDF + статус фоновой задачи рядом с ней. */
 /* Смета проекта: раздел на каждый объект и общий итог под ними. */
 .est-obj-title { font-size:14px; font-weight:600; margin:18px 0 6px; }
 .est-project-total {
@@ -989,8 +977,6 @@ button, input, select, textarea { font-family: inherit; }
   margin-top:16px; padding-top:10px; border-top:2px solid #333;
   font-size:16px; font-weight:700;
 }
-.est-actions { display:flex; align-items:center; gap:12px; margin-top:12px; }
-.est-actions .est-note { margin-top:0; }
 
 /* ── Отделка фасада: счётчик в футере план-редактора ── */
 .d-facade-count { font-size:12px; color:#777; white-space:nowrap; }

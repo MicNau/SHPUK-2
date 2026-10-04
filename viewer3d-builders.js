@@ -2212,18 +2212,28 @@ function _offsetPolyline(pts, halfW) {
     const L = Math.hypot(dx, dz) || 1;
     segN.push({ x: -dz / L, z: dx / L });                 // левая нормаль сегмента
   }
+  const miter = (a, b) => {
+    let mx = a.x + b.x, mz = a.z + b.z;
+    const mL = Math.hypot(mx, mz) || 1; mx /= mL; mz /= mL;
+    const cos = Math.max(mx * b.x + mz * b.z, 0.34);      // лимит миттера (не даём «шипам» расти)
+    const k = Math.min(1 / cos, 3);
+    return { x: mx * k, z: mz * k };
+  };
+  // Кольцо (последняя точка совпала с первой): шов сшивается тем же миттером, что
+  // и внутренний угол, — оба конца ленты сходятся по одной линии. Раньше концы
+  // обрезались каждый по своему отрезку, и на углу-шве оставалась ступенька
+  // (правка 2026-10-04).
+  const closed = n >= 4 && Math.hypot(pts[0].x - pts[n-1].x, pts[0].z - pts[n-1].z) < 1e-3;
+  const seam = closed ? miter(segN[n-2], segN[0]) : null;
   const left = [], right = [];
   for (let i = 0; i < n; i++) {
     let nx, nz;
-    if (i === 0)            { nx = segN[0].x;     nz = segN[0].z; }
+    if (seam && (i === 0 || i === n - 1)) { nx = seam.x; nz = seam.z; }
+    else if (i === 0)       { nx = segN[0].x;     nz = segN[0].z; }
     else if (i === n - 1)   { nx = segN[n-2].x;   nz = segN[n-2].z; }
     else {                                                // внутренний угол → миттер
-      const a = segN[i-1], b = segN[i];
-      let mx = a.x + b.x, mz = a.z + b.z;
-      const mL = Math.hypot(mx, mz) || 1; mx /= mL; mz /= mL;
-      const cos = Math.max(mx * b.x + mz * b.z, 0.34);    // лимит миттера (не даём «шипам» расти)
-      const k = Math.min(1 / cos, 3);
-      nx = mx * k; nz = mz * k;
+      const m = miter(segN[i-1], segN[i]);
+      nx = m.x; nz = m.z;
     }
     left.push ({ x: pts[i].x + nx * halfW, z: pts[i].z + nz * halfW });
     right.push({ x: pts[i].x - nx * halfW, z: pts[i].z - nz * halfW });
@@ -3382,7 +3392,7 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
     postSet.add(key);
     // Готовая модель калитки ставится как есть: масштабируется только по высоте
     // забора, ширина остаётся родной (проём под неё и делался).
-    if (wicket) _fenceWicketLeaf(wicket, fenceGroup, sx, sz, angle, panelH, panelMat, frameMat);
+    if (wicket) _fenceWicketLeaf(wicket, fenceGroup, sx, sz, angle, panelH, panelMat, frameMat, proto);
     else if (proto) panelsPainted += _fenceModelSection(proto, fenceGroup, sx, sz, angle, len, sy,
                                                         panelMat, frameMat, true);
     else       _fenceSchematicSection(fenceGroup, sx, sz, angle, len, panelH,
@@ -3394,23 +3404,109 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
 // Створка из готовой модели: клон прототипа, масштаб только по высоте забора.
 // Полотно красится товаром (как у секций), остальное — тёмной рамой; если панели
 // в модели не распознались, материалы остаются файловыми — калитка нарисована в
-// цвет своего забора.
-function _fenceWicketLeaf(proto, group, x, z, angle, panelH, panelMat, frameMat) {
+// цвет своего забора. fenceProto — модель секций того же забора: от неё берётся
+// направление досок (null — забор условный, доски горизонтальные).
+function _fenceWicketLeaf(proto, group, x, z, angle, panelH, panelMat, frameMat, fenceProto) {
   const inst = proto.clone(true);
   const sy = panelH / _fenceNativeH(proto);
   inst.scale.set(1, sy, 1);
   inst.position.set(x, 0, z);
   inst.rotation.y = angle;
-  const panels = (typeof _fenceProtoPanels === 'function') ? _fenceProtoPanels(proto) : new Set();
-  const names = new Set();
-  panels.forEach(o => names.add(o.name || ''));
+  // Клон обходится в том же порядке, что прототип, — меши сопоставляем по номеру:
+  // имена у примитивов одного меша не обязаны быть уникальными.
+  const panels = _wicketPanelFlags(proto);
+  if (panels) _wicketPanelUV(proto, panels, fenceProto ? _fenceProtoBoardsVertical(fenceProto) : false);
+  let i = 0;
   inst.traverse(o => {
     if (!o.isMesh) return;
     o.castShadow = o.receiveShadow = true;
-    if (!names.size) return;                     // разбор не удался — оставляем как в файле
-    o.material = names.has(o.name || '') ? panelMat : frameMat;
+    const isPanel = panels ? panels[i] : null;
+    i++;
+    if (isPanel === null) return;                // разбор не удался — оставляем как в файле
+    o.material = isPanel ? panelMat : frameMat;
   });
   group.add(inst);
+}
+
+// Что в калитке — полотно. Створка в наших файлах — ОДИН меш из нескольких
+// примитивов (рама, доски, ручки), и различаются они только материалом:
+// `fence_wood` — полотно, `fence_metal` — рама и ручки. Разбор секции забора
+// (_fenceProtoPanels) смотрит на имена мешей и площадь, а у примитивов створки
+// габарит почти одинаковый — рама и ручки красились под доски (правка 2026-10-04).
+// Поэтому сначала — материалы файла; нет в них полотна — прежний разбор.
+const WICKET_PANEL_MAT_RE = /wood|дерев|panel|полотн|board|доск|plank|lamel|ламел/i;
+
+function _wicketPanelFlags(proto) {
+  if (proto.userData._panelFlags !== undefined) return proto.userData._panelFlags;
+  const meshes = [];
+  proto.traverse(o => { if (o.isMesh) meshes.push(o); });
+  const matName = o => (Array.isArray(o.material) ? o.material.map(m => m && m.name).join('|')
+                                                   : (o.material && o.material.name)) || '';
+  let flags = meshes.map(o => WICKET_PANEL_MAT_RE.test(matName(o)));
+  let how = 'по материалам файла';
+  if (!flags.some(Boolean)) {
+    const panels = (typeof _fenceProtoPanels === 'function') ? _fenceProtoPanels(proto) : new Set();
+    flags = panels.size ? meshes.map(o => panels.has(o)) : null;
+    how = 'по именам и площади';
+  }
+  console.info('[fence] калитка: полотно', how, '—',
+               flags ? meshes.filter((o, k) => flags[k]).map(o => (o.name || '?') + ':' + matName(o)).join(', ')
+                     : 'не опознано, материалы файла');
+  proto.userData._panelFlags = flags;
+  return flags;
+}
+
+// Направление досок у секций забора — то же решение, что в _applyFencePanelUV для
+// полотна во всю секцию: по развёртке модели. Калитка того же типа, что забор
+// (индексы моделей совпадают), поэтому доски у неё идут так же: у 003 —
+// горизонтально, у 005 — вертикально.
+function _fenceProtoBoardsVertical(fenceProto) {
+  if (fenceProto.userData._boardsVertical !== undefined) return fenceProto.userData._boardsVertical;
+  // Геометрия — в осях секции, как её видит _applyFencePanelUV (там она уже запечена).
+  let best = null, bestW = 0;
+  const panels = (typeof _fenceProtoPanels === 'function') ? _fenceProtoPanels(fenceProto) : new Set();
+  fenceProto.updateMatrixWorld(true);
+  panels.forEach(o => {
+    const g = o.geometry.clone().applyMatrix4(o.matrixWorld);
+    g.computeBoundingBox();
+    const w = g.boundingBox.max.x - g.boundingBox.min.x;
+    if (w > bestW) { bestW = w; best = g; }
+  });
+  const info = best ? _fenceUVVerticalInGeo(best) : null;
+  fenceProto.userData._boardsVertical = !!(info && info.vertical);
+  return fenceProto.userData._boardsVertical;
+}
+
+// Ровная осевая развёртка полотна створки — родная UV под текстурой товара давала
+// мелкие плашки поперёк досок. Створка в файле повёрнута (лежит «на боку» и
+// приоткрыта), поэтому оси берём в системе самой геометрии: вверх — мировая
+// вертикаль, пересчитанная в неё; поперёк — ось, по которой полотно шире всего
+// (кроме вертикальной). Геометрия у клонов общая с прототипом: развёртка кладётся
+// один раз и переделывается, только если сменилось направление досок.
+function _wicketPanelUV(proto, flags, vertical) {
+  if (typeof _applyAxisUV !== 'function') return;
+  if (proto.userData._uvVertical === vertical) return;
+  proto.userData._uvVertical = vertical;
+  proto.updateMatrixWorld(true);
+  let k = 0;
+  proto.traverse(mesh => {
+    if (!mesh.isMesh) return;
+    if (!flags[k++]) return;
+    const g = mesh.geometry;
+    if (!g.attributes.position) return;
+    const rot = new THREE.Matrix3().setFromMatrix4(mesh.matrixWorld);
+    const up = new THREE.Vector3(0, 1, 0).applyMatrix3(rot.invert()).normalize();
+    g.computeBoundingBox();
+    const bb = g.boundingBox, ext = [bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z];
+    const axes = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+    let upK = 0;
+    axes.forEach((a, n) => { if (Math.abs(a.dot(up)) > Math.abs(axes[upK].dot(up))) upK = n; });
+    const rest = [0, 1, 2].filter(n => n !== upK);
+    const across = axes[ext[rest[0]] >= ext[rest[1]] ? rest[0] : rest[1]];
+    _applyAxisUV(mesh, vertical ? up : across);
+  });
+  console.info('[fence] калитка: развёртка полотна — доски', vertical ? 'вертикальные' : 'горизонтальные',
+               '(как у секций забора)');
 }
 
 // Делит пролёт на куски вокруг калитки: [{t0, len, gate?}]. Калитка задана точкой плана
