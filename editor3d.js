@@ -737,7 +737,7 @@ function _e3dDragStart(hit, np) {
     return S.pool ? { ...hit, from: { ...np }, start: { ...S.pool } } : null;
   }
   if (kind === 'entry') return { ...hit, from: { ...np } };
-  if (kind === 'line') return { ...hit, from: { ...np } };
+  if (kind === 'line') return { ...hit, from: { ...np }, mates: _e3dLineMates(sec, hit.idx) };
   return null;
 }
 
@@ -816,25 +816,30 @@ function _e3dDragMove(np) {
     const pt = pts[d.idx];
     if (!pt) return;
     let q = { x: snapNorm(np.x), y: snapNorm(np.y) };
+    // Сшитые точки (шов кольца, стык линий) едут вместе — см. _e3dLineMates.
+    const group = [d.idx, ...(d.mates || [])];
     // Конец, подведённый к началу своей же линии, прилипает — контур замыкается.
-    const snapTo = (typeof _lineCloseTarget === 'function') ? _lineCloseTarget(sec, d.idx, q) : null;
+    // У уже сшитой точки цель прилипания — она сама, её не ищем.
+    const snapTo = (!d.mates || !d.mates.length) && typeof _lineCloseTarget === 'function'
+      ? _lineCloseTarget(sec, d.idx, q) : null;
     if (snapTo) q = { x: snapTo.x, y: snapTo.y };
     else if (sec === 'fence' && typeof _fenceTooClose === 'function' && _fenceTooClose(q)) return;
+    // Соседи всех сшитых точек — у шва кольца это первый и последний отрезки.
+    const nbs = [];
+    for (const i of group) for (const nb of [pts[i - 1], pts[i + 1]]) {
+      if (nb && !nb.break && !group.some(j => pts[j] === nb)) nbs.push(nb);
+    }
     // Точка забора тянет за собой два своих отрезка — ни один не должен пройти
     // сквозь дом или террасу (правка 2026-09-26): точка упирается, как объекты.
     if (sec === 'fence' && typeof fenceSegBlocked === 'function') {
-      for (const nb of [pts[d.idx - 1], pts[d.idx + 1]]) {
-        if (nb && !nb.break && fenceSegBlocked(nb, q)) return;
-      }
+      for (const nb of nbs) if (fenceSegBlocked(nb, q)) return;
     }
     // Дорожке пересекать дом и террасу тоже нельзя (правка 2026-09-26; 19.09
     // было решено наоборот — вести насквозь и обрезать скрытое).
     if (sec === 'paths' && typeof pathSegBlocked === 'function') {
-      for (const nb of [pts[d.idx - 1], pts[d.idx + 1]]) {
-        if (nb && !nb.break && pathSegBlocked(nb, q)) return;
-      }
+      for (const nb of nbs) if (pathSegBlocked(nb, q)) return;
     }
-    pt.x = q.x; pt.y = q.y;
+    for (const i of group) { if (pts[i]) { pts[i].x = q.x; pts[i].y = q.y; } }
   }
   e3dSync();   // сцену НЕ пересобираем: тяжёлая сборка идёт один раз, на отпускании
 }
@@ -846,6 +851,21 @@ function _e3dDragMove(np) {
 
 function _e3dLineSegs(name) {
   return (typeof splitAtBreaks === 'function') ? splitAtBreaks(S.pts[name] || []) : [];
+}
+
+// Точки, сшитые с данной: те же координаты в той же разметке. Так хранится шов
+// кольца (последняя точка ломаной легла на первую) и стык линий. Перетаскивание
+// двигает их вместе — раньше тянулась одна точка, и кольцо расходилось
+// (правка 2026-10-04).
+function _e3dLineMates(name, idx) {
+  const pts = S.pts[name] || [];
+  const p = (typeof idx === 'number') ? pts[idx] : null;
+  if (!p || p.break) return [];
+  const out = [];
+  pts.forEach((q, j) => {
+    if (j !== idx && q && !q.break && Math.abs(q.x - p.x) < 1e-9 && Math.abs(q.y - p.y) < 1e-9) out.push(j);
+  });
+  return out;
 }
 
 // Записать список ломаных обратно плоским массивом с маркерами разрыва.

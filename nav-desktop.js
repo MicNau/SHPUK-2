@@ -763,8 +763,8 @@ const D_TERRACE_H_PARAM = `
     <div class="d-param-unit" id="d-terrace-h-hint"><span>15 см</span><span>80 см</span></div>
   </div>`;
 
-// Сечение доски — специфический фильтр каталога (ТЗ п. 5): живёт в левой панели,
-// рядом с настройками раздела, как высота борта у грядок. Разметку наполняет
+// Сечение доски — специфический фильтр каталога (ТЗ п. 5). Живёт в правой
+// панели, в блоке «Фильтры» (D_SECTION_FILTERS). Разметку наполняет
 // _dRenderPropFilters, отбор идёт на бэкенде по характеристике core_type.
 const D_CORE_FILTER = `
   <div class="d-color-section">
@@ -773,8 +773,8 @@ const D_CORE_FILTER = `
   </div>`;
 
 // Направление доски фасадных панелей — специфический фильтр отделки фасада
-// (правка 2026-09-26, п. 11): как «Доска» у террасы, живёт в левой панели, отбор
-// на бэкенде по характеристике board_direction. Наполняет _dRenderPropFilters.
+// (правка 2026-09-26, п. 11): как «Доска» у террасы, отбор на бэкенде по
+// характеристике board_direction. Наполняет _dRenderPropFilters.
 const D_DIR_FILTER = `
   <div class="d-color-section">
     <div class="d-color-title">Направление доски:</div>
@@ -789,9 +789,39 @@ const D_FENCE_FILTER = `
     <div class="d-price-grid" id="d-fence-grid"></div>
   </div>`;
 
+// Специфические фильтры раздела. С правки 2026-10-04 ВСЕ фильтры каталога — в
+// правой панели, в блоке «Фильтры» над цветом и ценой (_dRenderFilters); раньше
+// специфические жили в левой панели, рядом с настройками раздела (ТЗ п. 8).
+const D_SECTION_FILTERS = {
+  terrace:      D_CORE_FILTER,
+  pool_terrace: D_CORE_FILTER,
+  paths:        D_CORE_FILTER,
+  fence:        D_FENCE_FILTER,
+  facade:       D_DIR_FILTER,
+  facade2:      D_DIR_FILTER,
+  beds: `
+    <div class="d-color-section">
+      <div class="d-color-title">Высота борта:</div>
+      <div class="d-price-grid" id="d-bed-h-grid"></div>
+    </div>
+    <div class="d-color-section">
+      <div class="d-color-title">Крепёж:</div>
+      <div class="d-price-grid" id="d-bed-mount-grid"></div>
+    </div>`,
+  railing: `
+    <div class="d-color-section">
+      <div class="d-color-title">Крышка столба:</div>
+      <div class="d-price-grid" id="d-rail-cap-grid"></div>
+    </div>
+    <div class="d-color-section">
+      <div class="d-color-title">Сечение столба:</div>
+      <div class="d-price-grid" id="d-rail-post-grid"></div>
+    </div>`,
+};
+
 const D_SECTION_UI = {
   terrace: {
-    params: D_TERRACE_H_PARAM + D_CORE_FILTER,
+    params: D_TERRACE_H_PARAM,
     actions: [
       { lbl: 'Ещё одна',          fn: "addRect('terrace')" },
       { lbl: 'Удалить выбранную', fn: 'dDeleteSelected()', sel: true },
@@ -799,7 +829,6 @@ const D_SECTION_UI = {
     ],
   },
   pool_terrace: {
-    params: D_CORE_FILTER,
     actions: [
       { lbl: 'Ещё одна',          fn: "addRect('pool_terrace')" },
       { lbl: 'Бассейн ▭',         fn: "dSetPool('rect')" },
@@ -817,17 +846,6 @@ const D_SECTION_UI = {
     ],
   },
   beds: {
-    // Специфические фильтры каталога живут в панели раздела, рядом с его
-    // настройками (ТЗ п. 8); цвет и цена — в правой панели (п. 7).
-    params: `
-      <div class="d-color-section">
-        <div class="d-color-title">Высота борта:</div>
-        <div class="d-price-grid" id="d-bed-h-grid"></div>
-      </div>
-      <div class="d-color-section">
-        <div class="d-color-title">Крепёж:</div>
-        <div class="d-price-grid" id="d-bed-mount-grid"></div>
-      </div>`,
     actions: [
       { lbl: 'Ещё одна',          fn: 'addBed()' },
       { lbl: 'Удалить выбранную', fn: 'dDeleteSelected()', sel: true },
@@ -835,7 +853,7 @@ const D_SECTION_UI = {
     ],
   },
   paths: {
-    params: D_CORE_FILTER + `
+    params: `
       <div class="d-param-group">
         <div class="d-param-head">
           <span class="d-param-label">Ширина дорожки, см.</span>
@@ -853,7 +871,7 @@ const D_SECTION_UI = {
   },
   fence: {
     // Высота полотна одна — 1920 мм (правка 2026-08-30), подпись справочная.
-    params: D_FENCE_FILTER + `<div class="d-param-note">Высота забора: 1920 мм</div>`,
+    params: `<div class="d-param-note">Высота забора: 1920 мм</div>`,
     actions: [
       { lbl: 'Калитка',       fn: 'dFenceGate()' },
       { lbl: 'Удалить точку', fn: 'dDeleteSelected()', sel: true },
@@ -861,15 +879,6 @@ const D_SECTION_UI = {
     ],
   },
   railing: {
-    params: `
-      <div class="d-color-section">
-        <div class="d-color-title">Крышка столба:</div>
-        <div class="d-price-grid" id="d-rail-cap-grid"></div>
-      </div>
-      <div class="d-color-section">
-        <div class="d-color-title">Сечение столба:</div>
-        <div class="d-price-grid" id="d-rail-post-grid"></div>
-      </div>`,
     actions: [
       { lbl: 'Обозначить вход', fn: 'dRailingEntry()' },
       { lbl: 'Удалить всё',     fn: "dResetSection('railing')" },
@@ -882,14 +891,12 @@ const D_SECTION_UI = {
     ],
   },
   facade2: {
-    params: D_DIR_FILTER,
     actions: [
       { lbl: 'Сбросить',    fn: "dFacadeClear('facade2')" },
       { lbl: 'Удалить всё', fn: "dResetSection('facade2')" },
     ],
   },
   facade: {
-    params: D_DIR_FILTER,
     actions: [
       { lbl: 'Сбросить',    fn: "dFacadeClear('facade')" },
       { lbl: 'Удалить всё', fn: "dResetSection('facade')" },
@@ -970,11 +977,6 @@ function _dRenderSidebar() {
 
   _dSyncSectionActions();
   _dSyncAllRangeFills();
-  // Специфические фильтры живут в блоке раздела — наполняем сразу после того,
-  // как разметка панели создана заново.
-  _dRenderRailFilters();
-  _dRenderBedFilters();
-  _dRenderPropFilters();
   // Поля параметров рисуются заново — вернуть в них значения из состояния.
   if (dActiveItem === 'terrace') _dSyncTerraceHeight();
   if (dActiveItem === 'paths') {
@@ -1114,7 +1116,8 @@ function dSetBedFilter(kind, value) {
 // характеристике core_type, поэтому выбор входит в ключ кэша каталога.
 // Фильтры каталога по характеристикам товара — сечение доски, направление
 // фасадной доски, заполнение забора. Механика у всех одна: набор выбранных
-// значений в catFilter(раздел)[key], кнопки в своей сетке левой панели,
+// значений в catFilter(раздел)[key], кнопки в своей сетке в блоке «Фильтры»
+// правой панели (D_SECTION_FILTERS),
 // отбор на бэкенде предикатом по пути характеристики (одно значение — eq,
 // несколько — in). Разделу, где сетки нет, фильтр просто не показывается.
 const D_PROP_FILTERS = {
@@ -1638,12 +1641,18 @@ function _dRenderPanelContent() {
 }
 
 // ── ФИЛЬТРЫ КАТАЛОГА (правая панель) ──
-// Цвет и цена — у всех разделов; специфические (крышка и сечение столба,
-// высота борта и крепёж грядки) добавляются своему разделу. Блок свёрнут по
+// Цвет и цена — у всех разделов; специфические (доска, направление доски,
+// заполнение забора, высота борта и крепёж грядки, крышка и сечение столба)
+// добавляются своему разделу сверху — D_SECTION_FILTERS. Блок свёрнут по
 // умолчанию: развёрнутый он занимает половину панели и оттесняет карточки.
 let _dFiltersOpen = false;
 
 function _dRenderFilters() {
+  const spec = document.getElementById('d-spec-filters');
+  if (spec) spec.innerHTML = D_SECTION_FILTERS[dActiveItem] || '';
+  _dRenderRailFilters();
+  _dRenderBedFilters();
+  _dRenderPropFilters();
   _dRenderColorGrid();
   _dRenderPriceGrid();
   _dSyncFiltersBox();
@@ -3437,68 +3446,25 @@ function _dRenderProjectCalc() {
 // SUMMARY
 // ══════════════════════════════════════════════
 function dShowSummary() {
-  const desc = (typeof _houseCache !== 'undefined' && _houseCache.desc) ? _houseCache.desc : null;
-  const rows = [
-    ['Тип дома', S.houseType === 'no_house' ? 'Участок без дома' : (S.houseType || 'не выбран')],
-    ['Общая площадь', (document.getElementById('v-area')?.value || '—') + ' кв.м'],
-    ['Фундамент', (document.getElementById('v-found')?.value || '—') + ' см'],
-  ];
-  // Per-floor параметры (если есть дескриптор с этажами)
-  if (desc && desc.floors) {
-    desc.floors.forEach((floor, fi) => {
-      const a = document.getElementById(`v-area-${fi}`)?.value;
-      const h = document.getElementById(`v-floor-${fi}`)?.value;
-      const label = floor.label || `Этаж ${fi + 1}`;
-      if (a || h) rows.push([label, `${a || '—'} кв.м, h=${h || '—'} см`]);
-    });
-  }
-  rows.push(
-    ['Настроено', dConfigured.size
-      ? [...dConfigured].map(s => D_SIDEBAR_ITEMS.find(x => x.id === s)?.lbl || s).join(', ')
-      : 'не выбрано'],
-  );
-  const infoHTML = rows.map(([k, v]) =>
-    `<div class="sum-row"><span class="sum-k">${k}</span><span class="sum-v">${v}</span></div>`
-  ).join('');
-
-  // ── Предварительная смета ──
+  // В смете остаётся ТОЛЬКО расчёт по спецификации (правка 2026-10-04): описание
+  // проекта (тип дома, площадь, фундамент, этажи, настроенные разделы) и
+  // предварительная клиентская смета убраны. _computeEstimate нужен здесь лишь
+  // затем, чтобы понять, размечено ли что-нибудь: без разметки и без товаров
+  // расчёт не запускается — вместо него короткое сообщение.
+  const head = '<div class="est-title">Расчёт по спецификации</div>';
   const est = _computeEstimate();
   const hasProduct = !!(S.estimate && Object.keys(S.estimate).length);
-  let estHTML = '<div class="est-title">Предварительная смета</div>';
+  const body = document.getElementById('d-sum-body');
   if (!est.rows.length) {
-    estHTML += '<div class="est-empty">Разметьте конструкции, чтобы рассчитать смету.</div>';
+    body.innerHTML = head + '<div class="est-empty">Разметьте конструкции, чтобы рассчитать смету.</div>';
   } else if (!hasProduct) {
-    // Конструкции размечены, но ни один товар не применён: таблица из прочерков
-    // с итогом 0 ₽ выглядела бы поломкой.
-    estHTML += '<div class="est-empty">Товары ещё не выбраны.</div>';
+    // Спецификация на товарах по умолчанию при «ничего не выбрано» вводила бы в заблуждение.
+    body.innerHTML = head + '<div class="est-empty">Товары ещё не выбраны.</div>';
   } else {
-    estHTML += `
-      <table class="est-table">
-        <thead><tr><th>Элемент</th><th>Объём</th><th>Материал</th><th class="est-r">Кол-во</th><th class="est-r">Сумма</th></tr></thead>
-        <tbody>
-          ${est.rows.map(r => `
-            <tr>
-              <td>${r.lbl}</td>
-              <td>${r.metric.text}</td>
-              <td class="est-mat">${r.mat ? r.mat.name : '<span class="est-nomat">материал не выбран</span>'}</td>
-              <td class="est-r">${r.qtyUnits || '—'}</td>
-              <td class="est-r">${r.subtotal != null ? _fmtRub(r.subtotal) : '—'}</td>
-            </tr>`).join('')}
-        </tbody>
-        <tfoot><tr><td colspan="4" class="est-r">Итого:</td><td class="est-r est-total">${_fmtRub(est.total)}</td></tr></tfoot>
-      </table>
-      <div class="est-note">Расчёт ориентировочный: цены из каталога; расход доски с запасом 10%, забора — 5%.</div>`;
-  }
-
-  // Блок расчёта проекта бэкендом — заполняется асинхронно (_dRenderProjectCalc).
-  // Пока ни один товар не выбран, его НЕ показываем: спецификация на товарах по
-  // умолчанию рядом с «Товары ещё не выбраны» противоречила бы сама себе.
-  document.getElementById('d-sum-body').innerHTML =
-    infoHTML + estHTML + (hasProduct ? '<div id="d-project-calc"></div>' : '');
-  // Расчёт не должен ломать «Итог»: исключение при сборке запроса раньше обрывало
-  // dShowSummary до рендера, и блок оставался пустым — без заголовка и без
-  // сообщения, то есть неотличимо от «фичи вообще нет в этой сборке».
-  if (hasProduct) {
+    // Блок заполняется асинхронно (_dRenderProjectCalc). Расчёт не должен ломать
+    // смету: исключение при сборке запроса раньше обрывало dShowSummary до
+    // рендера, и блок оставался пустым — неотличимо от «фичи нет в этой сборке».
+    body.innerHTML = '<div id="d-project-calc"></div>';
     try {
       _ensureProjectCalc();
     } catch (e) {
