@@ -147,8 +147,8 @@ function _setupControls(camera, domElement) {
 // ИНИЦИАЛИЗАЦИЯ СЦЕНЫ
 // ══════════════════════════════════════════════
 // Свет сцены (правка 2026-10-08): см. комментарий у «Освещение» в init3dCanvas.
-const SUN_INTENSITY  = 5.0;    // солнце; physicallyCorrectLights — альбедо × I·cos / π
-const SCENE_EXPOSURE = 0.70;   // экспозиция ACES при солнце 5 и небе из HDRI
+const SUN_INTENSITY  = 2.6;    // солнце; physicallyCorrectLights — альбедо × I·cos / π
+const SCENE_EXPOSURE = 0.95;   // экспозиция ACES при солнце 2.6 и небе из HDRI
 
 function init3dCanvas(targetSlotId) {
   const targetSlot = document.getElementById(targetSlotId || 'three-container');
@@ -207,8 +207,9 @@ function init3dCanvas(targetSlotId) {
 
   // ── Освещение ─────────────────────────────────
   // Баланс подобран замером (правка 2026-10-08, после перевода цветов в линейные —
-  // color-management.js): серый образец #7e7e7e на солнце выходит #9a9897, тень на
-  // земле — 0.43 от освещённого места. Было: солнце 1.5 при physicallyCorrectLights
+  // color-management.js): серый образец #7e7e7e на солнце выходит #8e8f93, тень на
+  // земле — 0.57 от освещённого места (0.43 при солнце 5 вышло слишком плотно —
+  // ответ продукта: «тени нужно прозрачнее»). Было: солнце 1.5 при physicallyCorrectLights
   // давало едва половину альбедо, освещение от неба (HDRI) засвечивало тени почти
   // до уровня солнца (0.67), а заниженная экспозиция 0.72 темнила всё, что без
   // прямого солнца, — отсюда «тёмные текстуры» на стенах.
