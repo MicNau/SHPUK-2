@@ -774,7 +774,6 @@ button, input, select, textarea { font-family: inherit; }
 }
 .d-mat-info { flex: 1; min-width: 0; }
 .d-mat-name { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
-.d-mat-short { font-size: 11px; font-weight: 300; color: #666; line-height: 1.4; }
 .d-mat-price { font-size: 12px; font-weight: 700; margin-top: 3px; color: #333; }
 .d-mat-exp {
   width: 26px; height: 26px; background: rgba(0,0,0,.05); border: none; border-radius: 50%;
@@ -810,8 +809,6 @@ button, input, select, textarea { font-family: inherit; }
   background: var(--bg); color: var(--text); border: 2px solid var(--btn-border);
 }
 .d-mat-btn-view:hover { box-shadow: var(--hover-shadow); }
-.d-mat-btn-compare { background: var(--card); color: var(--text); }
-.d-mat-btn-compare:hover { background: var(--card-hover); }
 
 /* Price filter in panel */
 .d-price-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
@@ -903,6 +900,12 @@ button, input, select, textarea { font-family: inherit; }
 }
 .d-req-dump[hidden] { display: none; }
 .d-req-actions { display: flex; gap: 8px; width: 100%; }
+/* Пустая выдача под выбранные фильтры: текст и кнопка сброса. */
+.d-cat-empty { padding: 16px 4px; color: #888; font-size: 14px; display: flex; flex-direction: column;
+  align-items: flex-start; gap: 10px; }
+.d-cat-reset { background: none; border: 2px solid var(--btn-border); border-radius: var(--r);
+  padding: 8px 14px; font: inherit; font-size: 14px; font-weight: 600; color: var(--text); cursor: pointer; }
+.d-cat-reset:hover { border-color: var(--accent); }
 /* Окно «Размеры террасы»: два поля в ряд через «×». */
 .d-size-box { width: 380px; }
 .d-size-row { display: flex; align-items: flex-end; gap: 10px; width: 100%; }
