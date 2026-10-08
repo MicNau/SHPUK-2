@@ -146,6 +146,10 @@ function _setupControls(camera, domElement) {
 // ══════════════════════════════════════════════
 // ИНИЦИАЛИЗАЦИЯ СЦЕНЫ
 // ══════════════════════════════════════════════
+// Свет сцены (правка 2026-10-08): см. комментарий у «Освещение» в init3dCanvas.
+const SUN_INTENSITY  = 2.6;    // солнце; physicallyCorrectLights — альбедо × I·cos / π
+const SCENE_EXPOSURE = 0.95;   // экспозиция ACES при солнце 2.6 и небе из HDRI
+
 function init3dCanvas(targetSlotId) {
   const targetSlot = document.getElementById(targetSlotId || 'three-container');
   if (!targetSlot || typeof THREE === 'undefined') return;
@@ -171,7 +175,7 @@ function init3dCanvas(targetSlotId) {
   renderer.shadowMap.enabled   = true;
   renderer.shadowMap.type      = isMobile ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
   renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.82;
+  renderer.toneMappingExposure = SCENE_EXPOSURE;
   renderer.outputEncoding      = THREE.sRGBEncoding;
   renderer.physicallyCorrectLights = true;
   targetSlot.appendChild(renderer.domElement);
@@ -202,10 +206,17 @@ function init3dCanvas(targetSlotId) {
   scene.add(skyMesh);
 
   // ── Освещение ─────────────────────────────────
+  // Баланс подобран замером (правка 2026-10-08, после перевода цветов в линейные —
+  // color-management.js): серый образец #7e7e7e на солнце выходит #8e8f93, тень на
+  // земле — 0.57 от освещённого места (0.43 при солнце 5 вышло слишком плотно —
+  // ответ продукта: «тени нужно прозрачнее»). Было: солнце 1.5 при physicallyCorrectLights
+  // давало едва половину альбедо, освещение от неба (HDRI) засвечивало тени почти
+  // до уровня солнца (0.67), а заниженная экспозиция 0.72 темнила всё, что без
+  // прямого солнца, — отсюда «тёмные текстуры» на стенах.
   const ambLight = new THREE.AmbientLight(0xfff8e8, 0.2);
   scene.add(ambLight);
 
-  const sunLight = new THREE.DirectionalLight(0xfff4e0, 1.6);
+  const sunLight = new THREE.DirectionalLight(0xfff4e0, SUN_INTENSITY);
   sunLight.position.set(14, 22, 10);
   sunLight.castShadow = true;
   const smSz = isMobile ? 1024 : 2048;
@@ -217,8 +228,10 @@ function init3dCanvas(targetSlotId) {
   sunLight.shadow.normalBias    = 0.02;
   sunLight.shadow.radius        = isMobile ? 3 : 5;
   scene.add(sunLight);
-  // Заливка неба/земли — снижена: тени глубже (раньше 0.7 размывало тени).
-  scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a8a3c, 0.3));
+  // Заливка неба/земли — только пока нет HDRI (или если он не загрузился): с ним
+  // рассеянный свет даёт само небо, и эта подсветка лишь высветляла тени.
+  const hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x5a8a3c, 1.8);
+  scene.add(hemiLight);
 
   // ── Земля ─────────────────────────────────────
   const groundMesh = new THREE.Mesh(
@@ -239,7 +252,7 @@ function init3dCanvas(targetSlotId) {
 
   threeState = {
     renderer, scene, camera, controls,
-    houseGroup, vegGroup, skyMesh, sunLight, ambLight, groundMesh,
+    houseGroup, vegGroup, skyMesh, sunLight, ambLight, hemiLight, groundMesh,
     envMap: null, texCache: {},
     wallMeshes: [], deckMeshes: [], porchMeshes: [],
     stepMeshes: [], fenceMeshes: [], railingMeshes: [],
@@ -299,7 +312,7 @@ function _autoLoadHdri() {
 function _applyHdri(texture) {
   if (!threeState) return;
   texture.mapping = THREE.EquirectangularReflectionMapping;
-  const { scene, skyMesh, sunLight, ambLight, renderer } = threeState;
+  const { scene, skyMesh, sunLight, ambLight, hemiLight, renderer } = threeState;
 
   const pmrem  = new THREE.PMREMGenerator(renderer);
   pmrem.compileEquirectangularShader();
@@ -310,9 +323,10 @@ function _applyHdri(texture) {
   scene.environment = envMap;
   scene.background  = envMap;
   skyMesh.visible   = false;
-  sunLight.intensity = 1.5;
+  sunLight.intensity = SUN_INTENSITY;
   ambLight.intensity = 0.0;
-  renderer.toneMappingExposure = 0.72;   // меньше пересвета (текстуры не разбеливаются)
+  if (hemiLight) hemiLight.intensity = 0.0;
+  renderer.toneMappingExposure = SCENE_EXPOSURE;
   threeState.envMap  = envMap;
 
   // Перестраиваем дом — материалы получат envMap
@@ -718,11 +732,10 @@ function _texAverageColor(tex) {
     let r = 0, g = 0, b = 0, n = 0;
     for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
     if (!n) return null;
-    // Картинка в sRGB, а цвет материала three трактует линейно — переводим, иначе
-    // крышка выходит заметно светлее текстуры.
-    const lin = v => { const s = v / n / 255; return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
-    const c = new THREE.Color(lin(r), lin(g), lin(b));
-    hex = c.getHex();
+    // Картинка в sRGB, и hex отдаём тоже в sRGB: в линейный цвет материала его
+    // переводит color-management.js при color.set(hex).
+    const ch = v => Math.min(255, Math.round(v / n));
+    hex = (ch(r) << 16) | (ch(g) << 8) | ch(b);
   } catch (e) {
     hex = null;                                   // холст с чужого домена — не читается
   }

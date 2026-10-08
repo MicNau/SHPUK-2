@@ -182,11 +182,12 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-styles-desktop.css?v=53   styles-mobile.css?v=5      state.js?v=78
-canvas.js?v=66            shared/house-builder.js?v=89  ResourceManager.js?v=14
-viewer3d-core.js?v=161    viewer3d-builders.js?v=67   viewer3d-railing.js?v=18
-viewer3d-entourage.js?v=14   editor3d.js?v=21         nav-desktop.js?v=143
-nav-mobile.js?v=6         project-io.js?v=7          backend_API/Calculator.js?v=3
+color-management.js?v=1   styles-desktop.css?v=53   styles-mobile.css?v=5
+state.js?v=78             canvas.js?v=66            shared/house-builder.js?v=90
+ResourceManager.js?v=14   viewer3d-core.js?v=163    viewer3d-builders.js?v=68
+viewer3d-railing.js?v=18  viewer3d-entourage.js?v=14   editor3d.js?v=22
+nav-desktop.js?v=143      nav-mobile.js?v=6         project-io.js?v=7
+backend_API/Calculator.js?v=3
 ```
 
 `viewer3d-entourage.js` автоматически детектит `IS_MOBILE` (UA + `innerWidth<768`)
@@ -948,6 +949,33 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Ветка **Mobile**: цвета и свет сцены.
+
+- **Цвета — sRGB на входе, линейные внутри** (`color-management.js`, подключается
+  сразу после three.min.js). Рендер выводит sRGB, а three r128 принимал
+  `color: 0x…` / `color.set('#…')` как линейные — цвета образцов выходили заметно
+  светлее (серый #7e7e7e → #b8bec6 в кадре, тёмно-серый #1d2630 → #596f87). Модуль
+  делает то же, что ColorManagement новых three: `setHex`/`setStyle` переводят
+  sRGB → linear, `getHex` отдаёт sRGB (прочитанный и записанный заново цвет не
+  переводится дважды). `setRGB`, конструктор из трёх чисел и цвета GLB (glTF
+  хранит их линейными) не трогаются.
+- **Свет подобран замером** на стенде (серый куб на серой площадке):
+  `SUN_INTENSITY = 2.6`, `SCENE_EXPOSURE = 0.95`; полусферическая подсветка только без
+  HDRI (1.8), с HDRI — 0. Было: солнце 1.5 при physicallyCorrectLights, экспозиция
+  0.72 (её занизили, компенсируя высветление цветов, — отсюда тёмные текстуры) и
+  подсветка 0.3. Итог: #7e7e7e на солнце — #8e8f93 (чуть светлее образца), тень на
+  земле — 0.57 от освещённого места (было 0.67; промежуточный вариант с солнцем 5 и
+  тенью 0.43 продукт счёл слишком плотным).
+- Цвета, подобранные под старое высветление, приведены к задуманным: подложка
+  `PAD_COLOR` 0x3c3c3c → 0x6a6a6a (≈130 в кадре, как и было задумано), рама забора
+  `FENCE_FRAME_COLOR` 0x2a2a2a → 0x4a4a4a. `_texAverageColor` отдаёт sRGB-hex.
+- **Разметка редактора без тональной кривой** (`toneMapped: false` у линий,
+  маркеров, сетки, рамок фасада): оранжевый выбора теперь ровно акцент интерфейса
+  (раньше выходил #dab05e), белые ручки — белые. Зелёный «прочих объектов» и сетка
+  заданы цветами, которые раньше были видны на экране (0x73a782, 0xb6b6b6/0xc7c7c7).
+- Cache-bust: `color-management.js?v=1`, `shared/house-builder.js?v=90`,
+  `viewer3d-core.js?v=163`, `viewer3d-builders.js?v=68`, `editor3d.js?v=22`.
 
 Ветка **Mobile**: заглушки каталога убраны совсем.
 

@@ -419,9 +419,13 @@ function _e3dClearGroup() {
   return g;
 }
 
+// Разметка редактора — интерфейс, а не предмет в сцене: тональная кривая рендера
+// (ACES) её не трогает, цвета на экране — ровно цвета интерфейса (правка 2026-10-08;
+// раньше оранжевый выбора выходил грязно-жёлтым #dab05e, белые ручки — серыми).
 function _e3dLineMat(color, width) {
   return new THREE.LineBasicMaterial({
     color, linewidth: width || 1, depthTest: false, transparent: true, opacity: 0.95,
+    toneMapped: false,
   });
 }
 
@@ -445,6 +449,7 @@ function _e3dMarker(np, color, radius) {
   const geo = new THREE.CircleGeometry(radius || 0.18, 20);
   const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
     color, depthTest: false, transparent: true, opacity: 0.9, side: THREE.DoubleSide,
+    toneMapped: false,
   }));
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.set(w.x, y, w.z);
@@ -473,7 +478,9 @@ function _e3dRectPts(r) {
 }
 
 const E3D_COL_SEL  = 0xff7a1a;   // выбранный объект — оранжевый, как акцент интерфейса
-const E3D_COL_IDLE = 0x2f6f3f;   // прочие объекты раздела — приглушённый зелёный
+// Прочие объекты раздела — приглушённый зелёный. Значение — то, что раньше было
+// видно на экране (0x2f6f3f проходил через высветление и ACES и выглядел так).
+const E3D_COL_IDLE = 0x73a782;
 
 // Сетка 1 м: видна, пока открыт раздел с разметкой на земле.
 function _e3dSyncGrid(show) {
@@ -482,7 +489,9 @@ function _e3dSyncGrid(show) {
   if (!show) { if (E3D.grid) E3D.grid.visible = false; return; }
   if (!E3D.grid) {
     const div = Math.round(GRID / E3D_GRID_STEP);
-    E3D.grid = new THREE.GridHelper(GRID, div, 0x8a8a8a, 0xb9b9b9);
+    // Цвета — видимые раньше (0x8a8a8a / 0xb9b9b9 после высветления и ACES).
+    E3D.grid = new THREE.GridHelper(GRID, div, 0xb6b6b6, 0xc7c7c7);
+    E3D.grid.material.toneMapped = false;
     E3D.grid.material.transparent = true;
     E3D.grid.material.opacity = 0.35;
     E3D.grid.material.depthWrite = false;
@@ -563,6 +572,7 @@ function e3dSync() {
       const box = new THREE.Box3().setFromObject(seg);
       const h = new THREE.Box3Helper(box, E3D_COL_SEL);
       h.material.depthTest = false;
+      h.material.toneMapped = false;
       h.renderOrder = 999;
       g.add(h);
     }
