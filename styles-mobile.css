@@ -115,7 +115,6 @@ body.m-mode .d-panel-header { padding: 10px 12px 8px; }
 body.m-mode .d-panel-body { padding: 10px 12px 0; }
 body.m-mode .d-mat-list { padding: 10px 0; gap: 10px; }
 body.m-mode .d-mat-name { font-size: 15px; }
-body.m-mode .d-mat-short { font-size: 13px; }
 body.m-mode .d-mat-price { font-size: 14px; }
 body.m-mode .d-mat-thumb { width: 60px; height: 60px; }
 body.m-mode .d-mat-btn { height: 40px; font-size: 14px; }

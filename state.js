@@ -235,46 +235,6 @@ const HOUSE_MATERIALS = {
 // wallMat, frameMat). На этом соглашении держатся _dRenderHouseMaterials и
 // dSetHouseMat — новая группа материалов не требует правок в них.
 
-// Позиции из каталога outdoor-mebel.ru — Доска ДПК универсальная
-const STUB_RESULTS = [
-  {
-    id:1, ic:'🟫',
-    name:'TalverWood Стандарт 150×25',
-    short:'ДПК, двусторонняя, вельвет/гладкая, 5 цветов',
-    detail:'Доска ДПК бренда TalverWood. Состав: 60% древесная мука, 40% полимер. Размер: 150×25×4000 мм. Поверхность с двух сторон: вельвет + гладкая. Цвета: тик, венге, серый, кофе, белый. Гарантия 10 лет.',
-    price:'от 1 850 ₽/м²',
-    color:'#8B6331',
-    url:'https://outdoor-mebel.ru/catalog/terrasnaya_doska_iz_dpk/doska_dpk_universalnaya/talverwood',
-  },
-  {
-    id:2, ic:'🟤',
-    name:'AIWOODek Premium 140×22',
-    short:'ДПК, полнотелая, скрытый крепёж, 8 цветов',
-    detail:'Террасная доска AIWOODek Premium. Полнотелый профиль — повышенная жёсткость. Размер: 140×22×4000 мм. Система скрытого крепежа в комплекте. Фактура: натуральное дерево. Цвета: 8 вариантов от светлого дуба до антрацита.',
-    price:'от 2 400 ₽/м²',
-    color:'#704214',
-    url:'https://outdoor-mebel.ru/catalog/terrasnaya_doska_iz_dpk/doska_dpk_universalnaya/terrasnaya_doska_aiwood',
-  },
-  {
-    id:3, ic:'🪵',
-    name:'NauticPrime Prestige 163×23',
-    short:'ДПК, широкая, коэкструзия, морозостойкая',
-    detail:'Доска NauticPrime серии Prestige. Технология коэкструзии — защитный полимерный слой снаружи. Ширина 163 мм — меньше стыков. Устойчива к морозу до −50°C и УФ-излучению. Не требует покраски весь срок службы (25 лет).',
-    price:'от 3 700 ₽/м²',
-    color:'#5C3317',
-    url:'https://outdoor-mebel.ru/catalog/terrasnaya_doska_iz_dpk/doska_dpk_universalnaya/nauticprime',
-  },
-  {
-    id:4, ic:'⬜',
-    name:'POLIVAN Eco Line 120×28',
-    short:'ДПК, лёгкая полая, бюджетный сегмент',
-    detail:'Доска POLIVAN серии Eco Line. Полый профиль — снижает вес и стоимость настила. Размер: 120×28×3000 мм. Простой монтаж на лаги с шагом 300–400 мм. Оптимальный выбор для дачных террас и беседок.',
-    price:'от 1 350 ₽/м²',
-    color:'#D2B48C',
-    url:'https://outdoor-mebel.ru/catalog/terrasnaya_doska_iz_dpk/doska_dpk_universalnaya/polivan',
-  },
-];
-
 // ══════════════════════════════════════════════
 // СОСТОЯНИЕ
 // ══════════════════════════════════════════════

@@ -2218,7 +2218,7 @@ function dSelectPrice(tid) {
 }
 
 // ══════════════════════════════════════════════
-// КАТАЛОГ ИЗ API (ResourceManager) + fallback на заглушки
+// КАТАЛОГ ИЗ API (ResourceManager)
 // ══════════════════════════════════════════════
 let _rm = null;                 // singleton ResourceManager
 const _catalogCache = {};       // bitrix_id -> ProductResource[] | null
@@ -2278,7 +2278,7 @@ function _activeSectionId() {
 }
 
 // Загружает товары раздела (section_id) один раз и кэширует.
-//   [] — раздел реально пуст (fallback на заглушки, не перезапрашиваем);
+//   [] — раздел реально пуст (сообщение, не перезапрашиваем);
 //   null — ошибка/недоступно (перезапросим, но не больше CATALOG_MAX_TRIES раз);
 //   undefined — ещё не грузили.
 async function _ensureCatalogSection(sectionId, opts) {
@@ -2342,7 +2342,7 @@ async function _ensureCatalogSection(sectionId, opts) {
     let products = res ? (res.products || []) : null;
     // Пусто, хотя тег есть → товары тега могут лежать НЕ в этом разделе (так было
     // с мебелью, из-за чего появился SECTION_TAG_ONLY). Перезапрашиваем только по
-    // тегу: лучше показать товары из соседнего раздела, чем пустой список и заглушки.
+    // тегу: лучше показать товары из соседнего раздела, чем пустой список.
     if (tag && !tagOnly && products && products.length === 0) {
       // Фильтры пользователя (цена, сечение, направление) повтор СОХРАНЯЕТ: он
       // нужен, когда товары тега лежат в соседнем разделе, а не чтобы обойти
@@ -2497,8 +2497,10 @@ function _dRenderCatalogLoading() {
 }
 
 // ── Catalog results (auto-shown) ──
-// Показываем товары реального раздела каталога. Пока грузится — «Загрузка…»;
-// раздел реально пуст или API недоступен — fallback на заглушки STUB_RESULTS.
+// Показываем товары реального раздела каталога. Пока грузится — «Загрузка…».
+// Несуществующих товаров не показываем никогда (правка 2026-10-08): раньше пустой
+// раздел и недоступный каталог подменялись заглушками STUB_RESULTS, и их можно
+// было «применить» и увидеть в смете. Теперь в этих случаях — сообщение.
 function dShowResults() {
   _dRenderColorGrid();
   _dRenderPriceGrid();
@@ -2512,14 +2514,14 @@ function dShowResults() {
     // террасы (все доски пустотелые) выглядела как неработающий фильтр с
     // выдуманными товарами (правка 2026-10-08).
     else if (_dServerFiltersActive()) _dRenderNoMatch();
-    else               _dRenderStubResults();   // раздел реально пуст → заглушки
+    else               _dRenderCatalogNote('В этом разделе каталога пока нет товаров.');
     return;
   }
   // Раздел отвечал ошибкой CATALOG_MAX_TRIES раз (например, 400 на section_id), либо
-  // каталог целиком признан недоступным — показываем заглушки, а не вечную «Загрузку»:
-  // иначе dShowResults и _ensureCatalogSection зацикливались, перезапрашивая сервер.
+  // каталог целиком признан недоступным — сообщение, а не вечная «Загрузка»: иначе
+  // dShowResults и _ensureCatalogSection зацикливались, перезапрашивая сервер.
   if (_catalogDown || (_catalogFails[secId] || 0) >= CATALOG_MAX_TRIES) {
-    _dRenderStubResults();
+    _dRenderCatalogNote('Каталог временно недоступен, попробуйте позже.');
     if (_catalogDown) _dShowCatalogDown();
     return;
   }
@@ -2536,6 +2538,12 @@ function dShowResults() {
 function _dServerFiltersActive() {
   return _selectedPriceCats().length > 0
     || Object.keys(D_PROP_FILTERS).some(k => _selectedProp(k).length > 0);
+}
+
+// Сообщение вместо списка: раздел пуст или каталог недоступен.
+function _dRenderCatalogNote(text) {
+  const list = document.getElementById('d-mat-list');
+  if (list) list.innerHTML = `<div class="d-cat-empty"><div>${text}</div></div>`;
 }
 
 // «Под выбранные фильтры товаров нет» + кнопка сброса — одна разметка для
@@ -2653,62 +2661,6 @@ function _dRenderRealResults(allProducts) {
   }).join('');
 }
 
-function _dRenderStubResults() {
-  let results = [...STUB_RESULTS];
-  // Заглушки фильтруются по тем же тирам; выбранные объединяются.
-  const STUB_TIER_IDS = { budget: [4], balanced: [1, 4], premium: [2, 3] };
-  const picked = [...catFilter(dActiveItem).prices];
-  if (picked.length && !picked.includes('mpk')) {
-    const ids = new Set(picked.flatMap(t => STUB_TIER_IDS[t] || []));
-    results = results.filter(r => ids.has(r.id));
-  } else if (picked.includes('mpk')) {
-    const ids = new Set(picked.flatMap(t => STUB_TIER_IDS[t] || []));
-    results = results.filter(r => ids.has(r.id));
-    results.push({
-      id: 99, name: 'Deckron МПК Классик 145×22',
-      short: 'Массив прессованного кедра, премиум',
-      detail: 'Массив прессованного кедра (МПК) — натуральный кедр под давлением 800 атм. Плотность выше дуба. Не гниёт, не трескается, не требует обработки.',
-      price: 'от 10 000 ₽/м²', color: '#A0522D',
-      url: 'https://outdoor-mebel.ru/catalog/terrasnaya_doska_iz_dpk/doska_dpk_universalnaya/deckron',
-    });
-  }
-  // Цвета заглушек: сначала название, затем текст («Цвета: тик, венге, серый…»).
-  results = _filterByColors(results, m => [m.name, `${m.short || ''} ${m.detail || ''}`]);
-
-  const list = document.getElementById('d-mat-list');
-  if (!list) return;
-  if (!results.length) { _dRenderNoMatch(); return; }
-  list.innerHTML = results.map(m => `
-    <div class="d-mat-card" id="dmc-${m.id}">
-      <div class="d-mat-head" onclick="dToggleMatCard(${m.id})">
-        <div class="d-mat-thumb" style="background:${m.color || '#bbb'}"></div>
-        <div class="d-mat-info">
-          <div class="d-mat-name">${m.name}</div>
-          <div class="d-mat-short">${m.short}</div>
-          <div class="d-mat-price">${m.price}</div>
-        </div>
-        <button class="d-mat-exp">▼</button>
-      </div>
-      <div class="d-mat-body"><div class="d-mat-detail">
-        <div class="d-mat-desc">${m.detail}</div>
-        <div class="d-mat-actions">
-          <button class="d-mat-btn d-mat-btn-apply"
-                  onclick="dApplyMat(event, ${m.id}, '${m.name.replace(/'/g, "\\'")}', '${m.color || '#C8A96E'}', '${m.price}')">
-            Применить
-          </button>
-          <button class="d-mat-btn d-mat-btn-compare"
-                  onclick="dCompareMat(event, ${m.id}, '${m.name.replace(/'/g, "\\'")}', '${m.color || '#C8A96E'}')">
-            Сравнить
-          </button>
-        </div>
-        <a href="${m.url}" target="_blank"
-           style="display:block;margin-top:10px;font-size:11px;color:#555;text-decoration:underline;">
-          Подробнее на outdoor-mebel.ru ↗
-        </a>
-      </div></div>
-    </div>`).join('');
-}
-
 // Применить реальный товар к активному элементу (каждый элемент — независимо).
 async function dApplyRealMat(e, pid) {
   const btn = e.currentTarget;
@@ -2773,26 +2725,7 @@ function dToggleMatCard(mid) {
   setTimeout(toView, 450);
 }
 
-function dApplyMat(e, mid, name, color, priceStr) {
-  _applySampleToActive({ id: mid, name, color, price: priceStr });
-  const btn = e.currentTarget;
-  const orig = btn.textContent;
-  btn.textContent = '✓';
-  btn.style.background = '#444';
-  setTimeout(() => { btn.textContent = orig; btn.style.background = '#000'; }, 600);
-  // Каталог-заглушка ведёт себя как настоящий: на телефоне «Применить»
-  // возвращает к настройкам элемента.
-  if (typeof mAfterApply === 'function') mAfterApply();
-}
-
-function dCompareMat(e, mid, name, color) {
-  const btn = e.currentTarget;
-  btn.textContent = '✓ Запомнен';
-  btn.style.fontWeight = '400';
-  setTimeout(() => { btn.textContent = 'Сравнить'; btn.style.fontWeight = '700'; }, 1000);
-}
-
-// Заглушки: цена приходит строкой ("от 2 400 ₽/м²") → вытаскиваем число.
+// Цена товара → число (на случай строки вида "от 2 400 ₽/м²").
 function _parsePriceNum(s) {
   if (typeof s === 'number') return s;
   const digits = String(s || '').replace(/[^\d]/g, '');
