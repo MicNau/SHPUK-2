@@ -182,10 +182,10 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-styles-desktop.css?v=51   styles-mobile.css?v=4      state.js?v=77
+styles-desktop.css?v=52   styles-mobile.css?v=4      state.js?v=77
 canvas.js?v=66            shared/house-builder.js?v=89  ResourceManager.js?v=14
 viewer3d-core.js?v=161    viewer3d-builders.js?v=67   viewer3d-railing.js?v=18
-viewer3d-entourage.js?v=14   editor3d.js?v=21         nav-desktop.js?v=141
+viewer3d-entourage.js?v=14   editor3d.js?v=21         nav-desktop.js?v=142
 nav-mobile.js?v=6         project-io.js?v=7          backend_API/Calculator.js?v=3
 ```
 
@@ -948,6 +948,20 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Ветка **Mobile**: пустая выдача под фильтры — сообщение вместо заглушек.
+
+- Если отбор делает сервер (ценовая категория или характеристика —
+  `_dServerFiltersActive`) и он ничего не нашёл, в списке «По выбранным фильтрам
+  товаров нет» и кнопка «Сбросить фильтры» (`_dRenderNoMatch`,
+  `dResetCatFilters`). Раньше пустой ответ всегда уходил в заглушки STUB_RESULTS,
+  и «Полнотелая» у террасы (все доски в каталоге пустотелые) выглядела как
+  неработающий фильтр с выдуманными товарами. Заглушки остались для пустого
+  раздела без фильтров и для недоступного каталога.
+- То же сообщение с кнопкой — когда пусто после клиентских фильтров (цвет,
+  грядки, ограждение). Сброс чистит все фильтры раздела, включая «Пустотелую» по
+  умолчанию у террасы.
+- Cache-bust: `styles-desktop.css?v=52`, `nav-desktop.js?v=142`.
 
 Ветка **Mobile**: размеры террасы числами.
 

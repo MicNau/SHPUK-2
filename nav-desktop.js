@@ -2507,6 +2507,11 @@ function dShowResults() {
   const cached = _catalogCache[key];
   if (Array.isArray(cached)) {
     if (cached.length) _dRenderRealResults(cached);
+    // Пусто ИЗ-ЗА ФИЛЬТРОВ (сервер отобрал по категории или характеристике и ничего
+    // не нашёл) — так и говорим. Раньше здесь тоже шли заглушки, и «Полнотелая» у
+    // террасы (все доски пустотелые) выглядела как неработающий фильтр с
+    // выдуманными товарами (правка 2026-10-08).
+    else if (_dServerFiltersActive()) _dRenderNoMatch();
     else               _dRenderStubResults();   // раздел реально пуст → заглушки
     return;
   }
@@ -2523,6 +2528,36 @@ function dShowResults() {
   if (!_catalogLoading[key]) {
     _ensureCatalogSection(secId).then(() => dShowResults());
   }
+}
+
+// Отбирает ли выдачу СЕРВЕР: ценовая категория или характеристика товара
+// (сечение доски, направление, заполнение забора). Пустой ответ при таких
+// фильтрах — «под фильтры ничего нет», а не «раздел пуст».
+function _dServerFiltersActive() {
+  return _selectedPriceCats().length > 0
+    || Object.keys(D_PROP_FILTERS).some(k => _selectedProp(k).length > 0);
+}
+
+// «Под выбранные фильтры товаров нет» + кнопка сброса — одна разметка для
+// серверного и клиентского отбора.
+function _dRenderNoMatch() {
+  const list = document.getElementById('d-mat-list');
+  if (!list) return;
+  list.innerHTML = `<div class="d-cat-empty">
+      <div>По выбранным фильтрам товаров нет.</div>
+      <button class="d-cat-reset" onclick="dResetCatFilters()">Сбросить фильтры</button>
+    </div>`;
+}
+
+// Сбросить ВСЕ фильтры каталога активного раздела: цвет, цену, характеристики,
+// а у грядок и ограждения — их специфические фильтры.
+function dResetCatFilters() {
+  const f = catFilter(dActiveItem);
+  for (const k of ['colors', 'prices', ...Object.keys(D_PROP_FILTERS)]) if (f[k]) f[k].clear();
+  if (dActiveItem === 'beds' && S.bedFilters) for (const k of Object.keys(S.bedFilters)) S.bedFilters[k] = [];
+  if (dActiveItem === 'railing' && S.railFilters) for (const k of Object.keys(S.railFilters)) S.railFilters[k] = [];
+  _dRenderFilters();
+  dShowResults();
 }
 
 // ── Фото товара ──
@@ -2584,10 +2619,7 @@ function _dRenderRealResults(allProducts) {
   // с палитрой COLORS.md); затем название; preview_text — fallback (см. _itemColors).
   const products = _bedFilterProducts(_railingFilterProducts(_filterByColors(_filterRealByPrice(allProducts),
     p => [p.color || '', p.name || '', p.previewText || ''])));
-  if (!products.length) {
-    list.innerHTML = '<div style="padding:16px;color:#999;font-size:13px;">Нет товаров под выбранные фильтры</div>';
-    return;
-  }
+  if (!products.length) { _dRenderNoMatch(); return; }
   // В «Садовой мебели» по кнопке открывается фото товара, в остальных разделах —
   // текстура (TODO.md, этап 1 п.11). Раздел берём по пункту меню: _activeSectionId()
   // возвращает НОМЕР раздела каталога, а не его id.
@@ -2645,10 +2677,7 @@ function _dRenderStubResults() {
 
   const list = document.getElementById('d-mat-list');
   if (!list) return;
-  if (!results.length) {
-    list.innerHTML = '<div style="padding:16px;color:#999;font-size:13px;">Нет товаров под выбранные фильтры</div>';
-    return;
-  }
+  if (!results.length) { _dRenderNoMatch(); return; }
   list.innerHTML = results.map(m => `
     <div class="d-mat-card" id="dmc-${m.id}">
       <div class="d-mat-head" onclick="dToggleMatCard(${m.id})">

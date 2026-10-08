@@ -903,6 +903,12 @@ button, input, select, textarea { font-family: inherit; }
 }
 .d-req-dump[hidden] { display: none; }
 .d-req-actions { display: flex; gap: 8px; width: 100%; }
+/* Пустая выдача под выбранные фильтры: текст и кнопка сброса. */
+.d-cat-empty { padding: 16px 4px; color: #888; font-size: 14px; display: flex; flex-direction: column;
+  align-items: flex-start; gap: 10px; }
+.d-cat-reset { background: none; border: 2px solid var(--btn-border); border-radius: var(--r);
+  padding: 8px 14px; font: inherit; font-size: 14px; font-weight: 600; color: var(--text); cursor: pointer; }
+.d-cat-reset:hover { border-color: var(--accent); }
 /* Окно «Размеры террасы»: два поля в ряд через «×». */
 .d-size-box { width: 380px; }
 .d-size-row { display: flex; align-items: flex-end; gap: 10px; width: 100%; }
