@@ -120,12 +120,12 @@
   },
 
   "roof_windows": [
-    { "module": "dormer", "slope": "south", "position_along": 0.35, "position_up": 0.88,
-      "w": 1.20, "h": 0.95, "depth": 1.30, "roof_angle": 30,
-      "window": { "type": "single", "w": 0.85, "h": 0.70 } },
-    { "module": "dormer", "slope": "south", "position_along": 0.65, "position_up": 0.88,
-      "w": 1.20, "h": 0.95, "depth": 1.30, "roof_angle": 30,
-      "window": { "type": "single", "w": 0.85, "h": 0.70 } }
+    { "module": "dormer", "slope": "south", "position_along": 0.35, "position_up": 0.60,
+      "w": 1.50, "h": 1.55, "depth": 1.30, "roof_angle": 30,
+      "window": { "type": "single", "w": 1.00, "h": 1.20 } },
+    { "module": "dormer", "slope": "south", "position_along": 0.65, "position_up": 0.60,
+      "w": 1.50, "h": 1.55, "depth": 1.30, "roof_angle": 30,
+      "window": { "type": "single", "w": 1.00, "h": 1.20 } }
   ],
 
   "materials_map": {

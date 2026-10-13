@@ -1551,6 +1551,20 @@ function buildScene3d() {
     const cx = isNoHouse ? 0 : houseL/2;
     const cy = isNoHouse ? 1 : (bh+wh)/2;
     const cz = isNoHouse ? 0 : houseW/2;
+    // Смотрим со стороны ГЛАВНОГО входа (правка 2026-10-13): там же по
+    // умолчанию встаёт терраса (_defaultRect). Раньше камера всегда стояла с
+    // юго-востока, и у домов со входом на западе или севере дверь с террасой
+    // оказывались за домом. Ракурс прежний — по диагонали, с той же
+    // дистанцией и высотой; для входа на юге он и остаётся юго-восточным.
+    const door = (!isNoHouse && typeof _houseMainDoor === 'function') ? _houseMainDoor() : null;
+    const N = door && { S: [0, 1], N: [0, -1], E: [1, 0], W: [-1, 0] }[door.side];
+    if (N) {
+      const cam = threeState.camera;
+      const off = cam.position.clone().sub(controls.target);
+      const hd = Math.hypot(off.x, off.z) || 25;
+      const dx = N[0] + N[1], dz = N[1] - N[0], dl = Math.hypot(dx, dz);
+      cam.position.set(cx + dx / dl * hd, cy + off.y, cz + dz / dl * hd);
+    }
     controls.target.set(cx, cy, cz);
     controls.update();
   }

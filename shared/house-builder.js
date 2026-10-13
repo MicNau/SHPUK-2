@@ -3398,6 +3398,10 @@ function placeVelux(parent, modules, modulesDef, frame, posAlong, posUp, w, h) {
 // Размещает dormer: процедурная коробка (стены + двускатная мини-крыша) с встроенным окном.
 // Используется ПРАВОСТОРОННИЙ базис (right-handed): xAxis × yAxis = zAxis, det=+1 — это даёт
 // валидную ротацию. Сечение xAxis = up × normalHoriz (направлен «вправо» при взгляде наружу со ската).
+// Скат круче ~56° (tg > 1.5) — нижний скат мансарды: dormer укорачивается по глубине,
+// а не масштабируется целиком (см. placeDormer).
+const DORMER_STEEP_TAN = 1.5;
+
 function placeDormer(parent, modules, modulesDef, frame, dormerSpec, baseY, materialsMap) {
   if (!dormerSpec.w || !dormerSpec.h || !dormerSpec.depth) { log('[roof-win] dormer: нужны w, h, depth', 'err'); return; }
   const posAlong = dormerSpec.position_along || 0.5;
@@ -3410,14 +3414,39 @@ function placeDormer(parent, modules, modulesDef, frame, dormerSpec, baseY, mate
   //     масштабирование сохраняет соотношение d/h, значит врезка сохраняется на любом масштабе.
   // На большом доме места хватает → scale=1, dormer как в дескрипторе.
   const horizRun = frame.lengthUp * Math.hypot(frame.axisUp.x, frame.axisUp.z); // гориз. проекция ската
-  const dMaxFit = 2 * Math.min(posUp * horizRun - 0.35, (1 - posUp) * horizRun - 0.25); // запас на карниз/стекло
-  const scale = Math.min(1, Math.max(0.2, dMaxFit / dormerSpec.depth));
-  const w = dormerSpec.w * scale, h = dormerSpec.h * scale, d = dormerSpec.depth * scale;
-  const basePt = slopePointAt(frame, posAlong, posUp);
+  const slopeTan = frame.axisUp.y / Math.sqrt(frame.axisUp.x ** 2 + frame.axisUp.z ** 2);
+  // Уклон мини-крыши dormer'а: по умолчанию — как у ската, в дескрипторе можно задать свой.
+  const dormerRoofTan = (dormerSpec.roof_angle !== undefined)
+    ? Math.tan(dormerSpec.roof_angle * Math.PI / 180) : slopeTan;
+  let scale = 1, d, pu = posUp;
+  if (slopeTan >= DORMER_STEEP_TAN) {
+    // КРУТОЙ скат (нижний скат мансарды, 70°). Его горизонтальная проекция меньше
+    // метра, и правило выше ужимало dormer до 20% — окна в крыше мансарды выходили
+    // величиной с ладонь (правка 2026-10-13). Глубокий dormer здесь и не нужен:
+    // задняя стенка уходит под кровлю уже при d·tan ≥ h. Поэтому укорачиваем
+    // ГЛУБИНУ, а ширину и высоту оставляем, как в дескрипторе.
+    d = Math.min(dormerSpec.depth, dormerSpec.h / slopeTan + 0.15);
+    // Верх dormer'а (с мини-крышей) не выше перелома мансарды: опускаем его вдоль
+    // ската; не хватает высоты ската целиком — тогда уж масштабируем.
+    const yEave = Math.min(frame.eL.y, frame.eR.y), yTop = Math.min(frame.rL.y, frame.rR.y);
+    const rise = yTop - yEave;
+    const full = dormerSpec.h + (dormerSpec.w / 2) * dormerRoofTan;   // высота dormer'а с крышей
+    const room = rise - 0.15 - 0.10;                                   // запас у карниза и у перелома
+    if (full > room) scale = Math.max(0.2, room / full);
+    // Низ фронта сидит на скате в точке pu (минус d/2·tan), верх — на full·scale выше.
+    const puMax = (yTop - 0.10 - full * scale + (d * scale / 2) * slopeTan - yEave) / rise;
+    pu = Math.max(0.15 / rise, Math.min(posUp, puMax));
+    d *= scale;
+  } else {
+    const dMaxFit = 2 * Math.min(posUp * horizRun - 0.35, (1 - posUp) * horizRun - 0.25); // запас на карниз/стекло
+    scale = Math.min(1, Math.max(0.2, dMaxFit / dormerSpec.depth));
+    d = dormerSpec.depth * scale;
+  }
+  const w = dormerSpec.w * scale, h = dormerSpec.h * scale;
+  const basePt = slopePointAt(frame, posAlong, pu);
 
   // Скат наклонный, dormer вертикальный: front bottom висит над скатом на (d/2)*tan(angle).
   // Опускаем basePt.y на эту величину — front bottom сядет на скат, back утопится в скат.
-  const slopeTan = frame.axisUp.y / Math.sqrt(frame.axisUp.x ** 2 + frame.axisUp.z ** 2);
   basePt.y -= (d / 2) * slopeTan;
 
   // Right-handed basis: +Z = normalHoriz (outward), +Y = world up, +X = +Y × +Z
@@ -3451,10 +3480,6 @@ function placeDormer(parent, modules, modulesDef, frame, dormerSpec, baseY, mate
   // По умолчанию угол ската мини-крыши = углу главной крыши (slopeTan). Но для крутых мансардных
   // склонов (70°) это даёт слишком высокий «треугольный фронтон» dormer'а; в дескрипторе можно
   // переопределить через `roof_angle` (в градусах) — тогда крыша dormer'а получит свой пологий уклон.
-  let dormerRoofTan = slopeTan;
-  if (dormerSpec.roof_angle !== undefined) {
-    dormerRoofTan = Math.tan(dormerSpec.roof_angle * Math.PI / 180);
-  }
   const dormerRoofRise = (w / 2) * dormerRoofTan;
   const dormerRoofVerts = [
     localToWorld(-w/2, h, -d/2),                  // 0: back-left top of wall
@@ -3555,7 +3580,7 @@ function placeDormer(parent, modules, modulesDef, frame, dormerSpec, baseY, mate
     setupShadows(curtainMesh);
     parent.add(curtainMesh);
   }
-  log(`[roof-win] ✓ dormer at (along=${posAlong.toFixed(2)}, up=${posUp.toFixed(2)}) ${w}×${h}×${d}`, 'dim');
+  log(`[roof-win] ✓ dormer at (along=${posAlong.toFixed(2)}, up=${pu.toFixed(2)}) ${w.toFixed(2)}×${h.toFixed(2)}×${d.toFixed(2)}`, 'dim');
 }
 
 // Главный билдер roof_windows
