@@ -1,7 +1,7 @@
 {
   "id": "type_03",
   "name": "Г-образный одноэтажный",
-  "description": "Основной прямоугольник + северный выступ по центру. Вальмовая крыша. Главный вход на южном фасаде.",
+  "description": "Основной прямоугольник + крыло на север у западного края (план Г). Вальмовая крыша. Главный вход на южном фасаде.",
 
   "constraints": {
     "base_h":         { "min": 50, "max": 120, "step": 10, "default": 70,  "unit": "cm" },
@@ -61,33 +61,15 @@
       },
 
       "vars": {
-        "_comment": "L,W — основной прямоугольник; ext — ширина выступа (по X); eh — его глубина на север (по Z); L_left/right — стенки основы по бокам от выступа",
+        "_comment": "L,W — основной прямоугольник; ext — ширина крыла (по X), eh — его вынос на север (по Z). Крыло стоит у ЗАПАДНОГО края основы: западная стена идёт одной линией на W + eh — получается Г (правка 2026-10-13: раньше выступ стоял по центру северной стены, и план читался как Т).",
         "L":      "sqrt(area * 1.5)",
         "W":      "sqrt(area / 1.5)",
-        "ext":    "L * 0.32",
-        "eh":     "W * 0.40",
-        "L_side": "(L - ext) / 2"
+        "ext":    "L * 0.40",
+        "eh":     "W * 0.60"
       },
 
       "perimeter": [
-        { "_comment": "═══ N слева до выступа (по X) →" },
-        { "run": "L_side", "facade": [
-          { "wall": "fill" },
-          { "window": "single" },
-          { "wall": "fill" }
-        ]},
-        { "_comment": "REFLEX: вход в выступ" },
-        { "turn": -90 },
-
-        { "_comment": "═══ Запад выступа (по Z, на север) ↑" },
-        { "run": "eh", "facade": [
-          { "wall": "fill" },
-          { "window": "single" },
-          { "wall": "fill" }
-        ]},
-        { "turn": 90 },
-
-        { "_comment": "═══ Север выступа (узкая стена) →" },
+        { "_comment": "═══ N крыла (торец) →" },
         { "run": "ext", "facade": [
           { "wall": "fill" },
           { "window": "double" },
@@ -95,19 +77,21 @@
         ]},
         { "turn": 90 },
 
-        { "_comment": "═══ Восток выступа (по Z, на юг) ↓" },
+        { "_comment": "═══ E крыла (по Z, на юг) ↓" },
         { "run": "eh", "facade": [
           { "wall": "fill" },
           { "window": "single" },
           { "wall": "fill" }
         ]},
-        { "_comment": "REFLEX: возвращаемся к основе" },
+        { "_comment": "REFLEX: внутренний угол Г" },
         { "turn": -90 },
 
-        { "_comment": "═══ N справа от выступа →" },
-        { "run": "L_side", "facade": [
+        { "_comment": "═══ N основы справа от крыла →" },
+        { "run": "L - ext", "facade": [
           { "wall": "fill" },
           { "window": "single" },
+          { "wall": "fill" },
+          { "window": "double" },
           { "wall": "fill" }
         ]},
         { "turn": 90 },
@@ -136,10 +120,12 @@
         ]},
         { "turn": 90 },
 
-        { "_comment": "═══ W основы ↑" },
-        { "run": "W", "facade": [
+        { "_comment": "═══ W основы и крыла одной стеной ↑" },
+        { "run": "W + eh", "facade": [
           { "wall": "fill" },
           { "window": "double" },
+          { "wall": "fill" },
+          { "window": "single" },
           { "wall": "fill" },
           { "window": "double" },
           { "wall": "fill" }
@@ -150,7 +136,7 @@
   ],
 
   "features": {
-    "chimney":  { "position": [0.5, 0.5], "model": "chimney" },
+    "chimney":  { "position": [0.6, 0.7], "model": "chimney" },
     "gutters":  true,
     "downpipe": true,
     "cornice":  true,

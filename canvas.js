@@ -2469,10 +2469,21 @@ function _defaultRect(secId) {
     // Не поверх уже размеченного (TODO п.2) — она стоит отдельно, двигаем по обеим осям.
     return _placeFree(r, 'pool_terrace', 'xy');
   }
-  // terrace — у нижнего края дома, по центру фасада. Кромку у стены НЕ снапим на
-  // сетку: стена на 0.5 м обычно не попадает, и снап отрывал террасу от дома на
-  // несколько сантиметров. Вдоль стены (по X) снап остаётся, по ней же и двигаем,
-  // если центр фасада уже занят дорожкой или грядкой (TODO п.2).
+  // terrace — у стены с ГЛАВНОЙ дверью, по центру двери (правка 2026-10-13: у
+  // большинства домов вход на торце, а терраса вставала к нижней стене плана).
+  // Кромку у стены НЕ снапим на сетку: стена на 0.5 м обычно не попадает, и снап
+  // отрывал террасу от дома на несколько сантиметров. Вдоль стены снап остаётся,
+  // по ней же и двигаем, если место занято дорожкой или грядкой (TODO п.2).
+  const door = _houseMainDoor();
+  if (door) {
+    const len = w0, dep = snapNorm(2 / GRID);
+    const along = door.side === 'S' || door.side === 'N';
+    const r = along
+      ? { x: snapNorm(clamp(door.cx - len / 2, len)), y: door.side === 'S' ? door.wall : door.wall - dep, w: len, h: dep }
+      : { x: door.side === 'E' ? door.wall : door.wall - dep, y: snapNorm(clamp(door.cy - len / 2, len)), w: dep, h: len };
+    return _placeFree(r, 'terrace', along ? 'x' : 'y');
+  }
+  // Главной двери в дескрипторе нет — как раньше, у нижнего края дома.
   if (b) {
     const r = {
       x: snapNorm(b.nx + b.nw / 2 - 2 / GRID),
@@ -2485,9 +2496,33 @@ function _defaultRect(secId) {
                     'terrace', 'xy');
 }
 
+// Главная дверь дома (флаг "main" в фасаде первого этажа) в координатах плана:
+//   side — куда смотрит стена ('S' — вниз на плане, 'N', 'E', 'W');
+//   wall — координата стены по оси нормали (y для S/N, x для E/W);
+//   cx, cy — центр двери. null — дома нет или в дескрипторе нет главного входа.
+// Источник — та же раскладка фасада, что у плана и 3D (_houseWorldTransform).
+function _houseMainDoor() {
+  if (typeof isEmptyLot === 'function' && isEmptyLot()) return null;
+  const T = (typeof _houseWorldTransform === 'function') ? _houseWorldTransform() : null;
+  if (!T) return null;
+  for (const e of T.layout.edges) {
+    for (const it of e.items) {
+      if (!it.main) continue;
+      const t = it.start + it.width / 2;
+      const c = T.toNorm(e.x + e.dx * t, e.z + e.dz * t);
+      // Стены обходятся по часовой: наружная нормаль — (dz, −dx).
+      const nx = e.dz, nz = -e.dx;
+      const side = nz > 0.5 ? 'S' : nz < -0.5 ? 'N' : nx > 0.5 ? 'E' : 'W';
+      return { side, wall: (side === 'S' || side === 'N') ? c.y : c.x, cx: c.x, cy: c.y };
+    }
+  }
+  return null;
+}
+
 // Стороны дома, к которым пристраивается терраса: прямоугольник СНАРУЖИ стены,
-// длинной стороной вдоль неё, по центру фасада. Порядок — от главного фасада
-// по кругу. axis — вдоль какой оси двигать блок, если место занято.
+// длинной стороной вдоль неё, по центру фасада. Порядок — от стены с главной
+// дверью (там стоит первая терраса) по кругу. axis — вдоль какой оси двигать
+// блок, если место занято.
 function _houseSideRects(len, dep) {
   const hp = (typeof getHousePolygonNorm === 'function' && !isEmptyLot())
     ? getHousePolygonNorm() : null;
@@ -2495,12 +2530,15 @@ function _houseSideRects(len, dep) {
   if (!b) return [];
   const cx = b.nx + b.nw / 2, cy = b.ny + b.nh / 2;
   const cl = (v, size) => Math.max(0, Math.min(1 - size, v));
-  return [
+  const sides = [
     { side: 'S', axis: 'x', rect: { x: snapNorm(cl(cx - len / 2, len)), y: b.ny + b.nh, w: len, h: dep } },
     { side: 'E', axis: 'y', rect: { x: b.nx + b.nw,      y: snapNorm(cl(cy - len / 2, len)), w: dep, h: len } },
     { side: 'W', axis: 'y', rect: { x: cl(b.nx - dep, dep), y: snapNorm(cl(cy - len / 2, len)), w: dep, h: len } },
     { side: 'N', axis: 'x', rect: { x: snapNorm(cl(cx - len / 2, len)), y: cl(b.ny - dep, dep), w: len, h: dep } },
   ];
+  const door = _houseMainDoor();
+  const first = sides.findIndex(s => door && s.side === door.side);
+  return first > 0 ? sides.slice(first).concat(sides.slice(0, first)) : sides;
 }
 
 // Сторона уже занята террасой? Достаточно, чтобы блок стоял вплотную к этой
