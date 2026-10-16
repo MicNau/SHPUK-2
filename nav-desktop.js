@@ -33,6 +33,7 @@ const D_MENU_ITEMS = D_SIDEBAR_ITEMS.filter(i => !i.hidden);
 // SCREEN NAVIGATION
 // ══════════════════════════════════════════════
 function dGoTo(s) {
+  if (typeof _dHideLinkNote === 'function') _dHideLinkNote();
   const prev = document.getElementById('d-screen-' + dStep);
   if (prev) prev.classList.remove('active');
 
@@ -495,7 +496,7 @@ function _dRenderFloorParams() {
     wrap.style.borderTop = '1px solid #e0e0e0';
     wrap.style.paddingTop = '8px';
     const hMin = hConstr?.min ?? 270, hMax = hConstr?.max ?? 360;
-    const aMin = aConstr?.min ?? 40,  aMax = aConstr?.max ?? 140;
+    const aMin = aConstr?.min ?? 40,  aMax = aConstr?.max ?? 250;
     wrap.innerHTML = `
       <div class="d-floor-title">${label}</div>
       <div class="d-param-head">
@@ -692,22 +693,40 @@ function dCollectParams() {
 // STEP 3 — Workspace
 // ══════════════════════════════════════════════
 // Сигнатура параметров, определяющих КОНТУР дома (площади), на момент последнего
-// входа в workspace. Высота этажа/фундамента контур не меняют — их правка проект
-// не сбрасывает (3D пересобирается сам).
+// входа в workspace, и габарит дома на плане тогда же. Высота этажа/фундамента
+// контур не меняют — их правка проект не трогает (3D пересобирается сам).
 let _dParamsSig = null;
+let _dParamsType = null;
+let _dHouseBox = null;
 
 function _dParamsSignature() {
   const c = (typeof dCollectParams === 'function') ? dCollectParams() : null;
   return c ? JSON.stringify({ houseType: S.houseType, area: c.area, floorAreas: c.floorAreas }) : null;
 }
 
+function _dHouseBoxNow() {
+  if (typeof isEmptyLot === 'function' && isEmptyLot()) return null;
+  const hp = (typeof getHousePolygonNorm === 'function') ? getHousePolygonNorm() : null;
+  return hp && hp.bboxNorm ? { ...hp.bboxNorm } : null;
+}
+
 function _dInitWorkspace() {
-  // Мягкий сброс: проект обнуляется только если контур дома изменился с прошлого
-  // входа в workspace (площади / тип). «Сходил на шаг 2 посмотреть и вернулся» —
+  // Сменился ТИП дома — проект обнуляется: разметка под другой дом не годится.
+  // Сменилась только ПЛОЩАДЬ — разметка остаётся (правка 2026-10-16), а то, что
+  // пристроено к стенам, едет вместе с ними (adaptLayoutToHouseResize). Раньше
+  // сбрасывалось и то и другое. «Сходил на шаг 2 посмотреть и вернулся» —
   // ничего не трогает.
   const sig = _dParamsSignature();
-  if (_dParamsSig !== null && sig !== _dParamsSig) _dResetAllConfigurations();
+  if (_dParamsSig !== null && sig !== _dParamsSig) {
+    if (_dParamsType === S.houseType && typeof adaptLayoutToHouseResize === 'function') {
+      adaptLayoutToHouseResize(_dHouseBox, _dHouseBoxNow());
+    } else {
+      _dResetAllConfigurations();
+    }
+  }
   _dParamsSig = sig;
+  _dParamsType = S.houseType;
+  _dHouseBox = _dHouseBoxNow();
 
   dActiveItem = null;
   if (typeof e3dSetSection === 'function') e3dSetSection(null);
@@ -1427,8 +1446,9 @@ function dClickItem(secId) {
 function _dSelectItem(secId) {
   dActiveItem = secId;
 
-  if (!S.sections.includes(secId)) S.sections.push(secId);
-  _dSeedSection(secId);
+  const fresh = !S.sections.includes(secId);
+  if (fresh) S.sections.push(secId);
+  _dSeedSection(secId, fresh);
   // Ступени при создании сразу получают материал под доску террасы — той же фирмы
   // и цвета. Если пользователь уже выбрал свой, подбор его не тронет.
   if (secId === 'steps') _syncDefaultStepsProduct();
@@ -1443,6 +1463,7 @@ function _dSelectItem(secId) {
   _dRenderSidebar();
   _dSetPanelLocked(false);
   _dRenderPanelContent();
+  _dLinkOnEnter(secId);
   if (typeof e3dSetSection === 'function') e3dSetSection(secId);
   _dSyncSectionHint();
   _dShowEditorHint(secId);
@@ -1472,7 +1493,7 @@ function _dSectionHasContent(secId) {
 // Стартовая разметка раздела при первом открытии. Раньше её создавали
 // init*Canvas редакторов (initRectCanvas, initBedsCanvas, initSnapCanvas);
 // редакторы убраны, а заготовка нужна — иначе в сцене нечего выбирать.
-function _dSeedSection(secId) {
+function _dSeedSection(secId, fresh) {
   if (RECT_SECTIONS[secId]) {
     const rects = secRects(secId);
     if (rects.length === 0) { rects.push(_defaultRect(secId)); setSecActiveIdx(secId, 0); }
@@ -1483,7 +1504,13 @@ function _dSeedSection(secId) {
     if (!S.beds || S.beds.length === 0) { S.beds = [_defaultBed()]; S.activeBed = 0; }
     return;
   }
-  if (secId === 'steps') { _stepsNormalize(); return; }
+  // Первая лестница — у длинной свободной стороны террасы (stepsPlaceAtTerrace);
+  // при повторном открытии раздела её положение не трогаем.
+  if (secId === 'steps') {
+    if (fresh && stepsAll().length === 1 && typeof stepsPlaceAtTerrace === 'function') stepsPlaceAtTerrace();
+    _stepsNormalize();
+    return;
+  }
   if (secId === 'railing') { _railingSync(); return; }
   // Дорожки и забор заготовки НЕ получают: линия рисуется кликами по земле
   // (клик — начало отрезка, второй клик — конец), см. editor3d.js.
@@ -1746,7 +1773,11 @@ function _bedHeightFromProduct(sample) {
 // выбор помечен без auto, и автоматический его не перетирает.
 let _defStepsBusy = null;
 
+// Фирма товара: характеристика brand (появилась у ДПК, ступеней и ограждений
+// 2026-10-16); у товаров без неё — первое слово названия, как раньше.
 function _productBrand(p) {
+  const b = (typeof productProp === 'function') ? productProp(p, PROP_BRAND) : undefined;
+  if (typeof b === 'string' && b.trim()) return b.trim().toLowerCase();
   const m = /^\s*(\S+)/.exec((p && p.name) || '');
   return m ? m[1].toLowerCase() : '';
 }
@@ -1768,9 +1799,13 @@ async function _syncDefaultStepsProduct() {
   try {
     const brand = _productBrand(t), color = _productColor(t);
     const same = p => !!p && _productBrand(p) === brand && (!color || _productColor(p) === color);
+    // Связка бэкенда (related_product_ids.steps) — главнее всего: её ведут в
+    // каталоге вручную (2026-10-16).
+    const relId = _relatedId(t, 'steps');
+    const rel = relId ? await _loadProduct(relId) : null;
     const defId = _defaultStepsProductId();
-    const def = defId ? await _loadProduct(defId) : null;
-    let product = same(def) ? def : null;
+    const def = rel || (defId ? await _loadProduct(defId) : null);
+    let product = (rel || same(def)) ? def : null;
     if (!product) {
       const list = await _loadCatalogRaw(CONSTRUCTION_TO_SECTION.steps);
       const hit = (list || []).find(same);
@@ -1786,11 +1821,160 @@ async function _syncDefaultStepsProduct() {
     S.elementMat.steps.auto = true;
     S.elementMat.steps.forTerrace = t.productId;
     console.info('[steps] ступени по умолчанию под доску террасы:', product.name || product.id,
-                 same(product) ? '(та же фирма и цвет)' : '(по связке default_steps_id)');
+                 product === rel ? '(related_product_ids)'
+                   : same(product) ? '(та же фирма и цвет)' : '(по связке default_steps_id)');
   } finally {
     _defStepsBusy = null;
   }
 }
+
+// ── Связка терраса ↔ ступени ↔ ограждение (правка 2026-10-16) ─────────────
+// При переходе в один из трёх разделов в каталоге раскрывается и встаёт по
+// центру карточка товара под материал соседнего раздела, а слева от неё —
+// окно «Вы выбрали этот материал для террасы». Источник — терраса, если у неё
+// выбран товар; без неё — последний выбранный товар из этой тройки.
+// Связанный товар: related_product_ids[ключ раздела] (ведёт бэкенд; связь не
+// взаимно однозначная — несколько ограждений с разной шириной столба ссылаются
+// на одну доску), иначе тот же бренд и цвет, иначе тот же бренд.
+const PROP_BRAND = (typeof PropertyPath !== 'undefined' && PropertyPath.BRAND) || 'brand';
+const PROP_RELATED = 'related_product_ids';
+const LINKED_KEYS = { terrace: 'dpk', steps: 'steps', railing: 'fencing' };
+const LINKED_LABELS = { terrace: 'террасы', steps: 'ступеней', railing: 'ограждения' };
+let _dLinkLast = null;      // последний раздел тройки, где товар выбран вручную
+let _dLinkFocus = null;     // { sec, product, srcSec, src } — что раскрыть в каталоге
+let _dLinkSeq = 0;
+
+function _relatedId(mat, secId) {
+  const rel = (mat && typeof productProp === 'function') ? productProp(mat, PROP_RELATED) : null;
+  const v = rel && typeof rel === 'object' ? rel[LINKED_KEYS[secId]] : null;
+  const n = (typeof v === 'number') ? v : parseInt(v, 10);
+  return (isFinite(n) && n > 0) ? n : null;
+}
+
+// Раздел-источник для targetSec или null.
+function _linkedSource(targetSec) {
+  if (!LINKED_KEYS[targetSec]) return null;
+  const mat = sec => (S.elementMat && S.elementMat[sec] && S.elementMat[sec].productId) ? S.elementMat[sec] : null;
+  const hasTerrace = (S.sections || []).includes('terrace') && secRects('terrace').some(r => r && r.w > 0);
+  if (targetSec !== 'terrace' && hasTerrace && mat('terrace')) return 'terrace';
+  if (_dLinkLast && _dLinkLast !== targetSec && mat(_dLinkLast)) return _dLinkLast;
+  return null;
+}
+
+async function _relatedProduct(srcMat, targetSec) {
+  const id = _relatedId(srcMat, targetSec);
+  if (id) {
+    const p = await _loadProduct(id);
+    if (p) return p;
+  }
+  const list = await _loadCatalogRaw(CONSTRUCTION_TO_SECTION[targetSec]);
+  if (!list || !list.length) return null;
+  const brand = _productBrand(srcMat), color = _productColor(srcMat);
+  if (!brand) return null;
+  return list.find(p => _productBrand(p) === brand && color && _productColor(p) === color)
+      || list.find(p => _productBrand(p) === brand) || null;
+}
+
+// Вход в раздел: подобрать связанный товар и раскрыть его карточку.
+async function _dLinkOnEnter(secId) {
+  _dHideLinkNote();
+  _dLinkFocus = null;
+  const src = _linkedSource(secId);
+  if (!src) return;
+  const seq = ++_dLinkSeq;
+  const srcMat = S.elementMat[src];
+  // У раздела уже есть товар, выбранный вручную, — раскрываем его, а не связанный.
+  const own = S.elementMat[secId];
+  let product = null;
+  try {
+    product = (own && own.productId && !own.auto) ? await _loadProduct(own.productId)
+                                                    : await _relatedProduct(srcMat, secId);
+  } catch (e) { console.warn('[link]', e); }
+  if (seq !== _dLinkSeq || dActiveItem !== secId || !product) return;
+  _dLinkFocus = { sec: secId, product, srcSec: src, src: srcMat };
+  console.info('[link]', LINKED_LABELS[src], '→', secId, ':', product.name || product.id);
+  dShowResults();
+}
+
+// После отрисовки списка: раскрыть, отцентровать и подсветить карточку.
+function _dApplyLinkFocus() {
+  const f = _dLinkFocus;
+  if (!f || f.sec !== dActiveItem) return;
+  const card = document.getElementById('dmc-' + f.product.id);
+  if (!card) return;
+  document.querySelectorAll('.d-mat-card.open').forEach(c => c.classList.remove('open'));
+  document.querySelectorAll('.d-mat-card.linked').forEach(c => c.classList.remove('linked'));
+  card.classList.add('open', 'linked');
+  const list = document.getElementById('d-mat-list');
+  // Список невидим (на телефоне каталог — отдельный экран) — повторим, когда покажут.
+  if (!list || !list.offsetParent) return;
+  const center = () => {
+    const lr = list.getBoundingClientRect(), cr = card.getBoundingClientRect();
+    list.scrollTop += (cr.top + cr.height / 2) - (lr.top + lr.height / 2);
+    _dShowLinkNote(card, f);
+  };
+  // Раскрытие карточки анимировано — центруем после него (с запасом по времени).
+  setTimeout(center, 420);
+}
+
+function _dShowLinkNote(card, f) {
+  let note = document.getElementById('d-link-note');
+  if (!note) {
+    note = document.createElement('div');
+    note.id = 'd-link-note';
+    note.className = 'd-link-note';
+    document.body.appendChild(note);
+  }
+  const thumb = _productThumbStyle(_dLinkThumbSrc(f.src));
+  note.innerHTML = `
+    <button class="d-link-close" onclick="_dHideLinkNote()" aria-label="Закрыть">×</button>
+    <div class="d-link-title">Вы выбрали этот материал для ${LINKED_LABELS[f.srcSec]}</div>
+    <div class="d-link-body">
+      <div class="d-link-thumb" style="${thumb}"></div>
+      <div class="d-link-name">${f.src.name || ''}</div>
+    </div>`;
+  const mobile = document.body.classList.contains('m-mode');
+  note.classList.toggle('inline', mobile);
+  if (mobile) {
+    // На телефоне сбоку места нет — окно встаёт в список над карточкой.
+    card.parentNode.insertBefore(note, card);
+  } else {
+    if (note.parentNode !== document.body) document.body.appendChild(note);
+    const cr = card.getBoundingClientRect();
+    const panel = document.getElementById('d-panel');
+    const pr = panel ? panel.getBoundingClientRect() : cr;
+    note.style.right = (window.innerWidth - pr.left + 12) + 'px';
+    note.style.top = Math.max(60, cr.top + 8) + 'px';
+  }
+  note.classList.add('show');
+}
+
+// Превью исходного товара — его текстура, как у миниатюры карточки в каталоге.
+function _dLinkThumbSrc(mat) {
+  const tex = mat && mat.textures && mat.textures.textures_dpc_diffusion;
+  const img = tex && tex.image;
+  const url = (img && (img.currentSrc || img.src)) || '';
+  return url ? { textureUrls: { textures_dpc_diffusion: url } } : {};
+}
+
+function _dHideLinkNote() {
+  const note = document.getElementById('d-link-note');
+  if (note) note.remove();
+}
+
+// Окно держится напротив карточки, пока список прокручивают; карточка ушла из
+// вида — окно прячем до следующего входа в раздел.
+document.addEventListener('scroll', e => {
+  if (!e.target || e.target.id !== 'd-mat-list') return;
+  const note = document.getElementById('d-link-note');
+  const f = _dLinkFocus;
+  if (!note || note.classList.contains('inline') || !f) return;
+  const card = document.getElementById('dmc-' + f.product.id);
+  const lr = e.target.getBoundingClientRect();
+  const cr = card && card.getBoundingClientRect();
+  if (!cr || cr.bottom < lr.top || cr.top > lr.bottom) { _dHideLinkNote(); return; }
+  note.style.top = Math.max(60, cr.top + 8) + 'px';
+}, true);
 
 // Каталог раздела БЕЗ пользовательских фильтров: для подбора ступеней под террасу
 // фильтры активного раздела (например «Пустотелая» у террасы) неприменимы — они
@@ -2627,6 +2811,10 @@ function _dRenderRealResults(allProducts) {
   // с палитрой COLORS.md); затем название; preview_text — fallback (см. _itemColors).
   const products = _bedFilterProducts(_railingFilterProducts(_filterByColors(_filterRealByPrice(allProducts),
     p => [p.color || '', p.name || '', p.previewText || ''])));
+  // Связанный товар (терраса ↔ ступени ↔ ограждение) виден всегда: если его
+  // отсеяли фильтры или он не попал в выдачу раздела — ставим первым.
+  const lf = (_dLinkFocus && _dLinkFocus.sec === dActiveItem) ? _dLinkFocus.product : null;
+  if (lf && !products.some(p => p.id === lf.id)) products.unshift(lf);
   if (!products.length) { _dRenderNoMatch(); return; }
   // В «Садовой мебели» по кнопке открывается фото товара, в остальных разделах —
   // текстура (TODO.md, этап 1 п.11). Раздел берём по пункту меню: _activeSectionId()
@@ -2659,6 +2847,7 @@ function _dRenderRealResults(allProducts) {
       </div></div>
     </div>`;
   }).join('');
+  _dApplyLinkFocus();
 }
 
 // Применить реальный товар к активному элементу (каждый элемент — независимо).
@@ -2688,6 +2877,12 @@ async function dApplyRealMat(e, pid) {
                          properties: product.properties || null,
                          previewText: product.previewText || '',
                          price: _productPrice(product) });
+  // Связка терраса ↔ ступени ↔ ограждение: запоминаем, где выбрали последним, —
+  // без террасы источником станет он. Подсказку о связанном товаре убираем:
+  // выбор сделан.
+  if (LINKED_KEYS[dActiveItem]) _dLinkLast = dActiveItem;
+  _dLinkFocus = null;
+  _dHideLinkNote();
 
   // Применённый товар нельзя применить повторно: кнопка гаснет, у остальных
   // карточек — снова активна (применить можно только один товар на элемент).
@@ -3339,8 +3534,9 @@ function _ensureProjectCalc() {
   const key = JSON.stringify(req.payload);
   if (_projectCalc && _projectCalc.key === key && _projectCalc.state !== 'err') return;
   _projectCalc = { key, state: 'loading' };
-  calc.getCalculation(CalculationType.PROJECT, req.payload)
-    .then(data => { _projectCalc = { key, state: 'ok', data }; _dRenderProjectCalc(); })
+  // Полный ответ (материалы и работы): вкладки сметы урезают его сами.
+  calc.getCalculation(CalculationType.PROJECT, req.payload, CalculationOption.ALL_WITH_WORKS)
+    .then(data => { _projectCalc = { key, state: 'ok', data, payload: req.payload }; _dRenderProjectCalc(); })
     .catch(e => {
       console.warn('[calculate_project]', e);
       _projectCalc = { key, state: 'err', error: _calcErrorText(e) };
@@ -3356,6 +3552,21 @@ function _objectCalcTotal(obj) {
   return mats + works;
 }
 
+// Вкладки сметы (правка 2026-10-16) → опции Calculator. Опцию Calculator
+// применяет на клиенте к одному и тому же ответу API, поэтому запрос один
+// (полный, _ensureProjectCalc), а вкладки собираются из него Calculator._shape.
+const D_EST_TABS = [
+  { id: 'main',  lbl: 'Только товар',     opt: () => CalculationOption.ONLY_MAIN_MATERIALS },
+  { id: 'mats',  lbl: 'С комплектующими', opt: () => CalculationOption.ONLY_MATERIALS },
+  { id: 'works', lbl: 'С работой',        opt: () => CalculationOption.ALL_WITH_WORKS },
+];
+let _dEstTab = 'main';
+
+function dSetEstTab(id) {
+  _dEstTab = id;
+  _dRenderProjectCalc();
+}
+
 function _dRenderProjectCalc() {
   const host = document.getElementById('d-project-calc');
   if (!host) return;
@@ -3369,9 +3580,19 @@ function _dRenderProjectCalc() {
     host.innerHTML = head + '<div class="d-cat-loading"><div class="d-cat-spinner"></div>Считаем проект…</div>';
     return;
   }
-  const objects = (c.data && c.data.objects) || [];
+  const tab = D_EST_TABS.find(t => t.id === _dEstTab) || D_EST_TABS[0];
+  let shaped = c.data;
+  try {
+    shaped = Calculator._shape(c.data, CalculationType.PROJECT, tab.opt(), c.payload);
+  } catch (e) {
+    console.warn('[calculate_project] не удалось применить опцию', tab.id, e);
+  }
+  const objects = (shaped && shaped.objects) || [];
+  const tabs = `<div class="est-tabs">${D_EST_TABS.map(t =>
+    `<button class="est-tab${t.id === tab.id ? ' active' : ''}"
+             onclick="event.stopPropagation(); dSetEstTab('${t.id}')">${t.lbl}</button>`).join('')}</div>`;
   if (!objects.length) {
-    host.innerHTML = head + '<div class="est-empty">Бэкенд вернул пустой расчёт.</div>';
+    host.innerHTML = head + tabs + '<div class="est-empty">Бэкенд вернул пустой расчёт.</div>';
     return;
   }
   const row = (name, tag, qty, unit, price, cost) => `
@@ -3389,20 +3610,23 @@ function _dRenderProjectCalc() {
     const works = o.works || [];
     const sum = _objectCalcTotal(o);
     total += sum;
+    // description — краткое описание объекта от сервера («Терраса: доска TalverWood»).
     return `
       <div class="est-obj-title">${o.name || o.type || ''}</div>
+      ${o.description ? `<div class="est-obj-desc">${o.description}</div>` : ''}
       <table class="est-table">
         <thead><tr><th>Позиция</th><th>Наименование</th><th class="est-r">Кол-во</th><th class="est-r">Цена</th><th class="est-r">Сумма</th></tr></thead>
         <tbody>
           ${mats.map(m => row(m.name, m.ruTag, m.totalDimensionCount, m.dimension,
                               m.pricePerDimension, m.totalCost)).join('')}
-          ${works.map(w => row(w.name, 'Работы', null, '', null, w.cost)).join('')}
+          ${works.map(w => row(w.name, 'Работы', w.totalDimensionCount, w.dimension,
+                               w.pricePerDimension, w.cost)).join('')}
         </tbody>
         <tfoot><tr><td colspan="4" class="est-r">Итого:</td><td class="est-r est-total">${_fmtRub(sum)}</td></tr></tfoot>
       </table>`;
   }).join('');
 
-  host.innerHTML = head + sections + `
+  host.innerHTML = head + tabs + sections + `
     <div class="est-project-total">Итого по проекту: <span class="est-total">${_fmtRub(total)}</span></div>`;
 }
 

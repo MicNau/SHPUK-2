@@ -182,12 +182,12 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-color-management.js?v=1   styles-desktop.css?v=53   styles-mobile.css?v=5
-state.js?v=78             canvas.js?v=67            shared/house-builder.js?v=91
-ResourceManager.js?v=14   viewer3d-core.js?v=164    viewer3d-builders.js?v=68
+color-management.js?v=1   styles-desktop.css?v=54   styles-mobile.css?v=5
+state.js?v=78             canvas.js?v=68            shared/house-builder.js?v=92
+ResourceManager.js?v=15   viewer3d-core.js?v=165    viewer3d-builders.js?v=68
 viewer3d-railing.js?v=18  viewer3d-entourage.js?v=14   editor3d.js?v=22
-nav-desktop.js?v=143      nav-mobile.js?v=6         project-io.js?v=7
-backend_API/Calculator.js?v=3
+nav-desktop.js?v=144      nav-mobile.js?v=7         project-io.js?v=7
+backend_API/Calculator.js?v=4
 ```
 
 `viewer3d-entourage.js` автоматически детектит `IS_MOBILE` (UA + `innerWidth<768`)
@@ -949,6 +949,41 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Ветка **Mobile**: правки 2026-10-16 — площадь, ступени, трубы, связка товаров, вкладки сметы.
+
+- **Площадь дома до 250 м²**: `area.max` во всех дескрипторах и запасное значение
+  в интерфейсе. Сцена ограничивала площадь 140 м² (`HOUSE_AREA_MAX` в
+  viewer3d-core.js) — при большей 3D и план расходились.
+- **Смена площади не сбрасывает разделы.** `_dInitWorkspace` сбрасывает проект
+  только при смене ТИПА дома; при смене площади `adaptLayoutToHouseResize`
+  (canvas.js) двигает пристроенное к стенам (зазор до 35 см) вместе со стеной —
+  поперёк на сдвиг стены, вдоль пропорционально фасаду; ступени, грядки и точки,
+  примыкающие к террасе, едут за ней; объекты, в которые залез дом, выталкиваются;
+  ограждение пересчитывается по террасам.
+- **Первая лестница — у длинной свободной стороны террасы** (`stepsPlaceAtTerrace`,
+  только при первом открытии раздела), из длинных сторон — дальняя от дома.
+- **Водосточные трубы у двускатных и мансардных крыш** стоят вдоль карнизной
+  стены за выносом фронтона (`DOWNPIPE_GABLE_CLEAR`), а не по диагонали от угла —
+  там их протыкала накладка свеса фронтона.
+- **Связка терраса ↔ ступени ↔ ограждение** (`_dLinkOnEnter`, `_dApplyLinkFocus`):
+  при входе в раздел тройки карточка связанного товара раскрывается, встаёт по
+  центру списка и подсвечивается (`.linked`), слева — окно «Вы выбрали этот
+  материал для …» (`#d-link-note`; на телефоне — над карточкой в списке).
+  Источник — терраса с товаром, без неё — последний выбранный вручную раздел
+  тройки. Товар — `related_product_ids[dpk|steps|fencing]`, иначе тот же бренд
+  (`PropertyPath.BRAND`) и цвет, иначе тот же бренд; если его отсеяли фильтры,
+  он ставится первым в список. Свой выбор раздела главнее связанного.
+  Автоподбор ступеней под террасу тоже идёт сначала по `related_product_ids`;
+  фирма товара — характеристика `brand` (запасной вариант — первое слово названия).
+- **Смета — три вкладки**: «Только товар» (`ONLY_MAIN_MATERIALS`), «С
+  комплектующими» (`ONLY_MATERIALS`), «С работой» (`ALL_WITH_WORKS`). Запрос
+  один, полный; вкладки — `Calculator._shape` над ним (опцию Calculator и так
+  применяет на клиенте). Под названием объекта — `description` от сервера; у работ
+  — количество, единица и цена.
+- Cache-bust: `ResourceManager.js?v=15`, `backend_API/Calculator.js?v=4`,
+  `canvas.js?v=68`, `shared/house-builder.js?v=92`, `viewer3d-core.js?v=165`,
+  `nav-desktop.js?v=144`, `nav-mobile.js?v=7`, `styles-desktop.css?v=54`.
 
 Ветка **Mobile**: дома — терраса у входа, Г-образный план, окна мансарды.
 
