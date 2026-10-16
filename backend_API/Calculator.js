@@ -33,10 +33,13 @@ const ReportStatus = {
     FAILED: 'failed',
 };
 
+// Четыре варианта ответа, от короткого к полному. Без опции — то же, что
+// ALL_WITH_WORKS.
 const CalculationOption = {
-    ONLY_MATERIALS: 'onlyMaterials',
     ONLY_MAIN_MATERIALS: 'onlyMainMaterials',
-    ONLY_WORKS: 'onlyWorks',
+    MATERIALS_BRIEF: 'materialsBrief',
+    ONLY_MATERIALS: 'onlyMaterials',
+    ALL_WITH_WORKS: 'allWithWorks',
 };
 
 
@@ -64,9 +67,23 @@ const CALCULATION_PATHS = {
     project: 'calculate_project/',
 };
 
+// Название объекта для брифа.
+const OBJECT_NAMES = {
+    terrace: 'Терраса',
+    steps: 'Ступени',
+    fence: 'Забор',
+    railing: 'Оградка',
+    path: 'Дорожка',
+    facade: 'Фасад',
+    furniture: 'Мебель',
+    garden_beds: 'Грядки',
+    project: 'Проект',
+};
+
 // Основные материалы объекта: по ним работает onlyMainMaterials. У мебели и
-// грядок ролей нет вовсе, у проекта с объединёнными материалами и у фасада они
-// теряются при сложении по товарам, поэтому смета отдаётся целиком.
+// грядок ролей нет вовсе, а у фасада ключи позиций товарные, поэтому смета
+// отдаётся целиком. У проекта с объединёнными материалами основные — это
+// основные всех его объектов: роли позиции сервер отдаёт в её поле roles.
 const MAIN_MATERIALS = {
     terrace: ['deckingBoard', 'halfStep'],
     steps: ['step', 'riser', 'facadeBoard'],
@@ -120,8 +137,15 @@ class Calculator {
      * @param {string} type - значение CalculationType.
      * @param {object} request - тело запроса как в API.
      * @param {string|null} option - значение CalculationOption.
-     * @returns {Promise<object>} {materials, works} с учётом опции. У проекта
-     *   без объединения материалов — {objects} со сметой каждого объекта.
+     * @returns {Promise<object>} по опции:
+     *   ONLY_MAIN_MATERIALS - {materials} только основные;
+     *   MATERIALS_BRIEF     - {name, materialsTotal}: название объекта и
+     *                         стоимость всех материалов, без строк;
+     *   ONLY_MATERIALS      - {materials} все;
+     *   ALL_WITH_WORKS, null - {materials, works}.
+     *   Рядом description — краткое описание строкой; у объединённого
+     *   проекта в ней описания всех объектов. У проекта без объединения
+     *   материалов — {objects} со сметой и description каждого объекта.
      * @throws {CalculationError}
      */
     async getCalculation(type, request, option = null) {
@@ -130,7 +154,7 @@ class Calculator {
 
     /**
      * Общая стоимость расчёта: сумма позиций сметы и работ, оставшихся
-     * после опции.
+     * после опции. У MATERIALS_BRIEF — стоимость всех материалов.
      *
      * @param {string} type - значение CalculationType.
      * @param {object} request - тело запроса как в API.
@@ -311,7 +335,7 @@ class Calculator {
                 {kind: Calculator._kindByStatus(response.status), status: response.status});
         }
 
-        return Calculator._shape(data, type, option);
+        return Calculator._shape(data, type, option, request);
     }
 
     /**
@@ -330,39 +354,58 @@ class Calculator {
      * @param {object} result - ответ API.
      * @param {string} type - тип объекта.
      * @param {string|null} option - значение CalculationOption.
+     * @param {object|null} request - тело запроса: у проекта по нему видно,
+     *   из каких объектов он состоит.
      * @returns {object}
      */
-    static _shape(result, type, option) {
+    static _shape(result, type, option, request = null) {
         // Проект без объединения материалов отдаёт смету по объектам: опция
-        // применяется к каждому со своим типом, тип и имя остаются на месте.
+        // применяется к каждому со своим типом, тип, имя и описание остаются
+        // на месте. В брифе имя объекта из запроса важнее общего названия типа.
         if (result.objects) {
             return {
                 objects: result.objects.map(object => ({
+                    ...Calculator._shapeEstimate(object, object.type, option),
                     type: object.type,
                     name: object.name,
-                    ...Calculator._shape(object, object.type, option),
+                    description: object.description,
                 })),
             };
         }
 
+        const shaped = Calculator._shapeEstimate(result, type, option, request);
+
+        // Описание от опции не зависит: у одиночного объекта и у объединённой
+        // сметы проекта это одна строка рядом со сметой.
+        if (result.description !== undefined) {
+            shaped.description = result.description;
+        }
+        return shaped;
+    }
+
+    /**
+     * Смета одного объекта или объединённого проекта, урезанная по опции.
+     * @param {object} result - смета из ответа API.
+     * @param {string} type - тип объекта.
+     * @param {string|null} option - значение CalculationOption.
+     * @param {object|null} request - тело запроса.
+     * @returns {object}
+     */
+    static _shapeEstimate(result, type, option, request = null) {
         const materials = result.materials || {};
         const works = result.works || [];
 
-        if (option === CalculationOption.ONLY_WORKS) {
-            return {works};
+        if (option === CalculationOption.ONLY_MAIN_MATERIALS) {
+            return {materials: Calculator._mainMaterials(materials, type, request)};
         }
 
-        if (option === CalculationOption.ONLY_MAIN_MATERIALS) {
-            const keys = MAIN_MATERIALS[type];
-            if (!keys) {
-                return {materials};
-            }
-
-            const main = {};
-            for (const key of keys) {
-                if (materials[key]) main[key] = materials[key];
-            }
-            return {materials: main};
+        // Бриф — одна строка «Терраса — 46 466 ₽»: название и стоимость всех
+        // материалов, сами позиции не отдаются.
+        if (option === CalculationOption.MATERIALS_BRIEF) {
+            return {
+                name: OBJECT_NAMES[type],
+                materialsTotal: Calculator._materialsCost(materials),
+            };
         }
 
         if (option === CalculationOption.ONLY_MATERIALS) {
@@ -373,7 +416,77 @@ class Calculator {
     }
 
     /**
-     * Сумма по тому, что осталось в результате после опции.
+     * Основные материалы объекта. Если у типа ролей нет, отдаются все.
+     * @param {object} materials - словарь позиций из ответа API.
+     * @param {string} type - тип объекта.
+     * @param {object|null} request - тело запроса.
+     * @returns {object}
+     */
+    static _mainMaterials(materials, type, request = null) {
+        if (type === CalculationType.PROJECT) {
+            return Calculator._mainProjectMaterials(materials, request);
+        }
+
+        const keys = MAIN_MATERIALS[type];
+        if (!keys) {
+            return materials;
+        }
+
+        const main = {};
+        for (const key of keys) {
+            if (materials[key]) main[key] = materials[key];
+        }
+        return main;
+    }
+
+    /**
+     * Основные материалы объединённой сметы проекта.
+     *
+     * Ключи позиций здесь товарные, поэтому основная позиция узнаётся по
+     * roles: хотя бы одна её роль основная у какого-то объекта проекта.
+     * Готовые изделия ролей не имеют и считаются основными, как у мебели и
+     * грядок. Сервер, который roles ещё не отдаёт, получает смету целиком.
+     * @param {object} materials - словарь позиций из ответа API.
+     * @param {object|null} request - тело запроса проекта.
+     * @returns {object}
+     */
+    static _mainProjectMaterials(materials, request) {
+        const positions = Object.values(materials);
+        if (!positions.some(material => Array.isArray(material.roles))) {
+            return materials;
+        }
+
+        const roles = new Set();
+        for (const object of (request && request.objects) || []) {
+            for (const role of MAIN_MATERIALS[object.type] || []) roles.add(role);
+        }
+
+        const main = {};
+        for (const [key, material] of Object.entries(materials)) {
+            const own = material.roles || [];
+            if (own.length === 0 || own.some(role => roles.has(role))) {
+                main[key] = material;
+            }
+        }
+        return main;
+    }
+
+    /**
+     * Сумма позиций сметы.
+     * @param {object} materials
+     * @returns {number}
+     */
+    static _materialsCost(materials) {
+        let total = 0;
+        for (const material of Object.values(materials)) {
+            total += material.totalCost || 0;
+        }
+        return total;
+    }
+
+    /**
+     * Сумма по тому, что осталось в результате после опции. У брифа
+     * берётся готовый итог по всем материалам.
      * @param {object} result
      * @returns {number}
      */
@@ -386,8 +499,10 @@ class Calculator {
             total += Calculator._totalCost(object);
         }
 
-        for (const material of Object.values(result.materials || {})) {
-            total += material.totalCost || 0;
+        if (result.materialsTotal !== undefined) {
+            total += result.materialsTotal;
+        } else {
+            total += Calculator._materialsCost(result.materials || {});
         }
         for (const work of result.works || []) {
             total += work.cost || 0;

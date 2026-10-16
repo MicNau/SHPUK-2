@@ -53,6 +53,7 @@ const PropertyPath = Object.freeze({
     CORE_TYPE: 'core_type',
     BOARD_DIRECTION: 'board_direction',
     FENCE_TYPE: 'fence_type',
+    BRAND: 'brand'
 });
 
 // Ценовая категория товара: значение характеристики по пути

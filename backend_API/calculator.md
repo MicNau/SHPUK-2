@@ -21,9 +21,19 @@ const calculator = new Calculator('https://sollersdev.ru/api/v1/');
 Их два, оба асинхронные:
 
 - `getCalculation(type, request, option)` — объект расчёта `{materials, works}`
-  в том виде, в каком его отдаёт API;
-- `getTotalCost(type, request, option)` — только общая стоимость числом, сумма
-  позиций сметы и работ.
+  в том виде, в каком его отдаёт API, урезанный по опции;
+- `getTotalCost(type, request, option)` — только стоимость числом: сумма
+  того, что осталось после опции. Без опции это материалы вместе с работами.
+
+В результате `getCalculation` при любой опции есть ещё `description` —
+краткое описание объекта строкой: «Терраса: доска TalverWood». Его
+собирает сервер, опция его не урезает.
+
+- У одиночного объекта оно рядом со сметой.
+- У проекта по объектам — в каждом объекте, рядом с `type` и `name`.
+- У объединённого проекта оно, как и смета, одно, рядом со сметой. В нём
+  описания всех объектов через точку с запятой: «Терраса: доска
+  TalverWood; Дорожка: доска TalverWood».
 
 Тип объекта — значение `CalculationType`, от него зависит форма тела запроса:
 
@@ -61,35 +71,358 @@ const cost = await calculator.getTotalCost(
 
 ## Опции
 
-Вторым аргументом можно передать одну опцию из `CalculationOption`:
+Третьим аргументом можно передать одну опцию из `CalculationOption`. Вариантов
+четыре, от короткого к полному:
 
-| Опция | Что возвращается |
-|---|---|
-| `ONLY_MATERIALS` | только `materials` |
-| `ONLY_MAIN_MATERIALS` | только основные материалы объекта |
-| `ONLY_WORKS` | только `works` |
+| Опция | Что возвращается | `getTotalCost` |
+|---|---|---|
+| `ONLY_MAIN_MATERIALS` | `{materials}` — только основные материалы | сумма основных |
+| `MATERIALS_BRIEF` | `{name, materialsTotal}` — название объекта и стоимость всех материалов, без строк | стоимость всех материалов |
+| `ONLY_MATERIALS` | `{materials}` — все материалы | сумма всех материалов |
+| `ALL_WITH_WORKS` | `{materials, works}` — все материалы и работы | материалы и работы |
 
-Опция влияет и на стоимость: `getTotalCost` считает по тому, что осталось после
-урезания.
+Без опции — то же, что `ALL_WITH_WORKS`.
+
+Бриф — одна строка вида «Терраса — 46 466 ₽»: название объекта
+(`Терраса`, `Ступени`, `Забор`, `Оградка`, `Дорожка`, `Фасад`, `Мебель`,
+`Грядки`, `Проект`) и стоимость всех материалов, без работ и без самих позиций.
 
 ```js
-const materialsCost = await calculator.getTotalCost(
-    CalculationType.STEPS,
-    {vertices, height: 600},
-    CalculationOption.ONLY_MATERIALS,
+const brief = await calculator.getCalculation(
+    CalculationType.TERRACE,
+    {vertices, doorDirection: 'N'},
+    CalculationOption.MATERIALS_BRIEF,
 );
+// {name: 'Терраса', materialsTotal: 46466}
 ```
+
+Опции `ONLY_WORKS` больше нет: вызов с ней отбивается как неизвестная опция.
 
 Основные материалы заданы в `MAIN_MATERIALS`: у террасы доска и полуступень, у
 ступеней ступень, подступенок и фасадная доска, у забора секции и штакетник, у
 оградки секции, у дорожки доска. У мебели, грядок и фасада основными считаются
 все позиции: у фасада смета ключуется товарами, а не ролями, и отличить доску
 по ключу нельзя.
-У проекта опция применяется к каждому объекту по его типу; в объединённой
-смете роли теряются при сложении по товарам, и она отдаётся целиком.
+У проекта без объединения опция применяется к каждому объекту по его типу. В
+объединённой смете ключи позиций товарные, поэтому основная позиция узнаётся
+по её полю `roles`: она остаётся, если хоть одна её роль основная у
+какого-то объекта проекта. Готовые изделия (мебель, грядки) ролей не имеют и
+остаются всегда. Если сервер `roles` не отдаёт, объединённая смета
+приходит целиком.
 
 Двух опций сразу быть не может, неизвестное значение опции или типа объекта
 тоже не пройдёт — всё это отбивается до запроса.
+
+## Что возвращает каждая опция
+
+Все двенадцать случаев — четыре опции на трёх запросах: одна терраса, проект
+по объектам и проект с объединёнными материалами. Терраса 6×4 м у дома, в
+проекте к ней добавлена дорожка 1,2×5 м; товары по умолчанию, цены условные.
+
+```js
+const terrace = {
+    vertices: [
+        {x: 0, y: 0, vertexType: 'house'},
+        {x: 6000, y: 0, vertexType: 'house'},
+        {x: 6000, y: 4000, vertexType: 'free'},
+        {x: 0, y: 4000, vertexType: 'free'},
+    ],
+    doorDirection: 'N',
+};
+const path = {
+    vertices: [
+        {x: 0, y: 0, vertexType: 'start'},
+        {x: 1200, y: 0, vertexType: 'start'},
+        {x: 1200, y: 5000, vertexType: 'free'},
+        {x: 0, y: 5000, vertexType: 'free'},
+    ],
+};
+
+const request = terrace;
+const project = merge => ({
+    objects: [
+        {type: CalculationType.TERRACE, name: 'Терраса у входа', ...terrace},
+        {type: CalculationType.PATH, name: 'Дорожка к калитке', ...path},
+    ],
+    mergeMaterials: merge,
+});
+```
+
+Чтобы примеры читались, в позициях опущены `productId`, `ruTag` и
+`productUrl` — они приходят так же, как в ответе API. Под каждым случаем —
+что вернёт `getTotalCost` с той же опцией.
+
+Что видно по примерам:
+
+- **Бриф** — только название и стоимость всех материалов. У проекта по
+  объектам — строка на объект с его именем из запроса, у объединённого
+  проекта — одна строка «Проект».
+- **Основные материалы объединённого проекта** отбираются по `roles`: ключи
+  там — идентификаторы товаров, и одна строка доски собрала доску террасы и
+  дорожки.
+- `getTotalCost` с брифом равен `materialsTotal` — стоимости всех
+  материалов, а не только показанных.
+- **Описание** — всегда строка. У проекта по объектам оно своё у каждого
+  объекта, у объединённого проекта одно на всю смету.
+- У товаров по умолчанию бренда нет, поэтому в описании вместо бренда их
+  имя — «доска Террасная доска ДПК». У товара с брендом будет «доска
+  TalverWood».
+
+### Терраса
+
+`getCalculation(CalculationType.TERRACE, request, option)`
+
+#### 1. Терраса — `ONLY_MAIN_MATERIALS`
+
+`getTotalCost` — 13 500
+
+```json
+{
+  "materials": {
+    "deckingBoard": {"name": "Террасная доска ДПК", "dimension": "м пог", "pricePerDimension": 0, "totalDimensionCount": 165, "totalCost": 0, "roles": ["deckingBoard"]},
+    "halfStep": {"name": "Полуступень ДПК", "dimension": "м пог", "pricePerDimension": 900, "totalDimensionCount": 15, "totalCost": 13500, "roles": ["halfStep"]}
+  },
+  "description": "Терраса: доска Террасная доска ДПК"
+}
+```
+
+#### 2. Терраса — `MATERIALS_BRIEF`
+
+`getTotalCost` — 46 466
+
+```json
+{"name": "Терраса", "materialsTotal": 46466, "description": "Терраса: доска Террасная доска ДПК"}
+```
+
+#### 3. Терраса — `ONLY_MATERIALS`
+
+`getTotalCost` — 46 466
+
+```json
+{
+  "materials": {
+    "deckingBoard": {"name": "Террасная доска ДПК", "dimension": "м пог", "pricePerDimension": 0, "totalDimensionCount": 165, "totalCost": 0, "roles": ["deckingBoard"]},
+    "halfStep": {"name": "Полуступень ДПК", "dimension": "м пог", "pricePerDimension": 900, "totalDimensionCount": 15, "totalCost": 13500, "roles": ["halfStep"]},
+    "angleBracket": {"name": "Уголок стальной", "dimension": "шт", "pricePerDimension": 35, "totalDimensionCount": 28, "totalCost": 980, "roles": ["angleBracket"]},
+    "rubberSupports": {"name": "Подложка резиновая под лагу 60х80", "dimension": "упаковка 20 шт", "pricePerDimension": 240, "totalDimensionCount": 8, "totalCost": 1920, "roles": ["rubberSupports"]},
+    "joist": {"name": "Лага ДПК", "dimension": "м пог", "pricePerDimension": 190, "totalDimensionCount": 111, "totalCost": 21090, "roles": ["joist"]},
+    "deckingClip": {"name": "Кляймер рядовой", "dimension": "шт", "pricePerDimension": 17, "totalDimensionCount": 528, "totalCost": 8976, "roles": ["deckingClip"]}
+  },
+  "description": "Терраса: доска Террасная доска ДПК"
+}
+```
+
+#### 4. Терраса — `ALL_WITH_WORKS`
+
+`getTotalCost` — 72 866
+
+```json
+{
+  "materials": {
+    "deckingBoard": {"name": "Террасная доска ДПК", "dimension": "м пог", "pricePerDimension": 0, "totalDimensionCount": 165, "totalCost": 0, "roles": ["deckingBoard"]},
+    "halfStep": {"name": "Полуступень ДПК", "dimension": "м пог", "pricePerDimension": 900, "totalDimensionCount": 15, "totalCost": 13500, "roles": ["halfStep"]},
+    "angleBracket": {"name": "Уголок стальной", "dimension": "шт", "pricePerDimension": 35, "totalDimensionCount": 28, "totalCost": 980, "roles": ["angleBracket"]},
+    "rubberSupports": {"name": "Подложка резиновая под лагу 60х80", "dimension": "упаковка 20 шт", "pricePerDimension": 240, "totalDimensionCount": 8, "totalCost": 1920, "roles": ["rubberSupports"]},
+    "joist": {"name": "Лага ДПК", "dimension": "м пог", "pricePerDimension": 190, "totalDimensionCount": 111, "totalCost": 21090, "roles": ["joist"]},
+    "deckingClip": {"name": "Кляймер рядовой", "dimension": "шт", "pricePerDimension": 17, "totalDimensionCount": 528, "totalCost": 8976, "roles": ["deckingClip"]}
+  },
+  "works": [
+    {"name": "Монтаж террасной доски из ДПК", "dimension": "м²", "pricePerDimension": 1100, "totalDimensionCount": 24, "cost": 26400}
+  ],
+  "description": "Терраса: доска Террасная доска ДПК"
+}
+```
+
+### Проект по объектам
+
+`getCalculation(CalculationType.PROJECT, project(false), option)`
+
+#### 5. Проект по объектам — `ONLY_MAIN_MATERIALS`
+
+`getTotalCost` — 13 500
+
+```json
+{
+  "objects": [
+    {
+      "materials": {
+        "deckingBoard": {"name": "Террасная доска ДПК", "dimension": "м пог", "pricePerDimension": 0, "totalDimensionCount": 165, "totalCost": 0, "roles": ["deckingBoard"]},
+        "halfStep": {"name": "Полуступень ДПК", "dimension": "м пог", "pricePerDimension": 900, "totalDimensionCount": 15, "totalCost": 13500, "roles": ["halfStep"]}
+      },
+      "type": "terrace",
+      "name": "Терраса у входа",
+      "description": "Терраса: доска Террасная доска ДПК"
+    },
+    {
+      "materials": {
+        "deckingBoard": {"name": "Террасная доска ДПК", "dimension": "м пог", "pricePerDimension": 0, "totalDimensionCount": 45, "totalCost": 0, "roles": ["deckingBoard"]}
+      },
+      "type": "path",
+      "name": "Дорожка к калитке",
+      "description": "Дорожка: доска Террасная доска ДПК"
+    }
+  ]
+}
+```
+
+#### 6. Проект по объектам — `MATERIALS_BRIEF`
+
+`getTotalCost` — 54 405
+
+```json
+{
+  "objects": [
+    {"name": "Терраса у входа", "materialsTotal": 46466, "type": "terrace", "description": "Терраса: доска Террасная доска ДПК"},
+    {"name": "Дорожка к калитке", "materialsTotal": 7939, "type": "path", "description": "Дорожка: доска Террасная доска ДПК"}
+  ]
+}
+```
+
+#### 7. Проект по объектам — `ONLY_MATERIALS`
+
+`getTotalCost` — 54 405
+
+```json
+{
+  "objects": [
+    {
+      "materials": {
+        "deckingBoard": {"name": "Террасная доска ДПК", "dimension": "м пог", "pricePerDimension": 0, "totalDimensionCount": 165, "totalCost": 0, "roles": ["deckingBoard"]},
+        "halfStep": {"name": "Полуступень ДПК", "dimension": "м пог", "pricePerDimension": 900, "totalDimensionCount": 15, "totalCost": 13500, "roles": ["halfStep"]},
+        "angleBracket": {"name": "Уголок стальной", "dimension": "шт", "pricePerDimension": 35, "totalDimensionCount": 28, "totalCost": 980, "roles": ["angleBracket"]},
+        "rubberSupports": {"name": "Подложка резиновая под лагу 60х80", "dimension": "упаковка 20 шт", "pricePerDimension": 240, "totalDimensionCount": 8, "totalCost": 1920, "roles": ["rubberSupports"]},
+        "joist": {"name": "Лага ДПК", "dimension": "м пог", "pricePerDimension": 190, "totalDimensionCount": 111, "totalCost": 21090, "roles": ["joist"]},
+        "deckingClip": {"name": "Кляймер рядовой", "dimension": "шт", "pricePerDimension": 17, "totalDimensionCount": 528, "totalCost": 8976, "roles": ["deckingClip"]}
+      },
+      "type": "terrace",
+      "name": "Терраса у входа",
+      "description": "Терраса: доска Террасная доска ДПК"
+    },
+    {
+      "materials": {
+        "deckingBoard": {"name": "Террасная доска ДПК", "dimension": "м пог", "pricePerDimension": 0, "totalDimensionCount": 45, "totalCost": 0, "roles": ["deckingBoard"]},
+        "joist": {"name": "Лага ДПК", "dimension": "м пог", "pricePerDimension": 190, "totalDimensionCount": 27, "totalCost": 5130, "roles": ["joist"]},
+        "rubberSupports": {"name": "Подложка резиновая под лагу 60х80", "dimension": "упаковка 20 шт", "pricePerDimension": 240, "totalDimensionCount": 2, "totalCost": 480, "roles": ["rubberSupports"]},
+        "deckingClip": {"name": "Кляймер рядовой", "dimension": "шт", "pricePerDimension": 17, "totalDimensionCount": 132, "totalCost": 2244, "roles": ["deckingClip"]},
+        "starterClip": {"name": "Кляймер стартовый", "dimension": "шт", "pricePerDimension": 17, "totalDimensionCount": 5, "totalCost": 85, "roles": ["starterClip"]}
+      },
+      "type": "path",
+      "name": "Дорожка к калитке",
+      "description": "Дорожка: доска Террасная доска ДПК"
+    }
+  ]
+}
+```
+
+#### 8. Проект по объектам — `ALL_WITH_WORKS`
+
+`getTotalCost` — 87 405
+
+```json
+{
+  "objects": [
+    {
+      "materials": {
+        "deckingBoard": {"name": "Террасная доска ДПК", "dimension": "м пог", "pricePerDimension": 0, "totalDimensionCount": 165, "totalCost": 0, "roles": ["deckingBoard"]},
+        "halfStep": {"name": "Полуступень ДПК", "dimension": "м пог", "pricePerDimension": 900, "totalDimensionCount": 15, "totalCost": 13500, "roles": ["halfStep"]},
+        "angleBracket": {"name": "Уголок стальной", "dimension": "шт", "pricePerDimension": 35, "totalDimensionCount": 28, "totalCost": 980, "roles": ["angleBracket"]},
+        "rubberSupports": {"name": "Подложка резиновая под лагу 60х80", "dimension": "упаковка 20 шт", "pricePerDimension": 240, "totalDimensionCount": 8, "totalCost": 1920, "roles": ["rubberSupports"]},
+        "joist": {"name": "Лага ДПК", "dimension": "м пог", "pricePerDimension": 190, "totalDimensionCount": 111, "totalCost": 21090, "roles": ["joist"]},
+        "deckingClip": {"name": "Кляймер рядовой", "dimension": "шт", "pricePerDimension": 17, "totalDimensionCount": 528, "totalCost": 8976, "roles": ["deckingClip"]}
+      },
+      "works": [
+        {"name": "Монтаж террасной доски из ДПК", "dimension": "м²", "pricePerDimension": 1100, "totalDimensionCount": 24, "cost": 26400}
+      ],
+      "type": "terrace",
+      "name": "Терраса у входа",
+      "description": "Терраса: доска Террасная доска ДПК"
+    },
+    {
+      "materials": {
+        "deckingBoard": {"name": "Террасная доска ДПК", "dimension": "м пог", "pricePerDimension": 0, "totalDimensionCount": 45, "totalCost": 0, "roles": ["deckingBoard"]},
+        "joist": {"name": "Лага ДПК", "dimension": "м пог", "pricePerDimension": 190, "totalDimensionCount": 27, "totalCost": 5130, "roles": ["joist"]},
+        "rubberSupports": {"name": "Подложка резиновая под лагу 60х80", "dimension": "упаковка 20 шт", "pricePerDimension": 240, "totalDimensionCount": 2, "totalCost": 480, "roles": ["rubberSupports"]},
+        "deckingClip": {"name": "Кляймер рядовой", "dimension": "шт", "pricePerDimension": 17, "totalDimensionCount": 132, "totalCost": 2244, "roles": ["deckingClip"]},
+        "starterClip": {"name": "Кляймер стартовый", "dimension": "шт", "pricePerDimension": 17, "totalDimensionCount": 5, "totalCost": 85, "roles": ["starterClip"]}
+      },
+      "works": [
+        {"name": "Монтаж дорожки из ДПК", "dimension": "м²", "pricePerDimension": 1100, "totalDimensionCount": 6, "cost": 6600}
+      ],
+      "type": "path",
+      "name": "Дорожка к калитке",
+      "description": "Дорожка: доска Террасная доска ДПК"
+    }
+  ]
+}
+```
+
+### Проект с объединёнными материалами
+
+`getCalculation(CalculationType.PROJECT, project(true), option)`
+
+#### 9. Проект с объединёнными материалами — `ONLY_MAIN_MATERIALS`
+
+`getTotalCost` — 13 500
+
+```json
+{
+  "materials": {
+    "-1": {"name": "Террасная доска ДПК", "dimension": "м пог", "pricePerDimension": 0, "totalDimensionCount": 210, "totalCost": 0, "roles": ["deckingBoard"]},
+    "-7": {"name": "Полуступень ДПК", "dimension": "м пог", "pricePerDimension": 900, "totalDimensionCount": 15, "totalCost": 13500, "roles": ["halfStep"]}
+  },
+  "description": "Терраса: доска Террасная доска ДПК; Дорожка: доска Террасная доска ДПК"
+}
+```
+
+#### 10. Проект с объединёнными материалами — `MATERIALS_BRIEF`
+
+`getTotalCost` — 54 405
+
+```json
+{"name": "Проект", "materialsTotal": 54405, "description": "Терраса: доска Террасная доска ДПК; Дорожка: доска Террасная доска ДПК"}
+```
+
+#### 11. Проект с объединёнными материалами — `ONLY_MATERIALS`
+
+`getTotalCost` — 54 405
+
+```json
+{
+  "materials": {
+    "-1": {"name": "Террасная доска ДПК", "dimension": "м пог", "pricePerDimension": 0, "totalDimensionCount": 210, "totalCost": 0, "roles": ["deckingBoard"]},
+    "-7": {"name": "Полуступень ДПК", "dimension": "м пог", "pricePerDimension": 900, "totalDimensionCount": 15, "totalCost": 13500, "roles": ["halfStep"]},
+    "-8": {"name": "Уголок стальной", "dimension": "шт", "pricePerDimension": 35, "totalDimensionCount": 28, "totalCost": 980, "roles": ["angleBracket"]},
+    "-6": {"name": "Подложка резиновая под лагу 60х80", "dimension": "упаковка 20 шт", "pricePerDimension": 240, "totalDimensionCount": 10, "totalCost": 2400, "roles": ["rubberSupports"]},
+    "-5": {"name": "Лага ДПК", "dimension": "м пог", "pricePerDimension": 190, "totalDimensionCount": 138, "totalCost": 26220, "roles": ["joist"]},
+    "-9": {"name": "Кляймер рядовой", "dimension": "шт", "pricePerDimension": 17, "totalDimensionCount": 660, "totalCost": 11220, "roles": ["deckingClip"]},
+    "-10": {"name": "Кляймер стартовый", "dimension": "шт", "pricePerDimension": 17, "totalDimensionCount": 5, "totalCost": 85, "roles": ["starterClip"]}
+  },
+  "description": "Терраса: доска Террасная доска ДПК; Дорожка: доска Террасная доска ДПК"
+}
+```
+
+#### 12. Проект с объединёнными материалами — `ALL_WITH_WORKS`
+
+`getTotalCost` — 87 405
+
+```json
+{
+  "materials": {
+    "-1": {"name": "Террасная доска ДПК", "dimension": "м пог", "pricePerDimension": 0, "totalDimensionCount": 210, "totalCost": 0, "roles": ["deckingBoard"]},
+    "-7": {"name": "Полуступень ДПК", "dimension": "м пог", "pricePerDimension": 900, "totalDimensionCount": 15, "totalCost": 13500, "roles": ["halfStep"]},
+    "-8": {"name": "Уголок стальной", "dimension": "шт", "pricePerDimension": 35, "totalDimensionCount": 28, "totalCost": 980, "roles": ["angleBracket"]},
+    "-6": {"name": "Подложка резиновая под лагу 60х80", "dimension": "упаковка 20 шт", "pricePerDimension": 240, "totalDimensionCount": 10, "totalCost": 2400, "roles": ["rubberSupports"]},
+    "-5": {"name": "Лага ДПК", "dimension": "м пог", "pricePerDimension": 190, "totalDimensionCount": 138, "totalCost": 26220, "roles": ["joist"]},
+    "-9": {"name": "Кляймер рядовой", "dimension": "шт", "pricePerDimension": 17, "totalDimensionCount": 660, "totalCost": 11220, "roles": ["deckingClip"]},
+    "-10": {"name": "Кляймер стартовый", "dimension": "шт", "pricePerDimension": 17, "totalDimensionCount": 5, "totalCost": 85, "roles": ["starterClip"]}
+  },
+  "works": [
+    {"name": "Монтаж террасной доски из ДПК", "dimension": "м²", "pricePerDimension": 1100, "totalDimensionCount": 24, "cost": 26400},
+    {"name": "Монтаж дорожки из ДПК", "dimension": "м²", "pricePerDimension": 1100, "totalDimensionCount": 6, "cost": 6600}
+  ],
+  "description": "Терраса: доска Террасная доска ДПК; Дорожка: доска Террасная доска ДПК"
+}
+```
 
 ## Смета в PDF
 
@@ -272,7 +605,9 @@ const project = await calculator.getCalculation(CalculationType.PROJECT, {
 сложены в одну строку, а запас и округление взяты один раз от суммы.
 
 Без объединения ответ содержит `objects` — по одному на каждый объект
-запроса, с его типом, именем и своей сметой:
+запроса, с его типом, именем и своей сметой. Опция урезает смету каждого
+объекта по его типу. Бриф проекта — по строке на объект с его именем из
+запроса: `{objects: [{type, name, materialsTotal}, ...]}`.
 
 ```js
 const project = await calculator.getCalculation(CalculationType.PROJECT, {
@@ -289,16 +624,19 @@ for (const object of project.objects) {
 складывает их сметы сам.
 
 Смета в PDF у проекта тоже своя: `getReport(CalculationType.PROJECT, ...)`
-собирает файл, где видно имя каждого объекта.
+собирает файл, где видно имя каждого объекта. Работы в смете идут отдельным
+блоком в самом конце, по всем объектам сразу; итогов два — «Всего» без работ
+и «Всего с монтажом».
 
-### Стоимость дорожки без работ
+### Стоимость дорожки без работ и с монтажом
 
 ```js
+const request = {vertices, deckingBoardProductId: board.id};
+
 const cost = await calculator.getTotalCost(
-    CalculationType.PATH,
-    {vertices, deckingBoardProductId: board.id},
-    CalculationOption.ONLY_MATERIALS,
-);
+    CalculationType.PATH, request, CalculationOption.ONLY_MATERIALS);
+
+const costWithWorks = await calculator.getTotalCost(CalculationType.PATH, request);
 ```
 
 ## Чего сервис не делает
