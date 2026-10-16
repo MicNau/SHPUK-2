@@ -754,6 +754,32 @@ button, input, select, textarea { font-family: inherit; }
 }
 .d-mat-card:hover { box-shadow: var(--hover-shadow); }
 .d-mat-card.selected { border-color: var(--accent); }
+/* Связанный товар (терраса ↔ ступени ↔ ограждение) — подсвечен акцентом. */
+.d-mat-card.linked { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(242,116,44,.18); }
+
+/* Окно «Вы выбрали этот материал для террасы» — слева от карточки связанного
+   товара, на краю сцены; стрелка смотрит на карточку. На телефоне — над
+   карточкой в списке (.inline). */
+.d-link-note {
+  position: fixed; z-index: 150; width: 240px; padding: 12px 14px;
+  background: var(--bg); border: 2px solid var(--accent); box-shadow: var(--hover-shadow);
+  font-size: 13px; color: var(--text);
+}
+.d-link-note::after {
+  content: ''; position: absolute; right: -9px; top: 18px; width: 14px; height: 14px;
+  background: var(--bg); border-right: 2px solid var(--accent); border-top: 2px solid var(--accent);
+  transform: rotate(45deg);
+}
+.d-link-note.inline { position: static; width: auto; margin-bottom: -2px; }
+.d-link-note.inline::after { display: none; }
+.d-link-title { font-weight: 700; margin: 0 18px 8px 0; line-height: 1.3; }
+.d-link-body { display: flex; gap: 10px; align-items: center; }
+.d-link-thumb { width: 40px; height: 40px; flex: none; background: #bbb; }
+.d-link-name { font-size: 12px; line-height: 1.35; color: #444; }
+.d-link-close {
+  position: absolute; top: 6px; right: 8px; border: none; background: none;
+  font-size: 18px; line-height: 1; color: #888; cursor: pointer;
+}
 .d-mat-head {
   display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; cursor: pointer;
 }
@@ -979,7 +1005,17 @@ button, input, select, textarea { font-family: inherit; }
 .est-table tfoot td { border-top:2px solid #333; border-bottom:none; font-weight:700; padding-top:10px; }
 .est-total { font-size:16px; }
 /* Смета проекта: раздел на каждый объект и общий итог под ними. */
-.est-obj-title { font-size:14px; font-weight:600; margin:18px 0 6px; }
+.est-obj-title { font-size:14px; font-weight:600; margin:18px 0 2px; }
+.est-obj-desc { font-size:12px; color:#777; margin-bottom:6px; }
+/* Вкладки сметы: «Только товар» / «С комплектующими» / «С работой». */
+.est-tabs { display:flex; gap:0; margin:0 0 6px; border-bottom:2px solid #eee; }
+.est-tab {
+  flex:1; padding:9px 6px; border:none; background:none; cursor:pointer;
+  font:inherit; font-size:14px; font-weight:600; color:#888;
+  border-bottom:3px solid transparent; margin-bottom:-2px;
+}
+.est-tab:hover { color:var(--text); }
+.est-tab.active { color:var(--text); border-bottom-color:var(--accent); }
 .est-project-total {
   display:flex; justify-content:space-between; align-items:baseline;
   margin-top:16px; padding-top:10px; border-top:2px solid #333;

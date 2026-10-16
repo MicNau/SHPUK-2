@@ -64,7 +64,7 @@
       "id": "floor_1",
       "label": "Первый этаж",
       "constraints": {
-        "area":    { "min": 70, "max": 140, "step": 5,  "default": 100, "unit": "m2" },
+        "area":    { "min": 70, "max": 250, "step": 5,  "default": 100, "unit": "m2" },
         "floor_h": { "min": 270, "max": 330, "step": 10, "default": 300, "unit": "cm" }
       },
       "vars": {

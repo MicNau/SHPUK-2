@@ -147,6 +147,7 @@ function _setupControls(camera, domElement) {
 // ИНИЦИАЛИЗАЦИЯ СЦЕНЫ
 // ══════════════════════════════════════════════
 // Свет сцены (правка 2026-10-08): см. комментарий у «Освещение» в init3dCanvas.
+const HOUSE_AREA_MAX = 250;   // м², как area.max в дескрипторах домов
 const SUN_INTENSITY  = 2.6;    // солнце; physicallyCorrectLights — альбедо × I·cos / π
 const SCENE_EXPOSURE = 0.95;   // экспозиция ACES при солнце 2.6 и небе из HDRI
 
@@ -1144,7 +1145,10 @@ function buildScene3d() {
   const areaRaw  = collected.area;
   const floorRaw = collected.floorH;
   const foundRaw = collected.baseH;
-  const area   = Math.min(140, Math.max(40, areaRaw));
+  // Верхняя граница — та же, что у полей площади в дескрипторах (250 м², правка
+  // 2026-10-16). Раньше здесь стояло 140: при большей площади 3D строилось на 140, а
+  // контур на плане — по значению поля, и они расходились.
+  const area   = Math.min(HOUSE_AREA_MAX, Math.max(40, areaRaw));
   const wallH  = Math.min(3.6, Math.max(2.4, floorRaw / 100));
   const foundH = Math.min(1.2, Math.max(0.5, foundRaw / 100));
   const RATIO  = 1.6, wt = 0.2;

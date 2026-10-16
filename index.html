@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=53">
+<link rel="stylesheet" href="styles-desktop.css?v=54">
 <!-- Мобильная раскладка: правила действуют только при body.m-mode (nav-mobile.js). -->
 <link rel="stylesheet" href="styles-mobile.css?v=5">
 </head>
@@ -58,12 +58,12 @@
       <div class="d-param-group" id="d-area-group">
         <div class="d-param-head">
           <span class="d-param-label">Общая площадь дома (кв.м)</span>
-          <input class="d-param-input" type="number" id="v-area" value="80" min="40" max="100"
+          <input class="d-param-input" type="number" id="v-area" value="80" min="40" max="250"
                  oninput="dOnAreaTotal()">
         </div>
-        <input class="d-param-range" type="range" id="r-area" value="80" min="40" max="100" step="5"
+        <input class="d-param-range" type="range" id="r-area" value="80" min="40" max="250" step="5"
                oninput="document.getElementById('v-area').value=this.value; dOnAreaTotal()">
-        <div class="d-param-unit" id="d-area-range-hint"><span>40 кв.м</span><span>100 кв.м</span></div>
+        <div class="d-param-unit" id="d-area-range-hint"><span>40 кв.м</span><span>250 кв.м</span></div>
       </div>
 
       <div class="d-param-group">
@@ -286,9 +286,9 @@
 <script src="vendor/three/GLTFLoader.js"></script>
 <!-- Shared state, canvas engine -->
 <script src="state.js?v=78"></script>
-<script src="canvas.js?v=67"></script>
+<script src="canvas.js?v=68"></script>
 <!-- Shared house builder (модульная сборка дома по JSON-дескриптору) -->
-<script src="shared/house-builder.js?v=91"></script>
+<script src="shared/house-builder.js?v=92"></script>
 <!-- Каталожный API: домен выбирается по хосту.
        • localhost/127.0.0.1 → '' (same-origin): локальный dev-прокси devserver.py
          проксирует /api и /static на sollersdev.ru.
@@ -300,15 +300,15 @@
     (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
       ? '' : 'https://sollersdev.ru';
 </script>
-<script src="ResourceManager.js?v=14"></script>
+<script src="ResourceManager.js?v=15"></script>
 <!-- Расчёты на бэкенде: обёртка бэкендера, подключается как есть, без local-правок.
      Лежит в backend_API/ — это их выгрузка (см. calculation_api.md, calculator.md).
      NB: backend_API/ResourceManager.js — их копия каталожного менеджера, она НЕ
      подключается: рабочий файл — ResourceManager.js в корне. -->
-<script src="backend_API/Calculator.js?v=3"></script>
+<script src="backend_API/Calculator.js?v=4"></script>
 <!-- 3D viewer: core (сцена/материалы/оркестратор) → builders (конструкции) →
      railing (ограждение/навесы). Общая глобальная область, порядок важен. -->
-<script src="viewer3d-core.js?v=164"></script>
+<script src="viewer3d-core.js?v=165"></script>
 <script src="viewer3d-builders.js?v=68"></script>
 <script src="viewer3d-railing.js?v=18"></script>
 <script src="viewer3d-entourage.js?v=14"></script>
@@ -316,10 +316,10 @@
      Идёт после viewer3d-*, потому что опирается на threeState и worldToCanvas. -->
 <script src="editor3d.js?v=22"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=143"></script>
+<script src="nav-desktop.js?v=144"></script>
 <!-- Вертикальная раскладка телефона: переставляет те же узлы и ведёт свои
      четыре экрана. Идёт ПОСЛЕ nav-desktop.js — опирается на его функции. -->
-<script src="nav-mobile.js?v=6"></script>
+<script src="nav-mobile.js?v=7"></script>
 <!-- Снимок проекта: отправка заявки и открытие по ссылке из письма. -->
 <script src="project-io.js?v=7"></script>
 </body>

@@ -55,6 +55,7 @@ const PropertyPath = Object.freeze({
     CORE_TYPE: 'core_type',
     BOARD_DIRECTION: 'board_direction',
     FENCE_TYPE: 'fence_type',
+    BRAND: 'brand',                     // бренд товара (ДПК, ступени, ограждения; 2026-10-16)
 });
 
 // Ценовая категория товара: значение характеристики по пути

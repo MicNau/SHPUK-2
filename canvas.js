@@ -2008,6 +2008,131 @@ function _stepsSnapToRailPost(kind) {
   }
 }
 
+// Первая лестница — у ДЛИННОЙ свободной стороны террасы, по её центру (правка
+// 2026-10-16). Раньше она рождалась в фиксированной точке плана (DEFAULT_STEPS_RECT)
+// и прижималась к ближайшей стороне террасы — нередко к той, что у стены дома.
+// Свободная сторона — та, за которой не дом и не другой объект; из длинных сторон
+// сначала пробуем дальнюю от дома (обычно это спуск в сад). Возвращает true, если
+// лестница поставлена; без террасы ничего не делает — тогда работает прежнее
+// правило (_stepsNormalize к дому).
+function stepsPlaceAtTerrace() {
+  const s = S.steps; if (!s) return false;
+  const rects = secRects('terrace').filter(r => r && r.w > 0 && r.h > 0);
+  if (!rects.length) return false;
+  const t = rects[secActiveIdx('terrace')] || rects[0];
+  const D = _stepsDepthNorm();
+  const hp = (typeof isEmptyLot === 'function' && !isEmptyLot()) ? getHousePolygonNorm() : null;
+  const hb = hp && hp.bboxNorm;
+  const hcx = hb ? hb.nx + hb.nw / 2 : 0.5, hcy = hb ? hb.ny + hb.nh / 2 : 0.5;
+  const cx = t.x + t.w / 2, cy = t.y + t.h / 2;
+  const along = len => Math.min(DEFAULT_STEPS_RECT.w, len);
+  const sides = [
+    { long: t.w >= t.h, far: cy >= hcy, r: { x: cx - along(t.w) / 2, y: t.y + t.h, w: along(t.w), h: D } },   // низ
+    { long: t.w >= t.h, far: cy <  hcy, r: { x: cx - along(t.w) / 2, y: t.y - D,   w: along(t.w), h: D } },   // верх
+    { long: t.h >  t.w, far: cx >= hcx, r: { x: t.x + t.w, y: cy - along(t.h) / 2, w: D, h: along(t.h) } },   // право
+    { long: t.h >  t.w, far: cx <  hcx, r: { x: t.x - D,   y: cy - along(t.h) / 2, w: D, h: along(t.h) } },   // лево
+  ];
+  // Квадратная терраса: обе пары сторон «длинные».
+  if (Math.abs(t.w - t.h) < 1e-6) sides.forEach(sd => { sd.long = true; });
+  sides.sort((a, b) => (b.long - a.long) || (b.far - a.far));
+  const inPlot = r => r.x >= 0 && r.y >= 0 && r.x + r.w <= 1 && r.y + r.h <= 1;
+  for (const sd of sides) {
+    if (!inPlot(sd.r) || rectCollides(sd.r, 'steps', S.activeSteps | 0)) continue;
+    Object.assign(s, sd.r);
+    return true;
+  }
+  return false;
+}
+
+// Площадь дома изменилась (правка 2026-10-16: разметка больше не сбрасывается).
+// Дом растёт и сжимается от центра участка, поэтому объекты, пристроенные к
+// стене (зазор до 35 см), едут вместе с ней: поперёк — на сдвиг стены, вдоль —
+// пропорционально длине фасада, чтобы остаться напротив того же места (у двери —
+// у двери). Ступени едут за террасой, к которой примыкают. Прочие объекты стоят,
+// пока в них не залез дом, — тогда их выталкивает наружу на сдвиг ближайшей
+// стены. o, n — габарит дома на плане до и после ({nx, ny, nw, nh}).
+function adaptLayoutToHouseResize(o, n) {
+  if (!o || !n) return;
+  const TOUCH = 0.35 / GRID;
+  const oc = { x: o.nx + o.nw / 2, y: o.ny + o.nh / 2 }, nc = { x: n.nx + n.nw / 2, y: n.ny + n.nh / 2 };
+  const kx = o.nw > 0 ? n.nw / o.nw : 1, ky = o.nh > 0 ? n.nh / o.nh : 1;
+  const dS = (n.ny + n.nh) - (o.ny + o.nh), dN = n.ny - o.ny;
+  const dE = (n.nx + n.nw) - (o.nx + o.nw), dW = n.nx - o.nx;
+  // Сторона дома, за которой лежит прямоугольник, и зазор до неё (отрицательный — заходит в дом).
+  const sideOf = r => {
+    const gaps = [
+      ['S', r.y - (o.ny + o.nh)], ['N', o.ny - (r.y + r.h)],
+      ['E', r.x - (o.nx + o.nw)], ['W', o.nx - (r.x + r.w)],
+    ];
+    gaps.sort((a, b) => b[1] - a[1]);
+    return { side: gaps[0][0], gap: gaps[0][1] };
+  };
+  // Сдвиг прямоугольника вместе со стороной side; along — переносить ли вдоль фасада.
+  const shiftFor = (r, side, along) => {
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    if (side === 'S' || side === 'N') {
+      return { dx: along ? nc.x + (cx - oc.x) * kx - cx : 0, dy: side === 'S' ? dS : dN };
+    }
+    return { dx: side === 'E' ? dE : dW, dy: along ? nc.y + (cy - oc.y) * ky - cy : 0 };
+  };
+  const clamp01 = (r) => {
+    r.x = Math.max(0, Math.min(1 - r.w, r.x));
+    r.y = Math.max(0, Math.min(1 - r.h, r.y));
+  };
+  const moveRect = (r, d) => { r.x += d.dx; r.y += d.dy; clamp01(r); };
+  const adaptRect = r => {
+    if (!r || !(r.w > 0) || !(r.h > 0)) return null;
+    const { side, gap } = sideOf(r);
+    let d = null;
+    if (gap >= -1e-6 && gap <= TOUCH) d = shiftFor(r, side, true);   // пристроен к стене
+    else if (_houseCovers(r)) d = shiftFor(r, side, false);         // дом налез — выталкиваем
+    if (d) moveRect(r, d);
+    return d;
+  };
+  // Террасы (и у бассейна) — сначала: за ними поедут ступени.
+  const terraceMoves = [];
+  for (const sec of Object.keys(RECT_SECTIONS)) {
+    for (const r of secRects(sec)) {
+      const before = r && { ...r };
+      const d = adaptRect(r);
+      if (d && before) terraceMoves.push({ before, d });
+    }
+  }
+  const touches = (a, b) => a.x <= b.x + b.w + TOUCH && b.x <= a.x + a.w + TOUCH
+                         && a.y <= b.y + b.h + TOUCH && b.y <= a.y + a.h + TOUCH;
+  // Ступени, грядки и точки, примыкающие к сдвинутой террасе, едут вместе с ней:
+  // иначе начало дорожки или лестница оказывались внутри настила.
+  const hostOf = r => terraceMoves.find(m => touches(r, m.before));
+  for (const st of stepsAll()) {
+    const host = hostOf(st);
+    if (host) moveRect(st, host.d); else adaptRect(st);
+  }
+  for (const b of (S.beds || [])) {
+    const host = hostOf(b);
+    if (host) moveRect(b, host.d); else adaptRect(b);
+  }
+  // Точки (мебель, дорожки, забор, калитка) — как прямоугольник нулевого размера.
+  const adaptPt = p => {
+    if (!p || p.break) return;
+    const r = { x: p.x, y: p.y, w: 0, h: 0 };
+    const host = hostOf(r);
+    const { side, gap } = sideOf(r);
+    let d = null;
+    if (host) d = host.d;
+    else if (gap >= -1e-6 && gap <= TOUCH) d = shiftFor(r, side, true);
+    else if (gap < 0 && typeof _planPointInPoly === 'function'
+             && _planPointInPoly(p, getHousePolygonNorm().corners)) d = shiftFor(r, side, false);
+    if (!d) return;
+    p.x = Math.max(0, Math.min(1, p.x + d.dx));
+    p.y = Math.max(0, Math.min(1, p.y + d.dy));
+  };
+  (S.furniture || []).forEach(adaptPt);
+  for (const k of ['paths', 'fence']) (S.pts[k] || []).forEach(adaptPt);
+  if (S.fenceGate) adaptPt(S.fenceGate);
+  // Ограждение строится по периметру террас — пересчитываем.
+  if ((S.sections || []).includes('railing') && typeof _railingSync === 'function') _railingSync();
+}
+
 // «Ещё одна» / «Удалить выбранную» для лестниц (правка 2026-08-30). Новая лестница
 // ставится на свободное место рядом с дефолтным, как стартовые объекты остальных
 // секций (_placeFree), и сразу становится выбранной.

@@ -2040,6 +2040,10 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
     //   верх раструба = карниз − TOP_DROP (0.10 → чуть ниже жёлоба).
     // Длина = расстояние между ними, разницу добирает center масштабом.
     const DOWNPIPE_BOT_DROP = 0.70;
+    // Двускатная крыша: раструб — на столько дальше выноса фронтона вдоль карнизной
+    // стены и на столько от неё наружу (под жёлобом).
+    const DOWNPIPE_GABLE_CLEAR = 0.20;
+    const DOWNPIPE_WALL_OUT = 0.15;
     const DOWNPIPE_TOP_DROP = 0.10;
     const pipeBotY = baseY - DOWNPIPE_BOT_DROP;            // низ трубы
     const pipeTopY = wallTopY - DOWNPIPE_TOP_DROP;         // верх трубы
@@ -2094,8 +2098,29 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
         ? Math.sign(-prev.dx - next.dx) : 0;
       // Нормализуем (для прямого угла длина sqrt(2), для угла 0/180 — 1).
       const exLen = Math.hypot(exteriorOutX, exteriorOutZ) || 1;
-      const exUnitX = exteriorOutX / exLen;
-      const exUnitZ = exteriorOutZ / exLen;
+      let exUnitX = exteriorOutX / exLen;
+      let exUnitZ = exteriorOutZ / exLen;
+      // Точка, под которой стоит раструб: по умолчанию — по диагонали от угла на
+      // 0.15 м (под углом вальмовой крыши).
+      let attachX = item.x + (ROOF_EAVE - 0.15) * exUnitX;
+      let attachZ = item.z + (ROOF_EAVE - 0.15) * exUnitZ;
+      // Двускатная/мансардная крыша: у фронтонной стены свеса-жёлоба нет, зато есть
+      // вынос крыши с накладкой — по диагонали от угла труба уходила сквозь неё
+      // (правка 2026-10-16). Ставим трубу вдоль КАРНИЗНОЙ стены, за пределами
+      // выноса фронтона, под жёлобом, и разворачиваем от этой стены наружу.
+      if (skipGableEnds && prev && next && prev.type === 'wall' && next.type === 'wall') {
+        const eaveIsNext = isGableEndWall(prev, longAxisX) && !isGableEndWall(next, longAxisX);
+        const eaveIsPrev = isGableEndWall(next, longAxisX) && !isGableEndWall(prev, longAxisX);
+        if (eaveIsNext || eaveIsPrev) {
+          const w = eaveIsNext ? next : prev;
+          const alX = eaveIsNext ? w.dx : -w.dx, alZ = eaveIsNext ? w.dz : -w.dz;   // от угла вдоль стены
+          const nX = w.dz, nZ = -w.dx;                                              // наружу от стены
+          const along = ROOF_EAVE + DOWNPIPE_GABLE_CLEAR;
+          attachX = item.x + alX * along + nX * DOWNPIPE_WALL_OUT;
+          attachZ = item.z + alZ * along + nZ * DOWNPIPE_WALL_OUT;
+          exUnitX = nX; exUnitZ = nZ;
+        }
+      }
 
       if (partTop && partCenter && partBottom) {
         // Native bbox каждой части. БЕЗ scale — просто берём как есть.
@@ -2151,19 +2176,16 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
         const topCxNative = (bbTopInit.min.x + bbTopInit.max.x) / 2;
         const topCzNative = (bbTopInit.min.z + bbTopInit.max.z) / 2;
 
-        // Расстояние раструба от угла дома по диагонали (eave - приближение к углу).
-        const pipeAttachOffset = ROOF_EAVE - 0.15; // 0.30 - 0.15 = 0.15 м от угла
-
         // Поворачиваем native top centroid вокруг Y на ry, чтобы получить world offset.
         const cosR = Math.cos(ry), sinR = Math.sin(ry);
         const rotTopCx =  topCxNative * cosR + topCzNative * sinR;
         const rotTopCz = -topCxNative * sinR + topCzNative * cosR;
 
-        // d.position такое, чтобы world top centroid = corner + attach * exterior_unit.
+        // d.position такое, чтобы world top centroid пришёлся в точку крепления.
         d.position.set(
-          item.x + pipeAttachOffset * exUnitX - rotTopCx,
+          attachX - rotTopCx,
           pipeBotY,                                   // низ трубы (фундамент − BOT_DROP)
-          item.z + pipeAttachOffset * exUnitZ - rotTopCz,
+          attachZ - rotTopCz,
         );
         d.rotation.y = ry;
         if (upAxis === 'z')      d.rotation.x = Math.PI / 2;
@@ -2186,8 +2208,7 @@ function buildDecorFromFeatures(parent, modules, desc, outline, baseY, wallTopY,
         const nativeH = bb['size' + axCap];
         d.scale[upAxis] = spanH / Math.max(0.1, nativeH);
         // После scale пересчитываем позицию: min[upAxis] был bb.min[upAxis] в native.
-        d.position.set(item.x + (ROOF_EAVE - 0.15) * exUnitX, pipeBotY,
-                       item.z + (ROOF_EAVE - 0.15) * exUnitZ);
+        d.position.set(attachX, pipeBotY, attachZ);
         d.position[upAxis] = pipeBotY - bb.min[upAxis] * d.scale[upAxis];
         if (upAxis === 'z')      d.rotation.x = Math.PI / 2;
         else if (upAxis === 'x') d.rotation.z = Math.PI / 2;

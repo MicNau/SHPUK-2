@@ -107,6 +107,9 @@ function mShowScreen(n) {
 function mGoCatalog() {
   if (!dActiveItem) { dToast('Сначала выберите элемент благоустройства'); return; }
   mShowScreen(4);
+  // Карточку связанного товара (терраса ↔ ступени ↔ ограждение) раскрываем, когда
+  // каталог уже виден: в скрытом списке её не прокрутить к центру.
+  if (typeof _dApplyLinkFocus === 'function') setTimeout(_dApplyLinkFocus, 60);
 }
 
 // «Меню» — назад к списку разделов: активный раздел закрывается, как по клику
