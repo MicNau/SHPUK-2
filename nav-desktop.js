@@ -1594,6 +1594,9 @@ const HINT_3D_TEXT = 'Левая кнопка мыши — вращение, а 
 let _d3dHintShown = false;
 
 function dShow3dHint() {
+  // WebGL недоступен — вместо вида окно с рекомендациями (webgl-guard.js), и
+  // подсказка по управлению видом закрывала бы его.
+  if (typeof glProbe === 'function' && !(GL_GUARD.probe || glProbe()).ok) return;
   // На телефоне вид появляется только в открытом разделе, и жесты там другие —
   // подсказку показывает мобильная очередь (mHintTake).
   if (typeof mHintTake === 'function'

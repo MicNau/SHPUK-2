@@ -166,6 +166,7 @@ Three.js r128 → OrbitControls → RGBELoader → EXRLoader → GLTFLoader
 state.js → canvas.js
 → shared/house-builder.js
 → RESOURCE_API_DOMAIN (inline) → ResourceManager.js  (каталожный API; зависит от THREE)
+→ webgl-guard.js (проверка WebGL, сообщения о сбоях видеокарты)
 → viewer3d-core.js → viewer3d-builders.js → viewer3d-railing.js
 → viewer3d-entourage.js → nav-desktop.js
 
@@ -182,12 +183,12 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-color-management.js?v=1   styles-desktop.css?v=54   styles-mobile.css?v=5
+color-management.js?v=1   styles-desktop.css?v=55   styles-mobile.css?v=5
 state.js?v=78             canvas.js?v=68            shared/house-builder.js?v=92
-ResourceManager.js?v=15   viewer3d-core.js?v=167    viewer3d-builders.js?v=68
-viewer3d-railing.js?v=18  viewer3d-entourage.js?v=14   editor3d.js?v=23
-nav-desktop.js?v=145      nav-mobile.js?v=7         project-io.js?v=7
-backend_API/Calculator.js?v=4
+ResourceManager.js?v=15   webgl-guard.js?v=1        viewer3d-core.js?v=168
+viewer3d-builders.js?v=68 viewer3d-railing.js?v=18  viewer3d-entourage.js?v=14
+editor3d.js?v=24          nav-desktop.js?v=146      nav-mobile.js?v=7
+project-io.js?v=7         backend_API/Calculator.js?v=4
 ```
 
 `viewer3d-entourage.js` автоматически детектит `IS_MOBILE` (UA + `innerWidth<768`)
@@ -949,6 +950,44 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Ветка **Mobile**: правка 2026-10-19 — сбои WebGL: проверка, восстановление, рекомендации.
+
+У заказчика 3D-окно периодически оставалось пустым. Утечек видеопамяти и лишних
+контекстов нет (замер `renderer.info` при пересборках), причина — браузер и
+видеокарта, но приложение молчало: исключение `THREE.WebGLRenderer` при
+недоступном WebGL обрывало `init3dCanvas`, а потерю контекста не ловил никто.
+
+- **webgl-guard.js** (новый, до viewer3d-core.js): `glProbe()` — пробный контекст
+  на отдельном канвасе (сразу освобождается `WEBGL_lose_context`), имя видеокарты
+  (`WEBGL_debug_renderer_info`), признак программной отрисовки
+  (`failIfMajorPerformanceCaveat` или SwiftShader/llvmpipe/Basic Render в имени).
+  `glNoticeShow(slot, kind)` — окно поверх 3D-слота, `glBannerShow` — плашка внизу
+  вида (закрытая не возвращается), `glGuardFollow` — переезд вместе с видом
+  (`moveThreeTo`). Рекомендации учитывают браузер: где включить аппаратное
+  ускорение в Яндекс.Браузере, Chrome, Edge, Opera, Firefox. Внизу — строка
+  сведений (браузер, видеокарта, WebGL, число сбоев, текст ошибки): со скриншотом
+  окна поддержке не нужно расспрашивать пользователя.
+- **WebGL недоступен** — окно «3D-просмотр недоступен» вместо пустого поля;
+  `threeState` не создаётся, следующий `init3dCanvas` (смена шага) пробует снова.
+  Подсказка «Управление видом» в этом случае не показывается.
+- **Потеря контекста** (`_glOnLost`): окно «3D-вид перезапускается…». Вернул
+  браузер (`_glOnRestored` → `_glAfterRestore`) — заново тени (Three r128
+  пересоздаёт `renderer.shadowMap` с выключенными тенями), процедурное небо вместо
+  HDRI (его render target умер с контекстом), пересборка сцены и повторная
+  загрузка HDRI. Не вернул за `GL_RESTORE_WAIT_MS` = 3 с — `_glRecreate`: новый
+  рендерер на новом канвасе, OrbitControls с теми же настройками и целью,
+  обработчики редактора переезжают (`e3dRebindCanvas`), проект не теряется. Не
+  создался и новый — окно с кнопкой «Перезапустить 3D».
+- **Упрощённый режим** (`GL_GUARD.low`): программная отрисовка, второй сбой за
+  сессию или пересоздание рендерера — без сглаживания, pixelRatio 1, карта теней
+  1024 и `PCFShadowMap` (`_glApplyQuality`). Плашка объясняет, почему.
+- Цикл отрисовки берёт рендерер и OrbitControls из `threeState` (их можно
+  заменить) и не рисует на потерянном контексте: событие о потере приходит
+  асинхронно, и кадр между потерей и событием падал в Three на
+  `getProgramInfoLog(...).trim()`.
+- Cache-bust: `webgl-guard.js?v=1` (новый), `viewer3d-core.js?v=168`,
+  `editor3d.js?v=24`, `nav-desktop.js?v=146`, `styles-desktop.css?v=55`.
 
 Ветка **Mobile**: правка 2026-10-19 — отделка фасада на углах дома.
 

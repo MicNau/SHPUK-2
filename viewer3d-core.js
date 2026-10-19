@@ -151,6 +151,154 @@ const HOUSE_AREA_MAX = 250;   // м², как area.max в дескриптора
 const SUN_INTENSITY  = 2.6;    // солнце; physicallyCorrectLights — альбедо × I·cos / π
 const SCENE_EXPOSURE = 0.95;   // экспозиция ACES при солнце 2.6 и небе из HDRI
 
+// ── Рендерер и его сбои (правка 2026-10-19, см. webgl-guard.js) ──────────
+// Рендерер может смениться за сессию: если браузер отнял контекст и не вернул,
+// _glRecreate ставит новый на новом канвасе. Поэтому всё, что держит
+// рендерер или OrbitControls, берёт их из threeState, а не из замыканий.
+const GL_RESTORE_WAIT_MS = 3000;   // столько ждём, что браузер вернёт контекст сам
+
+const _glIsMobile = () => (typeof IS_MOBILE !== 'undefined' ? IS_MOBILE : false);
+
+// Качество, зависящее от режима: тени и плотность пикселей. Вызывается при
+// создании и после восстановления контекста — Three r128 при восстановлении
+// пересоздаёт renderer.shadowMap с настройками по умолчанию (тени выключены).
+function _glApplyQuality(renderer, sun) {
+  const mob = _glIsMobile(), low = GL_GUARD.low;
+  renderer.setPixelRatio(low ? 1 : Math.min(window.devicePixelRatio, mob ? 1.5 : 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = mob ? THREE.BasicShadowMap : low ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+  renderer.shadowMap.needsUpdate = true;
+  if (sun) {
+    const sz = (mob || low) ? 1024 : 2048;
+    if (sun.shadow.mapSize.x !== sz) {
+      sun.shadow.mapSize.set(sz, sz);
+      if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+    }
+    sun.shadow.radius = (mob || low) ? 3 : 5;
+  }
+}
+
+// Новый рендерер или null, если WebGL не создаётся (причина — в GL_GUARD).
+function _glMakeRenderer(W, H) {
+  const probe = glProbe();
+  if (!probe.ok) { GL_GUARD.lastError = probe.error; return null; }
+  if (probe.software) GL_GUARD.low = true;
+  const mob = _glIsMobile();
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({
+      antialias: !mob && !GL_GUARD.low,
+      powerPreference: mob ? 'low-power' : 'high-performance',
+    });
+  } catch (e) {
+    GL_GUARD.lastError = (e && e.message) || String(e);
+    return null;
+  }
+  renderer.setSize(W, H);
+  _glApplyQuality(renderer, null);
+  renderer.toneMapping         = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = SCENE_EXPOSURE;
+  renderer.outputEncoding      = THREE.sRGBEncoding;
+  renderer.physicallyCorrectLights = true;
+  // Углы прямые. Скругление задавалось ЗДЕСЬ, инлайном на канвасе рендерера, и
+  // никакое правило из styles-desktop.css его не перебивало (TODO: «скругления
+  // углов у 3D-окна не нужно»).
+  renderer.domElement.style.cssText =
+    'position:absolute;inset:0;width:100%;height:100%;display:block;border-radius:0;';
+  // Three сам вызывает preventDefault на webglcontextlost — без этого браузер
+  // не вернул бы контекст никогда.
+  renderer.domElement.addEventListener('webglcontextlost', _glOnLost);
+  renderer.domElement.addEventListener('webglcontextrestored', _glOnRestored);
+  return renderer;
+}
+
+function _glSlot() {
+  return threeState ? document.getElementById(threeState.currentSlot) : null;
+}
+
+function _glOnLost() {
+  if (!threeState) return;
+  GL_GUARD.losses++;
+  console.warn('[3D] WebGL-контекст потерян, сбой №' + GL_GUARD.losses);
+  glNoticeShow(_glSlot(), 'restarting');
+  clearTimeout(threeState.glTimer);
+  threeState.glTimer = setTimeout(_glRecreate, GL_RESTORE_WAIT_MS);
+}
+
+function _glOnRestored() {
+  if (!threeState) return;
+  clearTimeout(threeState.glTimer);
+  console.warn('[3D] WebGL-контекст восстановлен');
+  // Повторный сбой — переходим в упрощённый режим: меньше видеопамяти и работы.
+  if (GL_GUARD.losses >= 2) GL_GUARD.low = true;
+  _glAfterRestore();
+}
+
+// Окружение (HDRI) живёт в render target'е старого контекста — после сбоя его
+// содержимого нет. Возвращаем процедурное небо и грузим HDRI заново.
+function _glResetEnv() {
+  const st = threeState;
+  st.scene.environment = null;
+  st.scene.background  = null;
+  st.skyMesh.visible   = true;
+  st.ambLight.intensity = 0.2;
+  if (st.hemiLight) st.hemiLight.intensity = 1.8;
+  st.envMap = null;
+}
+
+function _glAfterRestore() {
+  const st = threeState;
+  _glApplyQuality(st.renderer, st.sunLight);
+  _glResetEnv();
+  resizeThree();
+  buildScene3d();
+  _autoLoadHdri();
+  glNoticeHide();
+  if (GL_GUARD.losses >= 2 || GL_GUARD.low) glBannerShow(_glSlot(), GL_GUARD.losses ? 'unstable' : 'software');
+}
+
+// Браузер не вернул контекст — ставим новый рендерер на новом канвасе. Сцена,
+// камера и проект остаются те же; OrbitControls и обработчики редактора
+// переезжают на новый канвас.
+function _glRecreate() {
+  const st = threeState;
+  if (!st) return;
+  const slot = _glSlot();
+  if (!st.renderer.getContext().isContextLost()) { glNoticeHide(); return; }
+  GL_GUARD.low = true;
+  const W = (slot && slot.offsetWidth) || 360, H = (slot && slot.offsetHeight) || 360;
+  const renderer = _glMakeRenderer(W, H);
+  if (!renderer) { glNoticeShow(slot, 'lost', _glRecreate); return; }
+  const old = st.renderer, oldEl = old.domElement;
+  oldEl.removeEventListener('webglcontextlost', _glOnLost);
+  oldEl.removeEventListener('webglcontextrestored', _glOnRestored);
+  oldEl.replaceWith(renderer.domElement);
+  try { old.dispose(); } catch (_) {}
+  // OrbitControls привязаны к канвасу при создании — заводим новые с теми же
+  // настройками (editor3d меняет enabled, touches и т. п.) и той же целью.
+  const prev = st.controls;
+  const controls = _setupControls(st.camera, renderer.domElement);
+  for (const k of Object.keys(prev)) {
+    const v = prev[k];
+    if (typeof v === 'boolean' || typeof v === 'number' || typeof v === 'string') controls[k] = v;
+  }
+  Object.assign(controls.mouseButtons, prev.mouseButtons);
+  Object.assign(controls.touches, prev.touches);
+  controls.target.copy(prev.target);
+  _watchCamTouch(controls);
+  prev.dispose();
+  st.renderer = renderer;
+  st.controls = controls;
+  if (typeof e3dRebindCanvas === 'function') e3dRebindCanvas(oldEl);
+  _glAfterRestore();
+}
+
+// Как только пользователь сам покрутил/подвинул камеру — перестаём её
+// переставлять при пересборке сцены (см. хвост buildScene3d).
+function _watchCamTouch(controls) {
+  controls.addEventListener('start', () => { if (threeState) threeState.camTouched = true; });
+}
+
 function init3dCanvas(targetSlotId) {
   const targetSlot = document.getElementById(targetSlotId || 'three-container');
   if (!targetSlot || typeof THREE === 'undefined') return;
@@ -165,26 +313,16 @@ function init3dCanvas(targetSlotId) {
   const H = targetSlot.offsetHeight || 360;
 
   // ── Renderer ─────────────────────────────────
-  const isMobile = typeof IS_MOBILE !== 'undefined' ? IS_MOBILE : false;
-  const renderer = new THREE.WebGLRenderer({
-    antialias: !isMobile,
-    powerPreference: isMobile ? 'low-power' : 'high-performance',
-  });
-  renderer.setSize(W, H);
-  renderer.setPixelRatio(isMobile ? Math.min(window.devicePixelRatio, 1.5)
-                                  : Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled   = true;
-  renderer.shadowMap.type      = isMobile ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
-  renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = SCENE_EXPOSURE;
-  renderer.outputEncoding      = THREE.sRGBEncoding;
-  renderer.physicallyCorrectLights = true;
+  // WebGL нет — вместо пустого окна объясняем, что делать. threeState не
+  // создаётся, и следующий вызов (смена шага) попробует снова.
+  const renderer = _glMakeRenderer(W, H);
+  if (!renderer) {
+    console.warn('[3D] WebGL недоступен:', GL_GUARD.lastError || 'контекст не создан');
+    glNoticeShow(targetSlot, 'none');
+    return;
+  }
+  glNoticeHide();
   targetSlot.appendChild(renderer.domElement);
-  // Углы прямые. Скругление задавалось ЗДЕСЬ, инлайном на канвасе рендерера, и
-  // никакое правило из styles-desktop.css его не перебивало (TODO: «скругления
-  // углов у 3D-окна не нужно»).
-  renderer.domElement.style.cssText =
-    'position:absolute;inset:0;width:100%;height:100%;display:block;border-radius:0;';
 
   // ── Scene ─────────────────────────────────────
   const scene = new THREE.Scene();
@@ -197,9 +335,7 @@ function init3dCanvas(targetSlotId) {
   // ── Controls ──────────────────────────────────
   const controls = _setupControls(camera, renderer.domElement);
   controls.target.set(4, 2, 2.5);
-  // Как только пользователь сам покрутил/подвинул камеру — перестаём её
-  // переставлять при пересборке сцены (см. хвост buildScene3d).
-  controls.addEventListener('start', () => { if (threeState) threeState.camTouched = true; });
+  _watchCamTouch(controls);
 
 
   // ── Процедурное небо (до загрузки HDRI) ───────
@@ -220,14 +356,12 @@ function init3dCanvas(targetSlotId) {
   const sunLight = new THREE.DirectionalLight(0xfff4e0, SUN_INTENSITY);
   sunLight.position.set(14, 22, 10);
   sunLight.castShadow = true;
-  const smSz = isMobile ? 1024 : 2048;
-  sunLight.shadow.mapSize.set(smSz, smSz);
   sunLight.shadow.camera.left   = -26; sunLight.shadow.camera.right  =  26;
   sunLight.shadow.camera.top    =  26; sunLight.shadow.camera.bottom = -26;
   sunLight.shadow.camera.near   = 0.5; sunLight.shadow.camera.far    =  80;
   sunLight.shadow.bias          = -0.0003;
   sunLight.shadow.normalBias    = 0.02;
-  sunLight.shadow.radius        = isMobile ? 3 : 5;
+  _glApplyQuality(renderer, sunLight);   // размер карты теней и мягкость — по режиму
   scene.add(sunLight);
   // Заливка неба/земли — только пока нет HDRI (или если он не загрузился): с ним
   // рассеянный свет даёт само небо, и эта подсветка лишь высветляла тени.
@@ -269,12 +403,17 @@ function init3dCanvas(targetSlotId) {
   function animate() {
     threeState.animId = requestAnimationFrame(animate);
     const t = clock.getElapsedTime();
-    controls.update();
+    threeState.controls.update();
     if (typeof _onAnimFrame === 'function') _onAnimFrame(t);
     // Подписи размеров — HTML поверх канваса, их позиции надо пересчитывать
     // каждый кадр, иначе они отстают от вращения камеры (editor3d.js).
     if (typeof e3dOnFrame === 'function') e3dOnFrame();
-    renderer.render(scene, camera);
+    // Контекст потерян — не рисуем. Флаг Three ставит лишь по событию, которое
+    // приходит асинхронно, а кадр между потерей и событием компилирует шейдеры
+    // на мёртвом контексте и падает (getProgramInfoLog → null.trim()).
+    const r = threeState.renderer;
+    if (r.getContext().isContextLost()) return;
+    r.render(scene, camera);
   }
   animate();
 
@@ -286,6 +425,9 @@ function init3dCanvas(targetSlotId) {
 
   // Загружаем HDRI автоматически если файл существует
   _autoLoadHdri();
+
+  // Рисуем без видеокарты — говорим, что режим упрощён и как это исправить.
+  if (GL_GUARD.low) glBannerShow(targetSlot, 'software');
 
   setTimeout(() => {
     const h = document.getElementById('three-hint');
@@ -2116,6 +2258,7 @@ function moveThreeTo(slotId) {
   if(threeState.currentSlot===slotId) return;
   // Просто переносим canvas в новый слот — controls остаются те же
   target.appendChild(threeState.renderer.domElement);
+  if (typeof glGuardFollow === 'function') glGuardFollow(target);
   threeState.currentSlot=slotId;
 }
 
