@@ -1594,6 +1594,9 @@ const HINT_3D_TEXT = 'Левая кнопка мыши — вращение, а 
 let _d3dHintShown = false;
 
 function dShow3dHint() {
+  // WebGL недоступен — вместо вида окно с рекомендациями (webgl-guard.js), и
+  // подсказка по управлению видом закрывала бы его.
+  if (typeof glProbe === 'function' && !(GL_GUARD.probe || glProbe()).ok) return;
   // На телефоне вид появляется только в открытом разделе, и жесты там другие —
   // подсказку показывает мобильная очередь (mHintTake).
   if (typeof mHintTake === 'function'
@@ -3401,12 +3404,17 @@ function _projectObjects() {
   }
   // Отделка фасада: каждая из двух идёт своим объектом со своими участками
   // (pieces). Участки собирает viewer3d по выбранным кускам — в системе
-  // координат стены, в миллиметрах.
+  // координат стены, в миллиметрах. walls — все стены дома по кругу с длинами
+  // (необязательный ключ, просьба бэкенда 2026-10-19).
   for (const sec of (typeof FACADE_SECS !== 'undefined' ? FACADE_SECS : ['facade'])) {
     if (!S.sections.includes(sec)) continue;
     if (typeof facadePieces !== 'function') break;
     const pieces = facadePieces(sec, _elementProductId(sec));
-    if (pieces.length) objs.push({ type: CalculationType.FACADE, name: lbl(sec), pieces });
+    if (!pieces.length) continue;
+    const o = { type: CalculationType.FACADE, name: lbl(sec), pieces };
+    const walls = (typeof facadeWalls === 'function') ? facadeWalls() : [];
+    if (walls.length) o.walls = walls;
+    objs.push(o);
   }
   return objs;
 }

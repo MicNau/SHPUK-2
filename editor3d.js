@@ -565,11 +565,10 @@ function e3dSync() {
     // мешает — прячем. Снимут отделку («Удалить всё») — рамки вернутся.
     // Считается материал СВОЕГО раздела: у второй отделки он может быть ещё не
     // выбран, когда у первой уже есть.
-    const zones = facadeZones(sec);
+    // Рамка охватывает и грани угловых столбов, которые красятся вместе с
+    // куском (facadeSelectionBoxes): иначе на углу обшивка выходила за рамку.
     const hasMat = !!(S.elementMat && S.elementMat[sec]);
-    for (const seg of hasMat ? [] : (threeState.facadeSegs || [])) {
-      if (!zones[seg.userData.segId]) continue;
-      const box = new THREE.Box3().setFromObject(seg);
+    for (const box of hasMat ? [] : facadeSelectionBoxes(sec)) {
       const h = new THREE.Box3Helper(box, E3D_COL_SEL);
       h.material.depthTest = false;
       h.material.toneMapped = false;
@@ -1134,12 +1133,31 @@ function e3dAttach() {
   window.addEventListener('pointerup', _e3dOnUp);
   el.addEventListener('pointermove', _e3dOnHover);
   window.addEventListener('keydown', _e3dOnKey);
-  // Меню браузера по правой кнопке над видом не нужно: правая кнопка здесь
-  // заканчивает линию и двигает вид.
-  el.addEventListener('contextmenu', ev => { if (E3D.sec) ev.preventDefault(); });
+  el.addEventListener('contextmenu', _e3dOnCtxMenu);
   E3D.bound = true;
   // Сцена могла родиться позже, чем включился мобильный режим — переносим на
   // неё настройку жестов (touches у OrbitControls живут в самой сцене).
+  if (E3D.touch) e3dSetTouch(true);
+}
+
+// Меню браузера по правой кнопке над видом не нужно: правая кнопка здесь
+// заканчивает линию и двигает вид.
+function _e3dOnCtxMenu(ev) { if (E3D.sec) ev.preventDefault(); }
+
+// Рендерер пересоздан после сбоя видеокарты (_glRecreate в viewer3d-core.js):
+// обработчики канваса переезжают на новый, оконные остаются как были.
+function e3dRebindCanvas(oldEl) {
+  if (!E3D.bound || !threeState || !threeState.renderer) return;
+  const el = threeState.renderer.domElement;
+  if (oldEl) {
+    oldEl.removeEventListener('pointerdown', _e3dOnDown);
+    oldEl.removeEventListener('pointermove', _e3dOnHover);
+    oldEl.removeEventListener('contextmenu', _e3dOnCtxMenu);
+  }
+  el.addEventListener('pointerdown', _e3dOnDown);
+  el.addEventListener('pointermove', _e3dOnHover);
+  el.addEventListener('contextmenu', _e3dOnCtxMenu);
+  E3D.press = null; E3D.drag = null;
   if (E3D.touch) e3dSetTouch(true);
 }
 

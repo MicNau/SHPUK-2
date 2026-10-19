@@ -503,6 +503,46 @@ button, input, select, textarea { font-family: inherit; }
 .d-3d-loading-bar.indet .d-3d-loading-fill { width: 40%; animation: dcatbar 1s linear infinite; transition: none; }
 .d-3d-loading-txt { font-size: 12px; color: #555; white-space: nowrap; }
 
+/* Сбои WebGL (webgl-guard.js): окно вместо пустого 3D-вида и плашка
+   упрощённого режима. Окно ловит клики (кнопка «Перезапустить 3D»), поэтому
+   курсор обычный, а не «рука» вида. */
+.gl-notice {
+  position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: #f4f4f2; cursor: default; touch-action: auto; overflow: auto;
+}
+.gl-card {
+  max-width: 520px; width: 100%; padding: 20px 22px; background: #fff;
+  border: 1px solid #e0e0e0; box-shadow: 0 4px 16px rgba(0,0,0,.08); color: #333;
+}
+.gl-title { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+.gl-lead { font-size: 13px; line-height: 1.45; color: #444; }
+.gl-sub { font-size: 13px; font-weight: 600; margin: 12px 0 4px; }
+.gl-tips { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.45; color: #444; }
+.gl-tips li + li { margin-top: 4px; }
+.gl-btn {
+  margin-top: 14px; height: 36px; padding: 0 18px; border: none; cursor: pointer;
+  background: var(--accent); color: #fff; font-size: 13px; font-weight: 600;
+}
+.gl-btn:hover { background: var(--accent-hover); }
+.gl-info { margin-top: 14px; font-size: 11px; color: #999; word-break: break-word; }
+.gl-spin {
+  width: 22px; height: 22px; margin: 14px auto 0; border: 2px solid #e3e3e3;
+  border-top-color: var(--accent); border-radius: 50%; animation: d-spin .8s linear infinite;
+}
+.gl-banner {
+  position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 35; max-width: 560px;
+  padding: 10px 34px 10px 14px; background: rgba(255,255,255,.96); border: 1px solid #e0e0e0;
+  box-shadow: 0 4px 16px rgba(0,0,0,.12); cursor: default;
+}
+.gl-banner .gl-title { font-size: 13px; margin-bottom: 4px; }
+.gl-banner .gl-lead { font-size: 12px; }
+.gl-banner .gl-info { margin-top: 6px; }
+.gl-close {
+  position: absolute; top: 4px; right: 6px; width: 24px; height: 24px; border: none;
+  background: none; font-size: 18px; line-height: 1; color: #888; cursor: pointer;
+}
+.gl-close:hover { color: #333; }
+
 /* Canvas editor overlay (hidden by default) */
 .d-center-canvas {
   position: absolute; inset: 0; display: none;
