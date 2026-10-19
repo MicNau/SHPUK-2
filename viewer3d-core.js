@@ -1941,6 +1941,13 @@ function _facadeWallEdges() {
   return out;
 }
 
+// Стены дома по кругу для расчёта фасада (необязательный ключ walls рядом с
+// pieces): id — как wallId участков, длина — по наружному контуру, мм. По ним
+// бэкенд видит углы и полную длину стены, даже если обшита только её часть.
+function facadeWalls() {
+  return _facadeWallEdges().map(e => ({ wallId: e.id, length: Math.round(e.len * 1000) }));
+}
+
 // Мировые вершины меша (с учётом трансформаций родителей).
 function _facadeMeshPoints(root) {
   const pts = [];

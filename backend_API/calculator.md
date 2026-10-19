@@ -44,7 +44,7 @@ const calculator = new Calculator('https://sollersdev.ru/api/v1/');
 | Забор | `FENCE` | `{lines, gateCount, sectionProductId, picketProductId}` |
 | Оградка | `RAILING` | `{lines, sectionProductId}` |
 | Дорожка | `PATH` | `{vertices, deckingBoardProductId}` |
-| Фасад | `FACADE` | `{pieces}` |
+| Фасад | `FACADE` | `{pieces, walls?}` |
 | Мебель | `FURNITURE` | `{items}` |
 | Грядки | `GARDEN_BEDS` | `{items}` |
 | Проект | `PROJECT` | `{objects, mergeMaterials}` |

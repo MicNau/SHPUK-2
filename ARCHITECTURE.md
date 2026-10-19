@@ -184,9 +184,9 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 ```
 color-management.js?v=1   styles-desktop.css?v=54   styles-mobile.css?v=5
 state.js?v=78             canvas.js?v=68            shared/house-builder.js?v=92
-ResourceManager.js?v=15   viewer3d-core.js?v=166    viewer3d-builders.js?v=68
+ResourceManager.js?v=15   viewer3d-core.js?v=167    viewer3d-builders.js?v=68
 viewer3d-railing.js?v=18  viewer3d-entourage.js?v=14   editor3d.js?v=23
-nav-desktop.js?v=144      nav-mobile.js?v=7         project-io.js?v=7
+nav-desktop.js?v=145      nav-mobile.js?v=7         project-io.js?v=7
 backend_API/Calculator.js?v=4
 ```
 
@@ -970,7 +970,12 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   грани упираются в тело соседней стены и снаружи не видны. Раньше они
   красились «вслепую» и добавляли ~1,5 м² в смету. `_facadePillarFaceHidden`
   отсеивает грань, проекция которой на ребро контура лежит за концом ребра.
-- Cache-bust: `viewer3d-core.js?v=166`, `editor3d.js?v=23`.
+- **Длины стен в расчёте фасада** (просьба бэкенда): у объекта `facade` в
+  `calculate_project` рядом с `pieces` идёт необязательный `walls` — все стены
+  дома по кругу `{wallId, length}`, длина по наружному контуру в мм
+  (`facadeWalls()`, те же id, что у участков). Снимок проекта (project-io.js)
+  не менялся: новые поля в нём — только по согласованию с бэкендом.
+- Cache-bust: `viewer3d-core.js?v=167`, `editor3d.js?v=23`, `nav-desktop.js?v=145`.
 
 Ветка **Mobile**: правки 2026-10-16 — площадь, ступени, трубы, связка товаров, вкладки сметы.
 
