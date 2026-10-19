@@ -565,11 +565,10 @@ function e3dSync() {
     // мешает — прячем. Снимут отделку («Удалить всё») — рамки вернутся.
     // Считается материал СВОЕГО раздела: у второй отделки он может быть ещё не
     // выбран, когда у первой уже есть.
-    const zones = facadeZones(sec);
+    // Рамка охватывает и грани угловых столбов, которые красятся вместе с
+    // куском (facadeSelectionBoxes): иначе на углу обшивка выходила за рамку.
     const hasMat = !!(S.elementMat && S.elementMat[sec]);
-    for (const seg of hasMat ? [] : (threeState.facadeSegs || [])) {
-      if (!zones[seg.userData.segId]) continue;
-      const box = new THREE.Box3().setFromObject(seg);
+    for (const box of hasMat ? [] : facadeSelectionBoxes(sec)) {
       const h = new THREE.Box3Helper(box, E3D_COL_SEL);
       h.material.depthTest = false;
       h.material.toneMapped = false;

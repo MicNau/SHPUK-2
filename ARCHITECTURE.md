@@ -184,8 +184,8 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 ```
 color-management.js?v=1   styles-desktop.css?v=54   styles-mobile.css?v=5
 state.js?v=78             canvas.js?v=68            shared/house-builder.js?v=92
-ResourceManager.js?v=15   viewer3d-core.js?v=165    viewer3d-builders.js?v=68
-viewer3d-railing.js?v=18  viewer3d-entourage.js?v=14   editor3d.js?v=22
+ResourceManager.js?v=15   viewer3d-core.js?v=166    viewer3d-builders.js?v=68
+viewer3d-railing.js?v=18  viewer3d-entourage.js?v=14   editor3d.js?v=23
 nav-desktop.js?v=144      nav-mobile.js?v=7         project-io.js?v=7
 backend_API/Calculator.js?v=4
 ```
@@ -949,6 +949,24 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Ветка **Mobile**: правка 2026-10-19 — отделка фасада на углах дома.
+
+- **Угловые столбы и пояс карниза — в расчёте.** Они красились вместе с
+  выбранной стеной и шли в площадь `facadeSelectedAreaM2`, но в `facadePieces`
+  (участки для `calculate_facade` и проекта) не попадали: обшивка на углу
+  выходила за посчитанную площадь. Теперь `_facadeSecParts(sec)` собирает куски
+  раздела вместе с гранями столбов и поясами; грань столба идёт отдельным
+  участком в системе стены того куска, за которым она красится (тот же
+  `wallId`, x — полоса толщиной стены у её торца). Сумма площадей участков
+  совпадает с `facadeSelectedAreaM2`.
+- **Рамка выделения** (editor3d.js) строится из `facadeSelectionBoxes(sec)`:
+  бокс куска, расширенный на окрашенную вместе с ним грань углового столба.
+- **Внутренний угол Г-образного дома**: столб там стоит за углом контура, его
+  грани упираются в тело соседней стены и снаружи не видны. Раньше они
+  красились «вслепую» и добавляли ~1,5 м² в смету. `_facadePillarFaceHidden`
+  отсеивает грань, проекция которой на ребро контура лежит за концом ребра.
+- Cache-bust: `viewer3d-core.js?v=166`, `editor3d.js?v=23`.
 
 Ветка **Mobile**: правки 2026-10-16 — площадь, ступени, трубы, связка товаров, вкладки сметы.
 

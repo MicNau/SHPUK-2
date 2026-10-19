@@ -1843,9 +1843,11 @@ function _applyFacadeSelection() {
   const bandSec = list => (list || []).map(o => o.userData._facadeSec).find(Boolean) || null;
   for (const p of pillars) {
     if (p.userData.facadeFollow) continue;
-    const secZf = (p.userData._adjAlongX || []).map(secOf).find(Boolean)
+    const secZf = _facadePillarFaceHidden(p, 'x') ? null
+               : (p.userData._adjAlongX || []).map(secOf).find(Boolean)
                || bandSec(p.userData._followAlongX) || null;                         // грани ±Z
-    const secXf = (p.userData._adjAlongZ || []).map(secOf).find(Boolean)
+    const secXf = _facadePillarFaceHidden(p, 'z') ? null
+               : (p.userData._adjAlongZ || []).map(secOf).find(Boolean)
                || bandSec(p.userData._followAlongZ) || null;                         // грани ±X
     p.userData._facadeSecX = secXf;
     p.userData._facadeSecZ = secZf;
@@ -1861,6 +1863,29 @@ function _applyFacadeSelection() {
       o.material = [secXf ? mats[secXf] : base, secZf ? mats[secZf] : base, base];
     });
   }
+}
+
+// Столб во ВНУТРЕННЕМ углу (Г-образный дом) стоит за углом контура: его грани
+// в плоскостях стен упираются в тело соседней стены и снаружи не видны, а в
+// смету шли бы лишней площадью. Признак — проекция грани на ребро контура в её
+// плоскости лежит за концом ребра. axis 'x' — грань в плоскости стены вдоль X
+// (грани ±Z), 'z' — вдоль Z. Кэш в userData: столбы пересоздаются вместе с домом.
+function _facadePillarFaceHidden(p, axis) {
+  const key = axis === 'x' ? '_hidX' : '_hidZ';
+  if (p.userData[key] !== undefined) return p.userData[key];
+  const edges = _facadeWallEdges().filter(e => Math.abs(axis === 'x' ? e.ux : e.uz) >= 0.9);
+  if (!edges.length) return false;
+  const bb = new THREE.Box3().setFromObject(p);
+  const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2;
+  let best = null, bestD = Infinity;
+  for (const e of edges) {
+    const d = Math.abs((cx - e.ax) * e.uz - (cz - e.az) * e.ux);
+    if (d < bestD) { bestD = d; best = e; }
+  }
+  const ts = [bb.min.x, bb.max.x].flatMap(x => [bb.min.z, bb.max.z].map(z => (x - best.ax) * best.ux + (z - best.az) * best.uz));
+  const hidden = Math.max(...ts) <= 0.01 || Math.min(...ts) >= best.len - 0.01;
+  p.userData[key] = hidden;
+  return hidden;
 }
 
 // Площадь элементов под отделку (м²) для сметы; пустой выбор = весь фасад.
@@ -1896,8 +1921,11 @@ function facadeSelectedAreaM2(secId) {
 // Стена — ребро контура дома, нумерация с единицы в порядке обхода. Высота
 // считается от НИЗА СТЕН ПЕРВОГО ЭТАЖА: у двухэтажного дома куски второго идут
 // выше на высоту этажа плюс перекрытие, и промежуток виден расчёту как есть.
-// Угловые столбы и пояс карниза отдельными участками не идут: столбы бэкенд
-// считает уголками, а пояс — узкая полоса, которая следует за соседом.
+// Угловой столб и пояс карниза идут СВОИМИ участками той же стены (правка
+// 2026-10-19): раньше они красились, но в расчёт не попадали, и обшивка на
+// углу дома выходила за посчитанную площадь. Грань столба — полоса шириной в
+// толщину стены у торца стены, в её плоскости; площадь сходится с
+// facadeSelectedAreaM2.
 
 function _facadeWallEdges() {
   const poly = (typeof _housePoly !== 'undefined' && _housePoly) ? _housePoly.corners : null;
@@ -1962,11 +1990,59 @@ function _facadeHull(pts) {
   return half(p).concat(half(p.slice().reverse()));
 }
 
+// Для каждого выбранного куска раздела — объекты, которые красятся вместе с ним
+// и должны попасть в его участок/рамку: { obj, edgeOf }. edgeOf — объект, по
+// которому определяется стена (сам кусок, сосед столба, пояс карниза), axis —
+// для грани столба: 'x' — грань в плоскости стены вдоль X, 'z' — вдоль Z.
+function _facadeSecParts(secId) {
+  const sec = secId || 'facade';
+  const segs = (threeState && threeState.facadeSegs) || [];
+  const zones = (typeof facadeZones === 'function') ? facadeZones(sec) : {};
+  const byId = {};
+  for (const s of segs) (byId[s.userData.segId] = byId[s.userData.segId] || []).push(s);
+  const parts = [];
+  for (const s of segs) if (zones[s.userData.segId]) parts.push({ obj: s, host: s });
+  const pillars = (threeState && threeState.facadePillars) || [];
+  for (const p of pillars) {
+    if (p.userData.facadeFollow && p.userData._facadeSec === sec) parts.push({ obj: p, host: p });
+  }
+  // Хозяин грани столба: выбранный сосед в плоскости этой грани, иначе пояс
+  // карниза, за которым грань следует.
+  const hostOf = (ids, bands) => {
+    for (const id of ids || []) if (zones[id] && byId[id]) return byId[id][0];
+    return (bands || []).find(b => b.userData._facadeSec === sec) || null;
+  };
+  for (const p of pillars) {
+    if (p.userData.facadeFollow) continue;
+    if (p.userData._facadeSecZ === sec) {
+      const host = hostOf(p.userData._adjAlongX, p.userData._followAlongX);
+      if (host) parts.push({ obj: p, host, axis: 'x' });
+    }
+    if (p.userData._facadeSecX === sec) {
+      const host = hostOf(p.userData._adjAlongZ, p.userData._followAlongZ);
+      if (host) parts.push({ obj: p, host, axis: 'z' });
+    }
+  }
+  return parts;
+}
+
+// Рамки выбора раздела в 3D (editor3d): бокс куска, расширенный на грани
+// угловых столбов, которые красятся вместе с ним, — рамка совпадает с тем,
+// что будет обшито и посчитано.
+function facadeSelectionBoxes(secId) {
+  const boxes = new Map();
+  for (const part of _facadeSecParts(secId)) {
+    const b = new THREE.Box3().setFromObject(part.obj);
+    const cur = boxes.get(part.host);
+    if (cur) cur.union(b); else boxes.set(part.host, b);
+  }
+  return [...boxes.values()];
+}
+
 function facadePieces(secId, productId) {
   const segs = (threeState && threeState.facadeSegs) || [];
   const edges = _facadeWallEdges();
   if (!segs.length || !edges.length) return [];
-  const zones = (typeof facadeZones === 'function') ? facadeZones(secId) : {};
   // Низ стен первого этажа = верх фундамента: от него считаем высоту.
   let baseY = Infinity;
   for (const s of segs) {
@@ -1976,11 +2052,15 @@ function facadePieces(secId, productId) {
   if (!isFinite(baseY)) baseY = 0;
   const mm = v => Math.round(v * 1000);
   const out = [];
-  for (const seg of segs) {
-    if (!zones[seg.userData.segId]) continue;
-    const pts = _facadeMeshPoints(seg);
+  for (const part of _facadeSecParts(secId)) {
+    const pts = _facadeMeshPoints(part.obj);
     if (pts.length < 3) continue;
-    const e = _facadeWallOf(pts, edges);
+    // Стена грани столба — стена куска, за которым грань красится (тот же
+    // wallId); столб стоит на углу, и «ближайшее ребро» по нему неоднозначно.
+    let e = _facadeWallOf(part.host === part.obj ? pts : _facadeMeshPoints(part.host), edges);
+    if (e && part.axis && Math.abs(part.axis === 'x' ? e.ux : e.uz) < 0.9) {
+      e = _facadeWallOf(pts, edges.filter(q => Math.abs(part.axis === 'x' ? q.ux : q.uz) >= 0.9)) || e;
+    }
     if (!e) continue;
     const flat = pts.map(p => ({ x: (p.x - e.ax) * e.ux + (p.z - e.az) * e.uz, y: p.y - baseY }));
     const hull = _facadeHull(flat);
