@@ -185,7 +185,7 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 ```
 color-management.js?v=1   styles-desktop.css?v=56   styles-mobile.css?v=5
 state.js?v=78             canvas.js?v=69            shared/house-builder.js?v=92
-ResourceManager.js?v=15   webgl-guard.js?v=1        viewer3d-core.js?v=169
+ResourceManager.js?v=15   webgl-guard.js?v=1        viewer3d-core.js?v=170
 viewer3d-builders.js?v=69 viewer3d-railing.js?v=18  viewer3d-entourage.js?v=14
 editor3d.js?v=25          nav-desktop.js?v=147      nav-mobile.js?v=8
 project-io.js?v=7         backend_API/Calculator.js?v=4
@@ -951,7 +951,7 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
 
-Ветка **Mobile**: правки 2026-10-26 — приветствие при запуске, калитка.
+Ветка **Mobile**: правки 2026-10-26 — приветствие при запуске, калитка, пояс мансарды.
 
 - **Приветствие** (index.html, `#d-welcome-overlay`): окно с описанием приложения
   поверх карточек домов при каждом запуске, кнопка «Понятно» (`dCloseWelcome`).
@@ -972,8 +972,17 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   крупнее точек забора, вокруг модели — рамка (`threeState.fenceGateObjs`).
   Захват — клик по самой модели или в радиусе `E3D_GATE_PICK_R` = 1.1 м от метки
   (растёт с отъездом камеры и на телефоне); на плане `FENCE_GATE_HIT` 0.02 → 0.035.
+- **Пояс карниза мансарды режется по соседям** (`_facadeSplitBands`, вызывается
+  из `_collectFacadeSegments`). Пояс нарезан по проёмам этажа (buildKneeWall), а
+  фронтон над ним — по своему окну; у type_10 окно фронтона на 5 см шире двери
+  под ним, и кусок пояса 0.7 м левее столбца заходил под выбранный кусок фронтона
+  больше допуска — красился целиком, рамка и отделка вылезали в сторону (скриншот
+  2026-10-26: клик над дверью, затем под окном). Теперь каждый кусок пояса
+  делится по границам ВСЕХ кусков над и под ним (не ближе 3 см к краю): геометрия
+  в мировых координатах прижимается к границам (`_facadeClampAxis`), мировой UV
+  пересчитывается — шва нет. Площадь и сумма участков не изменились.
 - Cache-bust: `canvas.js?v=69`, `editor3d.js?v=25`, `viewer3d-builders.js?v=69`,
-  `viewer3d-core.js?v=169`, `nav-desktop.js?v=147`, `nav-mobile.js?v=8`,
+  `viewer3d-core.js?v=170`, `nav-desktop.js?v=147`, `nav-mobile.js?v=8`,
   `styles-desktop.css?v=56`.
 
 Ветка **Mobile**: правка 2026-10-19 — сбои WebGL: проверка, восстановление, рекомендации.
