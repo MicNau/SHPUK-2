@@ -3391,20 +3391,70 @@ function buildFence3d(parent, M, pts, houseL, houseW) {
   // Просвета быть не должно (требование продукта 2026-08-28): калитка выглядит как
   // секция забора шириной FENCE_GATE_W3D. От обычной секции отличается тем, что из
   // повторяющихся вертикальных элементов полотна остаётся один.
+  // Створка стоит ОТКРЫТОЙ внутрь участка (правка 2026-10-26): закрытая калитка без
+  // готовой модели ничем не отличалась от секции забора. Готовая модель открыта
+  // уже в файле (_wicketNormalizeProto). Всё, что относится к калитке, попадает в
+  // threeState.fenceGateObjs — по ним редактор рисует рамку и ловит клик.
   function _fenceGateLeaf(sx, sz, ux, uz, len, angle) {
     if (len < 0.2) return;
     const key = postKey(sx, sz);
     const withPost = !postSet.has(key);
     postSet.add(key);
+    const before = fenceGroup.children.length;
     // Готовая модель калитки ставится как есть: масштабируется только по высоте
     // забора, ширина остаётся родной (проём под неё и делался).
     if (wicket) _fenceWicketLeaf(wicket, fenceGroup, sx, sz, angle, panelH, panelMat, frameMat, proto);
-    else if (proto) panelsPainted += _fenceModelSection(proto, fenceGroup, sx, sz, angle, len, sy,
-                                                        panelMat, frameMat, true);
-    else       _fenceSchematicSection(fenceGroup, sx, sz, angle, len, panelH,
-                                      panelMat, frameMat, withPost);
+    else {
+      const open = _fenceGateOpenAngle(sx, sz, ux, uz, houseL, houseW);
+      if (proto) {
+        // Секцию строим в своей системе (петля в нуле), столбы оставляем на линии,
+        // остальное поворачиваем вокруг оси стартового столба.
+        const tmp = new THREE.Group();
+        panelsPainted += _fenceModelSection(proto, tmp, 0, 0, 0, len, sy, panelMat, frameMat, true);
+        const inst = tmp.children[0];
+        const posts = new THREE.Group();
+        posts.scale.copy(inst.scale);
+        for (const m of inst.children.slice()) {
+          m.geometry.computeBoundingBox();
+          const bb = m.geometry.boundingBox;
+          if (bb.max.x - bb.min.x < FENCE_GATE_POST_MAX && Math.abs((bb.min.x + bb.max.x) / 2) < FENCE_GATE_POST_MAX) {
+            posts.add(m);
+          }
+        }
+        posts.position.set(sx, 0, sz); posts.rotation.y = angle;
+        inst.position.set(sx, 0, sz);  inst.rotation.y = open;
+        fenceGroup.add(posts, inst);
+      } else {
+        if (withPost) _fenceBoxPost(fenceGroup, sx, sz, angle, panelH, frameMat);
+        _fenceSchematicSection(fenceGroup, sx, sz, open, len, panelH, panelMat, frameMat, false);
+      }
+    }
+    for (const o of fenceGroup.children.slice(before)) {
+      o.userData.fenceGate = true;
+      threeState.fenceGateObjs.push(o);
+    }
     runEnds.push({ x: sx + ux * len, z: sz + uz * len, angle });
   }
+}
+
+// Открытая створка: поворот вокруг петли на FENCE_GATE_OPEN_DEG внутрь участка —
+// к дому (нет дома — к центру участка). Возвращает rotation.y для группы, у
+// которой локальный +X идёт вдоль створки (как у секций: (cos θ, −sin θ)).
+const FENCE_GATE_OPEN_DEG = 75;
+const FENCE_GATE_POST_MAX = 0.25;   // м — деталь уже и ближе к петле считается столбом
+
+function _fenceGateOpenAngle(sx, sz, ux, uz, houseL, houseW) {
+  const hp = (typeof getHousePolygonNorm === 'function'
+              && !(typeof isEmptyLot === 'function' && isEmptyLot())) ? getHousePolygonNorm() : null;
+  const b = hp && hp.bboxNorm;
+  const cn = b ? { x: b.nx + b.nw / 2, y: b.ny + b.nh / 2 } : { x: 0.5, y: 0.5 };
+  const c = canvasToWorld([cn], houseL, houseW)[0];
+  const cx = c.x, cz = c.z;
+  let nx = -uz, nz = ux;                       // нормаль к пролёту
+  if ((cx - sx) * nx + (cz - sz) * nz < 0) { nx = -nx; nz = -nz; }
+  const a = FENCE_GATE_OPEN_DEG * Math.PI / 180;
+  const dx = Math.cos(a) * ux + Math.sin(a) * nx, dz = Math.cos(a) * uz + Math.sin(a) * nz;
+  return Math.atan2(-dz, dx);
 }
 
 // Створка из готовой модели: клон прототипа, масштаб только по высоте забора.

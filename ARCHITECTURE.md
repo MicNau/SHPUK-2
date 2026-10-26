@@ -183,11 +183,11 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-color-management.js?v=1   styles-desktop.css?v=55   styles-mobile.css?v=5
-state.js?v=78             canvas.js?v=68            shared/house-builder.js?v=92
-ResourceManager.js?v=15   webgl-guard.js?v=1        viewer3d-core.js?v=168
-viewer3d-builders.js?v=68 viewer3d-railing.js?v=18  viewer3d-entourage.js?v=14
-editor3d.js?v=24          nav-desktop.js?v=146      nav-mobile.js?v=7
+color-management.js?v=1   styles-desktop.css?v=56   styles-mobile.css?v=5
+state.js?v=78             canvas.js?v=69            shared/house-builder.js?v=92
+ResourceManager.js?v=15   webgl-guard.js?v=1        viewer3d-core.js?v=169
+viewer3d-builders.js?v=69 viewer3d-railing.js?v=18  viewer3d-entourage.js?v=14
+editor3d.js?v=25          nav-desktop.js?v=147      nav-mobile.js?v=8
 project-io.js?v=7         backend_API/Calculator.js?v=4
 ```
 
@@ -950,6 +950,31 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Ветка **Mobile**: правки 2026-10-26 — приветствие при запуске, калитка.
+
+- **Приветствие** (index.html, `#d-welcome-overlay`): окно с описанием приложения
+  поверх карточек домов при каждом запуске, кнопка «Понятно» (`dCloseWelcome`).
+  Открыто сразу в разметке, без мигания карточек. Мобильная очередь подсказок
+  ждёт его закрытия (`_mHintNext` проверяет `dWelcomeOpen`), затем показывает
+  «Выбор дома». Текст — от заказчика («Так же» исправлено на «Также»).
+- **Калитка ставится у фасада с дверью** (`fenceGateDefault`, canvas.js): пролёт
+  забора, параллельный стене с главной дверью (до ~20°) и лежащий перед ней,
+  ближайший к двери; таких нет — ближайший к двери пролёт. Калитка — напротив
+  двери, но не ближе `FENCE_GATE_MID_OFF` = 0.8 м к середине пролёта (там
+  подпись длины) и не ближе полупроёма с запасом к его концам. Пустой участок —
+  по-старому, самый длинный пролёт.
+- **Открытая створка**: без готовой модели калитки (условный забор или модель
+  забора без `mod_wicket_*`) створка поворачивается на `FENCE_GATE_OPEN_DEG` = 75°
+  вокруг петли внутрь участка, к дому (`_fenceGateOpenAngle`); столбы модели
+  остаются на линии. Готовая модель открыта уже в файле — не меняется.
+- **Подсветка и захват** (editor3d.js): метка калитки синяя (`E3D_COL_GATE`),
+  крупнее точек забора, вокруг модели — рамка (`threeState.fenceGateObjs`).
+  Захват — клик по самой модели или в радиусе `E3D_GATE_PICK_R` = 1.1 м от метки
+  (растёт с отъездом камеры и на телефоне); на плане `FENCE_GATE_HIT` 0.02 → 0.035.
+- Cache-bust: `canvas.js?v=69`, `editor3d.js?v=25`, `viewer3d-builders.js?v=69`,
+  `viewer3d-core.js?v=169`, `nav-desktop.js?v=147`, `nav-mobile.js?v=8`,
+  `styles-desktop.css?v=56`.
 
 Ветка **Mobile**: правка 2026-10-19 — сбои WebGL: проверка, восстановление, рекомендации.
 

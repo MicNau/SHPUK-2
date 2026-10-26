@@ -1247,6 +1247,7 @@ function buildScene3d() {
   threeState.porchMeshes   = [];
   threeState.stepMeshes    = [];
   threeState.fenceMeshes   = [];
+  threeState.fenceGateObjs = [];      // калитка (створка и т. п.): рамка и захват в редакторе
   threeState.railingMeshes = [];
   threeState.bedMeshes     = [];
   threeState.furnitureMeshes = [];    // садовая мебель (GLB по точкам S.furniture)
