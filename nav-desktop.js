@@ -1578,6 +1578,19 @@ function _dSyncSectionHint() {
   el.textContent = (dStep === 3 && dActiveItem) ? _dHintText(dActiveItem) : '';
 }
 
+// Приветствие при запуске (index.html, #d-welcome-overlay) открыто сразу в
+// разметке — без мигания карточек до скрипта. Закрыли — мобильная очередь
+// подсказок показывает то, что накопила за это время.
+function dWelcomeOpen() {
+  const ov = document.getElementById('d-welcome-overlay');
+  return !!(ov && ov.classList.contains('active'));
+}
+function dCloseWelcome() {
+  const ov = document.getElementById('d-welcome-overlay');
+  if (ov) ov.classList.remove('active');
+  if (typeof mHintClosed === 'function') mHintClosed();
+}
+
 function dHideEditorHint() {
   const ov = document.getElementById('d-hint-overlay');
   if (ov) ov.classList.remove('active');

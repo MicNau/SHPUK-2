@@ -184,6 +184,8 @@ function mQueueHint(key, title, text) {
 }
 
 function _mHintNext() {
+  // Открыто приветствие — очередь ждёт его закрытия (dCloseWelcome).
+  if (typeof dWelcomeOpen === 'function' && dWelcomeOpen()) { _mHintBusy = false; return; }
   const next = _mHintQueue.shift();
   if (!next) { _mHintBusy = false; return; }
   const ov = document.getElementById('d-hint-overlay');

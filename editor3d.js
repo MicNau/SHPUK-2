@@ -278,6 +278,17 @@ function _e3dFurnIdxOf(obj) {
 
 // Элемент фасада под объектом, в который попал луч: id стоит на группе-модуле,
 // а луч приходит в её меш, поэтому поднимаемся по родителям.
+// Калитку берут за саму модель (створку, столб) или в радиусе от её метки.
+// Радиус в метрах растёт с отъездом камеры и на телефоне, как у прочих ручек:
+// метка в 0.64 м с вида сверху на весь участок была меньше курсора (правка 2026-10-26).
+const E3D_GATE_PICK_R = 1.1;
+
+function _e3dGateHit(np, object) {
+  if (!S.fenceGate) return false;
+  for (let o = object; o; o = o.parent) if (o.userData && o.userData.fenceGate) return true;
+  return typeof _gateHit === 'function' && _gateHit(np, _e3dR(E3D_GATE_PICK_R) / GRID);
+}
+
 function _e3dFacadeIdOf(obj) {
   for (let o = obj; o; o = o.parent) {
     if (o.userData && o.userData.segId) return o.userData.segId;
@@ -336,7 +347,7 @@ function e3dHitTest(np, object) {
   if (kind === 'railing') return _e3dHitEntry(np);
 
   if (kind === 'line') {
-    if (sec === 'fence' && typeof _gateHit === 'function' && _gateHit(np)) {
+    if (sec === 'fence' && _e3dGateHit(np, object)) {
       return { kind, idx: 'gate', handle: 'move' };
     }
     const i = _e3dHitLine(sec, np);
@@ -481,6 +492,8 @@ const E3D_COL_SEL  = 0xff7a1a;   // выбранный объект — оран
 // Прочие объекты раздела — приглушённый зелёный. Значение — то, что раньше было
 // видно на экране (0x2f6f3f проходил через высветление и ACES и выглядел так).
 const E3D_COL_IDLE = 0x73a782;
+// Калитка — синяя: её надо сразу отличать от точек забора (правка 2026-10-26).
+const E3D_COL_GATE = 0x2f80ed;
 
 // Сетка 1 м: видна, пока открыт раздел с разметкой на земле.
 function _e3dSyncGrid(show) {
@@ -584,8 +597,18 @@ function e3dSync() {
       if (p.break) return;
       g.add(_e3dMarker(p, i === sel ? E3D_COL_SEL : E3D_COL_IDLE, 0.16));
     });
+    // Калитка выделена своим цветом: метка крупнее точек и рамка вокруг модели.
     if (sec === 'fence' && S.fenceGate) {
-      g.add(_e3dMarker(S.fenceGate, sel === 'gate' ? E3D_COL_SEL : E3D_COL_IDLE, 0.20));
+      const col = sel === 'gate' ? E3D_COL_SEL : E3D_COL_GATE;
+      g.add(_e3dMarker(S.fenceGate, col, 0.30));
+      const objs = (threeState.fenceGateObjs || []).filter(o => o.parent);
+      if (objs.length) {
+        const box = new THREE.Box3();
+        for (const o of objs) box.expandByObject(o);
+        const h = new THREE.Box3Helper(box, col);
+        h.material.depthTest = false; h.material.toneMapped = false; h.renderOrder = 999;
+        g.add(h);
+      }
     }
     // Начатый отрезок: точка старта и «резинка» до курсора.
     if (E3D.draw && E3D.draw.name === sec) {

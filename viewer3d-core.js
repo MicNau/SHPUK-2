@@ -1247,6 +1247,7 @@ function buildScene3d() {
   threeState.porchMeshes   = [];
   threeState.stepMeshes    = [];
   threeState.fenceMeshes   = [];
+  threeState.fenceGateObjs = [];      // калитка (створка и т. п.): рамка и захват в редакторе
   threeState.railingMeshes = [];
   threeState.bedMeshes     = [];
   threeState.furnitureMeshes = [];    // садовая мебель (GLB по точкам S.furniture)
@@ -1800,13 +1801,101 @@ function _facadeSideBy(pillarBox, segBox) {
       && over(pillarBox.min.y, pillarBox.max.y, segBox.min.y, segBox.max.y) > 0.02;
 }
 
+// Пояс карниза мансарды нарезан по проёмам ЭТАЖА (buildKneeWall), а фронтон над
+// ним — по своему окну. Границы не совпадают, и кусок пояса, на пару сантиметров
+// заходящий под выбранный кусок фронтона, красился целиком: отделка вылезала в
+// сторону от выбора (баг 2026-10-26, дом с мансардой: клик под окном фронтона
+// красил полосу пояса левее столбца). Режем каждый кусок пояса по границам
+// ВСЕХ кусков над и под ним — тогда кусок пояса лежит ровно под одним куском
+// фронтона и над одним куском этажа и красится вслед за ними без вылета.
+const FACADE_BAND_CUT_MIN = 0.03;   // м — ближе к краю куска пояса границу не режем
+
+function _facadeSplitBands(root, segs, bands) {
+  if (!bands.length || !segs.length) return bands;
+  root.updateMatrixWorld(true);
+  const rootInv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const segBoxes = segs.map(s => new THREE.Box3().setFromObject(s));
+  const out = [];
+  for (const band of bands) {
+    const pb = new THREE.Box3().setFromObject(band);
+    const ax = (pb.max.x - pb.min.x) >= (pb.max.z - pb.min.z) ? 'x' : 'z';
+    const lo = pb.min[ax], hi = pb.max[ax];
+    const cuts = [];
+    for (const sb of segBoxes) {
+      if (!_facadeStackedOn(pb, sb)) continue;
+      for (const c of [sb.min[ax], sb.max[ax]]) {
+        if (c > lo + FACADE_BAND_CUT_MIN && c < hi - FACADE_BAND_CUT_MIN
+            && !cuts.some(q => Math.abs(q - c) < FACADE_BAND_CUT_MIN)) cuts.push(c);
+      }
+    }
+    if (!cuts.length) { out.push(band); continue; }
+    cuts.sort((a, b) => a - b);
+    const edges = [lo, ...cuts, hi];
+    const meshes = [];
+    band.traverse(o => { if (o.isMesh && o.geometry && o.geometry.attributes.position) meshes.push(o); });
+    for (let i = 0; i < edges.length - 1; i++) {
+      const a = edges[i], b = edges[i + 1];
+      const piece = new THREE.Group();
+      piece.name = band.name;
+      Object.assign(piece.userData, band.userData, { segW: b - a });
+      for (const m of meshes) {
+        const g = m.geometry.clone();
+        g.applyMatrix4(m.matrixWorld);
+        if (!_facadeClampAxis(g, ax, a, b)) { g.dispose(); continue; }
+        g.applyMatrix4(rootInv);
+        g.computeVertexNormals();
+        const q = new THREE.Mesh(g, m.material);
+        q.name = m.name;
+        q.castShadow = m.castShadow; q.receiveShadow = m.receiveShadow;
+        // Текстура стен лежит мировым UV — у нарезки он пересчитывается тем же
+        // способом, шва на стыке кусков нет.
+        if (q.material && q.material.map) _applyWorldBoxUV(q, HOUSE_WALL_TILE);
+        piece.add(q);
+      }
+      if (!piece.children.length) continue;
+      root.add(piece);
+      out.push(piece);
+    }
+    if (band.parent) band.parent.remove(band);
+  }
+  return out;
+}
+
+// Оставляет от геометрии (в мировых координатах) часть между a и b по оси ax:
+// треугольники целиком вне диапазона выбрасываются, вершины прижимаются к
+// границам. Пояс — коробка, ей этого достаточно. false — ничего не осталось.
+function _facadeClampAxis(geo, ax, a, b) {
+  const pos = geo.attributes.position;
+  const get = ax === 'x' ? i => pos.getX(i) : i => pos.getZ(i);
+  const set = ax === 'x' ? (i, v) => pos.setX(i, v) : (i, v) => pos.setZ(i, v);
+  const idx = geo.index;
+  const n = idx ? idx.count : pos.count;
+  const vAt = i => (idx ? idx.getX(i) : i);
+  const keep = [];
+  for (let t = 0; t + 2 < n; t += 3) {
+    const v = [vAt(t), vAt(t + 1), vAt(t + 2)];
+    const xs = v.map(get);
+    if (Math.max(...xs) > a + 1e-4 && Math.min(...xs) < b - 1e-4) keep.push(...v);
+  }
+  if (!keep.length) return false;
+  geo.setIndex(keep);
+  for (let i = 0; i < pos.count; i++) set(i, Math.min(b, Math.max(a, get(i))));
+  pos.needsUpdate = true;
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+  return true;
+}
+
 function _collectFacadeSegments(root) {
-  const segs = [], pillars = [];
+  const segs = [];
+  let pillars = [];
   root.traverse(o => {
     if (!o.userData) return;
     if (o.userData.segId) segs.push(o);
     else if (o.userData.facadePillar || o.userData.facadeFollow) pillars.push(o);
   });
+  const bands = _facadeSplitBands(root, segs, pillars.filter(p => p.userData.facadeFollow));
+  pillars = pillars.filter(p => !p.userData.facadeFollow).concat(bands);
   threeState.facadeSegs = segs;
   threeState.facadePillars = pillars;
   // Смежность столбов с элементами фасада (bbox-касание с допуском) — один раз

@@ -748,9 +748,14 @@ function _lineEnsureDefault(name) {
 // Калитка на плане — такая же управляемая метка, как точка ломаной (TODO п.13):
 // выбирается кликом, перетаскивается вдоль забора, удаляется кнопкой «Удалить
 // точку». В _lineSel она обозначается idx === 'gate'.
-function _gateHit(p) {
+// Зона захвата — радиус в долях плана (0.035 × 32 м ≈ 1.1 м). Было 0.02 (0.64 м):
+// по маленькой метке калитки трудно попасть (правка 2026-10-26). В 3D радиус
+// ещё растёт с отъездом камеры и на телефоне (editor3d.js, _e3dGateHit).
+const FENCE_GATE_HIT = 0.035;
+
+function _gateHit(p, r) {
   if (!S.fenceGate) return false;
-  return Math.hypot(S.fenceGate.x - p.x, S.fenceGate.y - p.y) < 0.02;
+  return Math.hypot(S.fenceGate.x - p.x, S.fenceGate.y - p.y) < Math.max(FENCE_GATE_HIT, r || 0);
 }
 
 // Ближайшая точка НА ломаной забора: калитка не должна сходить с линии.
@@ -772,27 +777,54 @@ function _fenceProjectToLine(p) {
   return best;
 }
 
-// Калитка: ставится в середину самого длинного отрезка забора (или в выбранную
-// точку, если она есть). Хранится в координатах плана; проём вычитается в 3D.
-// Калитка ставится на САМЫЙ ДЛИННЫЙ пролёт, но НЕ в его середину: там же стоит
-// подпись длины пролёта, и маркер калитки под ней не разглядеть. Смещаем на
-// треть длины — место всё ещё удобное, а подпись не перекрывает.
+// Калитка: хранится в координатах плана; проём вычитается в 3D.
+// Ставится на пролёт ПАРАЛЛЕЛЬНЫЙ фасаду с главной дверью и лежащий перед ним
+// (ближайший из таких), напротив двери; нет такого — на ближайший к двери пролёт
+// (правка 2026-10-26: раньше — на самый длинный пролёт, где придётся). Дома нет
+// (пустой участок) — по-старому, на самый длинный.
+// В середину пролёта калитку не ставим: там подпись длины, и маркер под ней не
+// разглядеть, — отводим от середины на FENCE_GATE_MID_OFF.
 const FENCE_GATE_T = 1 / 3;
+const FENCE_GATE_MID_OFF = 0.8;   // м
+const FENCE_GATE_PARALLEL = 0.34; // |cos| угла между пролётом и нормалью фасада: до ~20° от параллели
 
 function fenceGateDefault() {
-  const segs = splitAtBreaks(S.pts.fence || []);
-  let best = null, bestL = 0;
-  for (const seg of segs) {
+  const minL = FENCE_GATE_W + 0.4;
+  const list = [];
+  for (const seg of splitAtBreaks(S.pts.fence || [])) {
     for (let i = 0; i < seg.length - 1; i++) {
       const a = seg[i], b = seg[i + 1];
       const L = Math.hypot(b.x - a.x, b.y - a.y) * GRID;
-      if (L > bestL) {
-        bestL = L;
-        best = { x: a.x + (b.x - a.x) * FENCE_GATE_T, y: a.y + (b.y - a.y) * FENCE_GATE_T };
-      }
+      if (L > minL) list.push({ a, b, L });
     }
   }
-  return (bestL > FENCE_GATE_W + 0.4) ? best : null;
+  if (!list.length) return null;
+  const at = (s, t) => ({ x: s.a.x + (s.b.x - s.a.x) * t, y: s.a.y + (s.b.y - s.a.y) * t });
+  const door = (typeof _houseMainDoor === 'function') ? _houseMainDoor() : null;
+  if (!door) {
+    const s = list.reduce((m, q) => (q.L > m.L ? q : m));
+    return at(s, FENCE_GATE_T);
+  }
+  const n = { S: [0, 1], N: [0, -1], E: [1, 0], W: [-1, 0] }[door.side];
+  const D = { x: door.cx, y: door.cy };
+  for (const s of list) {
+    const dx = s.b.x - s.a.x, dy = s.b.y - s.a.y, l = Math.hypot(dx, dy);
+    const t = Math.max(0, Math.min(1, ((D.x - s.a.x) * dx + (D.y - s.a.y) * dy) / (l * l)));
+    const q = at(s, t);
+    s.t = t;
+    s.dist = Math.hypot(q.x - D.x, q.y - D.y);
+    s.front = Math.abs((dx * n[0] + dy * n[1]) / l) < FENCE_GATE_PARALLEL
+           && ((s.a.x + s.b.x) / 2 - D.x) * n[0] + ((s.a.y + s.b.y) / 2 - D.y) * n[1] > 0;
+  }
+  const front = list.filter(s => s.front);
+  const s = (front.length ? front : list).reduce((m, q) => (q.dist < m.dist ? q : m));
+  // Напротив двери, но не ближе полупроёма с запасом к концам пролёта и не на подписи.
+  const edge = (FENCE_GATE_W / 2 + 0.2) / s.L;
+  let t = s.t;
+  const off = FENCE_GATE_MID_OFF / s.L;
+  if (Math.abs(t - 0.5) < off) t = 0.5 + (t < 0.5 ? -off : off);
+  t = Math.max(edge, Math.min(1 - edge, t));
+  return at(s, t);
 }
 
 // «Удалить точку» — убирает выбранную. Линия короче двух точек удаляется целиком.
