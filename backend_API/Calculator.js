@@ -84,6 +84,9 @@ const OBJECT_NAMES = {
 // грядок ролей нет вовсе, а у фасада ключи позиций товарные, поэтому смета
 // отдаётся целиком. У проекта с объединёнными материалами основные — это
 // основные всех его объектов: роли позиции сервер отдаёт в её поле roles.
+// У забора и оградки основные приходят готовой сводкой mainMaterials —
+// секции и столбы, см. SUMMARY_TYPES; списки ниже для них остаются на
+// случай сервера, который сводку ещё не отдаёт.
 const MAIN_MATERIALS = {
     terrace: ['deckingBoard', 'halfStep'],
     steps: ['step', 'riser', 'facadeBoard'],
@@ -95,6 +98,10 @@ const MAIN_MATERIALS = {
     garden_beds: null,
     project: null,
 };
+
+// Объекты, у которых сервер отдаёт сводку основных материалов mainMaterials:
+// смету, собранную в секции и столбы, без комплектующих.
+const SUMMARY_TYPES = ['fence', 'railing'];
 
 class CalculationError extends Error {
     constructor(message, {kind, status = null, cause = null} = {}) {
@@ -129,7 +136,7 @@ class Calculator {
      *   fence     - {lines, gateCount, sectionProductId, picketProductId};
      *   railing   - {lines, sectionProductId};
      *   path      - {vertices, deckingBoardProductId};
-     *   facade    - {pieces};
+     *   facade    - {pieces, walls};
      *   furniture - {items};
      *   garden_beds - {items};
      *   project   - {objects, mergeMaterials}.
@@ -396,7 +403,7 @@ class Calculator {
         const works = result.works || [];
 
         if (option === CalculationOption.ONLY_MAIN_MATERIALS) {
-            return {materials: Calculator._mainMaterials(materials, type, request)};
+            return {materials: Calculator._mainMaterials(result, type, request)};
         }
 
         // Бриф — одна строка «Терраса — 46 466 ₽»: название и стоимость всех
@@ -417,16 +424,25 @@ class Calculator {
 
     /**
      * Основные материалы объекта. Если у типа ролей нет, отдаются все.
-     * @param {object} materials - словарь позиций из ответа API.
+     *
+     * У забора и оградки это сводка сервера mainMaterials: секции и столбы,
+     * в которые собрана вся смета.
+     * @param {object} estimate - смета из ответа API: materials и,
+     *   у забора и оградки, mainMaterials.
      * @param {string} type - тип объекта.
      * @param {object|null} request - тело запроса.
      * @returns {object}
      */
-    static _mainMaterials(materials, type, request = null) {
+    static _mainMaterials(estimate, type, request = null) {
         if (type === CalculationType.PROJECT) {
-            return Calculator._mainProjectMaterials(materials, request);
+            return Calculator._mainProjectMaterials(estimate, request);
         }
 
+        if (estimate.mainMaterials) {
+            return estimate.mainMaterials;
+        }
+
+        const materials = estimate.materials || {};
         const keys = MAIN_MATERIALS[type];
         if (!keys) {
             return materials;
@@ -446,11 +462,17 @@ class Calculator {
      * roles: хотя бы одна её роль основная у какого-то объекта проекта.
      * Готовые изделия ролей не имеют и считаются основными, как у мебели и
      * грядок. Сервер, который roles ещё не отдаёт, получает смету целиком.
-     * @param {object} materials - словарь позиций из ответа API.
+     *
+     * Забор и оградка в отборе по ролям не участвуют, если пришла сводка
+     * mainMaterials: их секции и столбы добавляются из неё целиком.
+     * @param {object} estimate - смета из ответа API: materials и, если в
+     *   проекте есть забор или оградка, mainMaterials.
      * @param {object|null} request - тело запроса проекта.
      * @returns {object}
      */
-    static _mainProjectMaterials(materials, request) {
+    static _mainProjectMaterials(estimate, request) {
+        const materials = estimate.materials || {};
+        const summary = estimate.mainMaterials;
         const positions = Object.values(materials);
         if (!positions.some(material => Array.isArray(material.roles))) {
             return materials;
@@ -458,6 +480,7 @@ class Calculator {
 
         const roles = new Set();
         for (const object of (request && request.objects) || []) {
+            if (summary && SUMMARY_TYPES.includes(object.type)) continue;
             for (const role of MAIN_MATERIALS[object.type] || []) roles.add(role);
         }
 
@@ -468,7 +491,7 @@ class Calculator {
                 main[key] = material;
             }
         }
-        return main;
+        return {...main, ...(summary || {})};
     }
 
     /**
