@@ -331,6 +331,7 @@ function _dResetAllConfigurations() {
   S.mats = {};
   S.elementMat = {};
   S.estimate = {};
+  _dShots = []; _dRenderShots();   // снимки — вид прежнего проекта
   S.catFilters = {};        // фильтры каталога у каждого раздела свои
   S.catSection = null;
   S.curSec = 0;
@@ -1504,10 +1505,12 @@ function _dSeedSection(secId, fresh) {
     if (!S.beds || S.beds.length === 0) { S.beds = [_defaultBed()]; S.activeBed = 0; }
     return;
   }
-  // Первая лестница — у длинной свободной стороны террасы (stepsPlaceAtTerrace);
-  // при повторном открытии раздела её положение не трогаем.
+  // Первая лестница — в проход ограждения террасы, если он есть
+  // (stepsPlaceAtRailingEntry), иначе у длинной свободной стороны террасы
+  // (stepsPlaceAtTerrace); при повторном открытии раздела её положение не трогаем.
   if (secId === 'steps') {
-    if (fresh && stepsAll().length === 1 && typeof stepsPlaceAtTerrace === 'function') stepsPlaceAtTerrace();
+    if (fresh && stepsAll().length === 1 && typeof stepsPlaceAtTerrace === 'function'
+        && !stepsPlaceAtRailingEntry()) stepsPlaceAtTerrace();
     _stepsNormalize();
     return;
   }
@@ -1646,10 +1649,90 @@ function _dSyncSummaryBtn() {
   if (!btn) return;
   const show = (dStep === 3);
   btn.style.display = show ? '' : 'none';
+  const shot = document.getElementById('d-btn-shot');
+  if (shot) shot.style.display = show ? '' : 'none';
   // Кнопка живёт внизу правой панели: прячем и контейнер, иначе остаются
   // его отступы пустой полосой под списком товаров.
   const footer = btn.closest('.d-panel-footer');
   if (footer) footer.classList.toggle('hidden', !show);
+}
+
+// ── Снимки рендера (правка 2026-11-01) ──
+// «Снимок» в правой панели сохраняет текущий вид сцены — до D_SHOTS_MAX кадров.
+// Снимки показываются миниатюрами над кнопкой и крупно в смете. Хранятся только
+// в памяти страницы: в снимок проекта и заявку не идут — формат с бэкендом не
+// согласован. Слой редактора (контуры, маркеры) на время кадра прячется:
+// снимок — это рендер, а не экран редактирования; подписи размеров — HTML
+// поверх канваса, в кадр они не попадают.
+const D_SHOTS_MAX = 3;
+const D_SHOT_MAX_W = 1600;    // px — длинная сторона кадра; больше смете не нужно
+let _dShots = [];             // dataURL (JPEG)
+
+function dTakeShot() {
+  if (_dShots.length >= D_SHOTS_MAX) {
+    dToast(`Снимков уже ${D_SHOTS_MAX} — удалите лишний, чтобы сделать новый`);
+    return;
+  }
+  if (typeof threeState === 'undefined' || !threeState || !threeState.renderer) {
+    dToast('3D-вид недоступен — снимок не сделать');
+    return;
+  }
+  const { renderer, scene, camera } = threeState;
+  const layer = (typeof E3D !== 'undefined' && E3D.group) ? E3D.group : null;
+  const was = layer ? layer.visible : true;
+  let url = null;
+  try {
+    if (layer) layer.visible = false;
+    // Канвас без preserveDrawingBuffer: читать его можно только сразу после
+    // отрисовки, в той же задаче, — поэтому рисуем кадр здесь же.
+    renderer.render(scene, camera);
+    const src = renderer.domElement;
+    const k = Math.min(1, D_SHOT_MAX_W / Math.max(src.width, src.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(src.width * k);
+    c.height = Math.round(src.height * k);
+    c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+    url = c.toDataURL('image/jpeg', 0.88);
+  } catch (e) {
+    console.warn('[shot]', e);
+  } finally {
+    if (layer) layer.visible = was;
+  }
+  if (!url) { dToast('Не удалось сделать снимок'); return; }
+  _dShots.push(url);
+  _dRenderShots();
+  dToast(`Снимок ${_dShots.length} из ${D_SHOTS_MAX} — он будет в смете`);
+}
+
+function dRemoveShot(i) {
+  _dShots.splice(i, 1);
+  _dRenderShots();
+}
+
+function _dRenderShots() {
+  const host = document.getElementById('d-shots');
+  if (host) {
+    host.innerHTML = _dShots.map((u, i) => `
+      <div class="d-shot">
+        <img src="${u}" alt="Снимок ${i + 1}" onclick="dShowPhoto(event, _dShots[${i}])">
+        <button class="d-shot-del" title="Удалить снимок" onclick="dRemoveShot(${i})">×</button>
+      </div>`).join('');
+  }
+  const btn = document.getElementById('d-btn-shot');
+  if (btn) {
+    btn.textContent = _dShots.length ? `Снимок (${_dShots.length}/${D_SHOTS_MAX})` : 'Снимок';
+    btn.classList.toggle('full', _dShots.length >= D_SHOTS_MAX);
+  }
+}
+
+// Блок снимков в смете; пусто — ничего.
+function _dShotsSummaryHtml() {
+  if (!_dShots.length) return '';
+  return `<div class="est-shots">
+      <div class="est-title">Снимки</div>
+      ${_dShots.map((u, i) => `<img class="est-shot" src="${u}" alt="Снимок ${i + 1}"
+            onclick="dShowPhoto(event, _dShots[${i}])">`).join('')}
+    </div>`;
 }
 
 // ══════════════════════════════════════════════
@@ -3523,7 +3606,9 @@ function _poolCutAreaM2() {
 // Сетевую часть держит обёртка бэкендера (backend_API/Calculator.js): адрес,
 // метод, разбор ответа и ошибок. Свой fetch убран, чтобы формат запроса жил в
 // одном месте — в их библиотеке и calculation_api.md.
-let _projectCalc = null;    // { key, state:'loading'|'ok'|'err', data, error }
+// { key, payload, error?, tabs: { [id вкладки]: { state:'loading'|'ok'|'err', data, error } } }
+// error на верхнем уровне — запрос не собрался, вкладки не запрашивались.
+let _projectCalc = null;
 let _calculator = null;
 
 function _dCalculator() {
@@ -3546,23 +3631,34 @@ function _calcErrorText(e) {
   }
 }
 
-// Запускает расчёт, если тело запроса изменилось; перерисовывает блок по готовности.
-function _ensureProjectCalc() {
+// Запускает расчёт открытой вкладки сметы, если её ещё нет для текущего тела
+// запроса; перерисовывает блок по готовности.
+// Запрос — НА КАЖДУЮ вкладку со своей опцией (правка 2026-11-01, просьба
+// бэкенда). Опцию Calculator применяет к ответу сервера, а у забора и оградки
+// «Только товар» — это сводка mainMaterials, которой нет в уже урезанном
+// ответе ALL_WITH_WORKS: прежняя схема «один полный запрос, вкладки режем сами»
+// теряла её, и оградка в первой вкладке пропадала. Одинаковый запрос сервер
+// десять минут отдаёт из кэша, так что лишние запросы почти бесплатны.
+// Ответы кэшируются по вкладке, пока не изменится тело запроса.
+function _ensureProjectCalc(tabId) {
   const req = buildProjectCalcRequest();
-  if (req.error) { _projectCalc = { key: 'x', state: 'err', error: req.error }; return; }
+  if (req.error) { _projectCalc = { key: 'x', error: req.error, tabs: {} }; return; }
   const calc = _dCalculator();
-  if (!calc) { _projectCalc = { key: 'x', state: 'err', error: 'Сервис расчёта не подключён.' }; return; }
+  if (!calc) { _projectCalc = { key: 'x', error: 'Сервис расчёта не подключён.', tabs: {} }; return; }
   const key = JSON.stringify(req.payload);
-  if (_projectCalc && _projectCalc.key === key && _projectCalc.state !== 'err') return;
-  _projectCalc = { key, state: 'loading' };
-  // Полный ответ (материалы и работы): вкладки сметы урезают его сами.
-  calc.getCalculation(CalculationType.PROJECT, req.payload, CalculationOption.ALL_WITH_WORKS)
-    .then(data => { _projectCalc = { key, state: 'ok', data, payload: req.payload }; _dRenderProjectCalc(); })
+  if (!_projectCalc || _projectCalc.key !== key) _projectCalc = { key, payload: req.payload, tabs: {} };
+  const tab = D_EST_TABS.find(t => t.id === (tabId || _dEstTab)) || D_EST_TABS[0];
+  const cur = _projectCalc.tabs[tab.id];
+  if (cur && cur.state !== 'err') return;
+  const slot = _projectCalc.tabs[tab.id] = { state: 'loading' };
+  const mine = _projectCalc;
+  calc.getCalculation(CalculationType.PROJECT, req.payload, tab.opt())
+    .then(data => { slot.state = 'ok'; slot.data = data; })
     .catch(e => {
-      console.warn('[calculate_project]', e);
-      _projectCalc = { key, state: 'err', error: _calcErrorText(e) };
-      _dRenderProjectCalc();
-    });
+      console.warn('[calculate_project]', tab.id, e);
+      slot.state = 'err'; slot.error = _calcErrorText(e);
+    })
+    .then(() => { if (_projectCalc === mine) _dRenderProjectCalc(); });
 }
 
 // Итог по объекту: материалы + работы.
@@ -3573,9 +3669,8 @@ function _objectCalcTotal(obj) {
   return mats + works;
 }
 
-// Вкладки сметы (правка 2026-10-16) → опции Calculator. Опцию Calculator
-// применяет на клиенте к одному и тому же ответу API, поэтому запрос один
-// (полный, _ensureProjectCalc), а вкладки собираются из него Calculator._shape.
+// Вкладки сметы (правка 2026-10-16) → опции Calculator. Каждая вкладка —
+// свой запрос с опцией (_ensureProjectCalc).
 const D_EST_TABS = [
   { id: 'main',  lbl: 'Только товар',     opt: () => CalculationOption.ONLY_MAIN_MATERIALS },
   { id: 'mats',  lbl: 'С комплектующими', opt: () => CalculationOption.ONLY_MATERIALS },
@@ -3585,33 +3680,35 @@ let _dEstTab = 'main';
 
 function dSetEstTab(id) {
   _dEstTab = id;
+  try { _ensureProjectCalc(id); }
+  catch (e) { console.error('[project calc] не удалось собрать запрос', e); }
   _dRenderProjectCalc();
 }
 
 function _dRenderProjectCalc() {
   const host = document.getElementById('d-project-calc');
   if (!host) return;
-  const c = _projectCalc;
   const head = '<div class="est-title">Расчёт по спецификации</div>';
-  if (!c || c.state === 'err') {
-    host.innerHTML = head + `<div class="est-empty">${(c && c.error) || 'Расчёт недоступен.'}</div>`;
-    return;
-  }
-  if (c.state === 'loading') {
-    host.innerHTML = head + '<div class="d-cat-loading"><div class="d-cat-spinner"></div>Считаем проект…</div>';
+  if (!_projectCalc || _projectCalc.error) {
+    host.innerHTML = head + `<div class="est-empty">${(_projectCalc && _projectCalc.error) || 'Расчёт недоступен.'}</div>`;
     return;
   }
   const tab = D_EST_TABS.find(t => t.id === _dEstTab) || D_EST_TABS[0];
-  let shaped = c.data;
-  try {
-    shaped = Calculator._shape(c.data, CalculationType.PROJECT, tab.opt(), c.payload);
-  } catch (e) {
-    console.warn('[calculate_project] не удалось применить опцию', tab.id, e);
-  }
-  const objects = (shaped && shaped.objects) || [];
+  // Вкладки видны всегда, даже пока считается или упала одна из них: на другую
+  // можно переключиться.
   const tabs = `<div class="est-tabs">${D_EST_TABS.map(t =>
     `<button class="est-tab${t.id === tab.id ? ' active' : ''}"
              onclick="event.stopPropagation(); dSetEstTab('${t.id}')">${t.lbl}</button>`).join('')}</div>`;
+  const c = _projectCalc.tabs[tab.id];
+  if (!c || c.state === 'loading') {
+    host.innerHTML = head + tabs + '<div class="d-cat-loading"><div class="d-cat-spinner"></div>Считаем проект…</div>';
+    return;
+  }
+  if (c.state === 'err') {
+    host.innerHTML = head + tabs + `<div class="est-empty">${c.error || 'Расчёт недоступен.'}</div>`;
+    return;
+  }
+  const objects = (c.data && c.data.objects) || [];
   if (!objects.length) {
     host.innerHTML = head + tabs + '<div class="est-empty">Бэкенд вернул пустой расчёт.</div>';
     return;
@@ -3678,10 +3775,13 @@ function dShowSummary() {
       _ensureProjectCalc();
     } catch (e) {
       console.error('[project calc] не удалось собрать запрос', e);
-      _projectCalc = { key: 'x', state: 'err', error: 'Не удалось собрать запрос: ' + e.message };
+      _projectCalc = { key: 'x', error: 'Не удалось собрать запрос: ' + e.message, tabs: {} };
     }
     _dRenderProjectCalc();
   }
+  // Снимки рендера — после расчёта, своим блоком (_dRenderProjectCalc
+  // перерисовывает только #d-project-calc).
+  body.insertAdjacentHTML('beforeend', _dShotsSummaryHtml());
   document.getElementById('d-summary-overlay').classList.add('active');
 }
 
