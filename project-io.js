@@ -353,13 +353,72 @@ function pioDumpRequest(name, email) {
   return dump;
 }
 
+// ── Снимки к заявке (правка 2026-11-13) ─────────────────────────────────
+// Снимки рендера (кнопка «Снимок», nav-desktop.js) уходят изображениями в
+// начало сметы в письме. Порядок по catalog_api.md, «Изображения к заявке»:
+// create_project с images: N → сразу POST изображений. Письма ждут их до
+// 2 минут; сетевую ошибку можно повторить, пока не прошло это время; 409 —
+// изображения больше не ждут, повторять незачем. Изображения ждут только при
+// calculation, сколько на деле — поле images ответа. Заявка от снимков не
+// зависит: не дошли — письмо уйдёт без них.
+const PIO_IMG_RETRIES = 3;
+const PIO_IMG_DEADLINE_MS = 110000;    // чуть меньше серверных 2 минут
+
+function _pioShotBlobs() {
+  const shots = (typeof _dShots !== 'undefined' && Array.isArray(_dShots)) ? _dShots : [];
+  return shots.slice(0, 3).map(url => {
+    const [head, b64] = url.split(',');
+    const mime = (/data:([^;]+)/.exec(head) || [])[1] || 'image/jpeg';
+    const bin = atob(b64);
+    const buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    return new Blob([buf], { type: mime });
+  });
+}
+
+async function _pioUploadShots(rm, saveId, blobs, debug) {
+  const started = Date.now();
+  for (let attempt = 1; attempt <= PIO_IMG_RETRIES; attempt++) {
+    const res = debug ? await rm.uploadProjectImagesDebug(saveId, blobs)
+                      : await rm.uploadProjectImages(saveId, blobs);
+    if (res) return { ok: true, images: res.images };
+    const e = rm.lastUploadError || {};
+    // Повторяем только сетевой сбой (status 0) — остальное повтором не лечится.
+    if (e.status !== 0 || Date.now() - started > PIO_IMG_DEADLINE_MS) return { ok: false, error: e };
+    await new Promise(r => setTimeout(r, 1500 * attempt));
+  }
+  return { ok: false, error: rm.lastUploadError || {} };
+}
+
+// Отладочный режим заявки: ?debug=<токен> в адресе страницы. Заявка проходит
+// весь путь, но писем нет, а смета приходит PDF-файлом (catalog_api.md,
+// «Отладочные адреса»). Токен в репозитории не хранится; на время вкладки он
+// запоминается в sessionStorage, чтобы пережить переходы.
+const PIO_DEBUG_KEY = 'shpuk-debug-token';
+
+function pioDebugToken() {
+  let t = null;
+  try { t = new URLSearchParams(location.search).get('debug'); } catch (_) {}
+  try {
+    if (t) sessionStorage.setItem(PIO_DEBUG_KEY, t);
+    else t = sessionStorage.getItem(PIO_DEBUG_KEY);
+  } catch (_) {}
+  return t || null;
+}
+
 async function saveProjectToServer(name, email) {
   const rm = (typeof _getRM === 'function') ? _getRM() : null;
   if (!rm || typeof rm.saveProject !== 'function') return { error: 'Сервис недоступен.' };
+  const token = pioDebugToken();
+  const debug = !!(token && typeof rm.saveProjectDebug === 'function');
+  if (debug) rm.setDebugToken(token);
+  const save = (calc, n) => debug ? rm.saveProjectDebug(name, email, data, calc, n)
+                                  : rm.saveProject(name, email, data, calc, n);
   const body = pioRequestBody(name, email);
   const data = body.data;
-  _pioLastAttempt = { body, response: null, at: new Date().toISOString() };
-  let res = await rm.saveProject(name, email, data, body.calculation);
+  const blobs = body.calculation ? _pioShotBlobs() : [];
+  _pioLastAttempt = { body, response: null, at: new Date().toISOString(), images: blobs.length, debug };
+  let res = await save(body.calculation, blobs.length);
   _pioLastAttempt.response = res
     ? { status: 'ok', body: res }
     : (rm.lastSaveError || { status: 0, message: '', body: '' });
@@ -370,14 +429,27 @@ async function saveProjectToServer(name, email) {
   const err = rm.lastSaveError;
   if (!res && err && err.status === 400 && /calculation/i.test(err.message || err.body || '')) {
     console.warn('[project] смета не принята сервером, отправляем заявку без неё:', err.message);
-    res = await rm.saveProject(name, email, data, null);
+    res = await save(null, 0);
     _pioLastAttempt.retriedWithoutCalculation = true;
     _pioLastAttempt.response = res
       ? { status: 'ok', body: res, note: 'принято со второй попытки, без calculation' }
       : (rm.lastSaveError || _pioLastAttempt.response);
   }
   if (!res) return { error: _pioSaveErrorText(rm), canDump: true };
-  return { saveId: res.saveId || res.save_id || res.id || res.key || null, raw: res };
+  const saveId = res.saveId || res.save_id || res.id || res.key || null;
+  const out = { saveId, raw: res, debug };
+  // Сколько изображений сервер ждёт на деле; 0 — не слать.
+  const want = Math.min(blobs.length, Number(res.images) || 0);
+  if (saveId && want > 0) {
+    out.shots = await _pioUploadShots(rm, saveId, blobs.slice(0, want), debug);
+    _pioLastAttempt.imagesResult = out.shots;
+    if (!out.shots.ok) console.warn('[project] снимки не приняты, письмо уйдёт без них:', out.shots.error);
+  }
+  // Отладка: смета, которая ушла бы в письме, — ссылкой на PDF.
+  if (debug && saveId && body.calculation && typeof rm.getProjectReportDebug === 'function') {
+    out.reportUrl = await rm.getProjectReportDebug(saveId);
+  }
+  return out;
 }
 
 function projectKeyFromUrl() {

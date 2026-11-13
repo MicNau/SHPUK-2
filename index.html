@@ -4,11 +4,38 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Конфигуратор дома — Десктоп</title>
-<link rel="stylesheet" href="styles-desktop.css?v=57">
+<link rel="stylesheet" href="styles-desktop.css?v=58">
 <!-- Мобильная раскладка: правила действуют только при body.m-mode (nav-mobile.js). -->
-<link rel="stylesheet" href="styles-mobile.css?v=5">
+<link rel="stylesheet" href="styles-mobile.css?v=6">
 </head>
 <body>
+
+<!-- ═══ СТАРТОВЫЙ ЭКРАН (десктоп, правка 2026-11-13) ═══
+     Поверх всего приложения при запуске; «НАЧАТЬ» открывает выбор дома
+     (dStart). На телефоне вместо него — окно #d-welcome-overlay (nav-mobile.js);
+     при открытии проекта по ссылке не показывается. -->
+<div class="d-start active" id="d-start">
+  <div class="d-start-wrap">
+    <div class="d-start-left">
+      <div class="d-start-kicker">Онлайн-конфигуратор</div>
+      <h1 class="d-start-title">Спроектируйте террасу своей мечты!</h1>
+      <img class="d-start-img" src="assets/start_hero.jpg" alt="Дом с террасой, ограждением, ступенями и садовой мебелью">
+      <div class="d-start-actions">
+        <button class="d-btn d-btn-next d-start-go" onclick="dStart()">НАЧАТЬ →</button>
+      </div>
+    </div>
+    <div class="d-start-right">
+      <ol class="d-start-steps">
+        <li><span class="d-start-num">1</span><span>Выберите тип дома (или пустой участок)</span></li>
+        <li><span class="d-start-num">2</span><span>Задайте размеры и форму террасы, ограждения и&nbsp;ступеней</span></li>
+        <li><span class="d-start-num">3</span><span>Подберите доски, ограждения, ступени и фасадную отделку из ДПК и МПК</span></li>
+        <li><span class="d-start-num">4</span><span>Выберите садовую мебель, грядки и элементы благоустройства участка</span></li>
+        <li><span class="d-start-num">5</span><span>Скачайте готовый эскиз и детальный расчёт стоимости</span></li>
+      </ol>
+      <div class="d-start-note">Все изменения отображаются в реальном времени!</div>
+    </div>
+  </div>
+</div>
 
 <!-- ═══ ХЕДЕР: название приложения и выход на сайт ═══ -->
 <div class="d-header">
@@ -153,9 +180,12 @@
       <div class="d-panel-body" id="d-panel-body">
         <div class="d-panel-filters">
           <button class="d-filters-toggle" id="d-filters-toggle" onclick="dToggleFilters()">
-            <span>Фильтры</span><span class="d-filters-caret">▾</span>
+            <span>Фильтры</span><span class="d-filters-caret">▼</span>
           </button>
           <div class="d-filters-box" id="d-filters-box">
+            <!-- Фильтры категории с сервера (_dRenderDynFilters); пока их нет —
+                 прежние локальные блоки ниже. -->
+            <div class="d-dyn-filters" id="d-dyn-filters" style="display:none"></div>
             <div class="d-spec-filters" id="d-spec-filters"></div>
             <div class="d-color-section" id="d-color-section">
               <div class="d-color-title">Цвет:</div>
@@ -194,7 +224,9 @@
 
 <!-- ═══ HINT OVERLAY (инструкция при первом заходе в редактор) ═══ -->
 <!-- Приветствие при запуске — поверх карточек домов, каждый раз (правка 2026-10-26).
-     Мобильная очередь подсказок ждёт, пока оно открыто (nav-mobile.js, _mHintNext). -->
+     С правки 2026-11-13 — только на телефоне: на десктопе вместо него стартовый
+     экран #d-start. Мобильная очередь подсказок ждёт, пока оно открыто
+     (nav-mobile.js, _mHintNext). -->
 <div class="d-hint-overlay active" id="d-welcome-overlay">
   <div class="d-hint-box d-welcome-box">
     <div class="d-hint-text">Приложение создаёт визуализацию вашей террасы с нашими материалами в сегментах премиальный/средний/эконом. К ним можно подобрать ограждения, ступени и отделку фасада из ДПК и МПК. Также можно выбрать садовую мебель и грядки для вашего участка. После этого можно получить эскиз и расчёт сметы по вашему проекту. Для строителей есть раскладка материала и подсистемы.</div>
@@ -283,7 +315,7 @@
 <div class="d-hint-overlay" id="d-req-done">
   <div class="d-hint-box">
     <div class="d-hint-title">Заявка отправлена</div>
-    <div class="d-hint-text">Смета и ссылка на текущий проект отправлены менеджеру
+    <div class="d-hint-text" id="d-req-done-text">Смета и ссылка на текущий проект отправлены менеджеру
       и вам на почту</div>
     <button class="d-btn d-btn-next" onclick="dCloseRequestDone()">Понятно</button>
   </div>
@@ -313,7 +345,7 @@
     (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
       ? '' : 'https://sollersdev.ru';
 </script>
-<script src="ResourceManager.js?v=15"></script>
+<script src="ResourceManager.js?v=16"></script>
 <!-- Расчёты на бэкенде: обёртка бэкендера, подключается как есть, без local-правок.
      Лежит в backend_API/ — это их выгрузка (см. calculation_api.md, calculator.md).
      NB: backend_API/ResourceManager.js — их копия каталожного менеджера, она НЕ
@@ -331,11 +363,11 @@
      Идёт после viewer3d-*, потому что опирается на threeState и worldToCanvas. -->
 <script src="editor3d.js?v=25"></script>
 <!-- Desktop navigation & UI -->
-<script src="nav-desktop.js?v=148"></script>
+<script src="nav-desktop.js?v=149"></script>
 <!-- Вертикальная раскладка телефона: переставляет те же узлы и ведёт свои
      четыре экрана. Идёт ПОСЛЕ nav-desktop.js — опирается на его функции. -->
-<script src="nav-mobile.js?v=8"></script>
+<script src="nav-mobile.js?v=9"></script>
 <!-- Снимок проекта: отправка заявки и открытие по ссылке из письма. -->
-<script src="project-io.js?v=7"></script>
+<script src="project-io.js?v=8"></script>
 </body>
 </html>

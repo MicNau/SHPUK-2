@@ -11,7 +11,13 @@ body.m-mode {
   --header-h: 44px;
   --panel-title-fz: 20px;
   overflow: hidden;
+  /* Высота — ВИДИМАЯ часть окна (--app-h ставит nav-mobile.js по innerHeight;
+     запасной вариант — 100dvh). 100vh у мобильных браузеров — высота БЕЗ
+     адресной строки: пока строка видна, низ экранов уходил под неё, и «Назад /
+     Дальше» и «Смета» появлялись только после прокрутки (правка 2026-11-13). */
+  height: var(--app-h, 100dvh); min-height: 0;
 }
+body.m-mode .d-screen { bottom: auto; height: calc(var(--app-h, 100dvh) - var(--header-h)); }
 
 /* ── ХЕДЕР ── */
 /* Название и «На главную» обязаны уместиться в одну строку (ТЗ п. 4): название
@@ -67,14 +73,16 @@ body.m-mode #d-screen-3 .d-workspace { flex-direction: column; min-height: 0; }
 /* Десктопная центральная колонка осталась пустой — вид из неё переехал в .m-3d;
    без этого её flex:1 забирал бы верх экрана под пустое место. */
 body.m-mode #d-screen-3 .d-center { display: none; }
-body.m-mode .m-3d { display: none; position: relative; flex: 0 0 42vh; min-height: 0; }
+/* Вид — треть видимой высоты (было 42vh): кнопки и «Смета» под ним должны
+   помещаться на экране и без прокрутки (правка 2026-11-13). */
+body.m-mode .m-3d { display: none; position: relative; flex: 0 0 calc(var(--app-h, 100dvh) * 0.34); min-height: 0; }
 body.m-mode #d-screen-3.m-open .m-3d { display: block; }
 body.m-mode .m-3d .d-center-view { position: absolute; inset: 0; }
 body.m-mode .m-sec { flex: 1; min-height: 0; display: flex; }
 body.m-mode .m-sec .d-sidebar { width: 100%; border-right: none; }
 body.m-mode .d-sidebar-title { padding: 10px 12px 6px; }
 body.m-mode .d-sidebar-list { padding: 0 12px 8px; gap: 6px; }
-/* «К параметрам дома» живёт в нижней панели экрана — своя строка кнопок в
+/* «Назад» (к списку элементов или к параметрам) живёт в нижней панели — своя строка кнопок в
    сайдбаре была бы её дублем. */
 body.m-mode .d-sidebar-actions { display: none; }
 body.m-mode .d-sb-btn { height: 44px; font-size: 16px; }
@@ -100,7 +108,14 @@ body.m-mode .m-bar .d-btn {
 /* Нижняя кромка: у телефонов там системная полоса жестов (safe-area). */
 body.m-mode #d-screen-3 .d-panel-footer {
   padding: 8px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-wrap: wrap; gap: 8px;
 }
+/* «Снимок» — рядом со «Сметой», а не отдельной строкой над ней: строка кнопок
+   у телефона на счету. Миниатюры снимков — своей строкой во всю ширину. */
+body.m-mode #d-screen-3 .d-panel-footer .d-shots { flex: 0 0 100%; margin-bottom: 0; }
+body.m-mode #d-screen-3 .d-panel-footer .d-shots:empty { display: none; }
+body.m-mode #d-screen-3 .d-panel-footer .d-shot-btn { flex: 0 0 auto; width: auto; height: 44px; padding: 0 14px; margin: 0; font-size: 14px; }
+body.m-mode #d-screen-3 .d-panel-footer .d-fab-summary { flex: 1; width: auto; }
 body.m-mode #d-screen-4 .m-bar {
   padding: 8px 12px calc(10px + env(safe-area-inset-bottom, 0px));
 }
@@ -136,10 +151,16 @@ body.m-mode .d-req-input { height: 44px; font-size: 16px; }
 /* Флажок под палец: 18 px мыши на телефоне мимо не промахнёшься только случайно. */
 body.m-mode .d-req-consent { font-size: 14px; gap: 12px; }
 body.m-mode .d-req-consent input { width: 24px; height: 24px; }
-body.m-mode .d-summary-box { width: 100%; max-width: calc(100vw - 24px); max-height: 86vh; }
+body.m-mode .d-summary-box { width: 100%; max-width: calc(100vw - 24px); max-height: calc(var(--app-h, 100dvh) * 0.86); }
 body.m-mode .d-summary-header { padding: 14px 16px; }
 body.m-mode .d-summary-title { font-size: 19px; }
 body.m-mode .d-summary-body { padding: 14px 16px; }
 body.m-mode .d-summary-actions { padding: 12px 16px; gap: 8px; }
 body.m-mode .d-summary-btn { height: 44px; font-size: 14px; }
 body.m-mode .d-photo-overlay { padding: 16px; }
+
+/* Плашка WebGL (webgl-guard.js) на телефоне: без строки сведений и мельче —
+   иначе она закрывала весь вид (правка 2026-11-13). */
+body.m-mode .gl-banner { left: 8px; right: 8px; bottom: 8px; padding: 8px 30px 8px 10px; }
+body.m-mode .gl-banner .gl-lead { font-size: 11px; }
+body.m-mode .gl-banner .gl-info { display: none; }

@@ -1584,6 +1584,12 @@ function _dSyncSectionHint() {
 // Приветствие при запуске (index.html, #d-welcome-overlay) открыто сразу в
 // разметке — без мигания карточек до скрипта. Закрыли — мобильная очередь
 // подсказок показывает то, что накопила за это время.
+// Стартовый экран (десктоп, правка 2026-11-13): «НАЧАТЬ» открывает выбор дома.
+function dStart() {
+  const el = document.getElementById('d-start');
+  if (el) el.classList.remove('active');
+}
+
 function dWelcomeOpen() {
   const ov = document.getElementById('d-welcome-overlay');
   return !!(ov && ov.classList.contains('active'));
@@ -1659,9 +1665,10 @@ function _dSyncSummaryBtn() {
 
 // ── Снимки рендера (правка 2026-11-01) ──
 // «Снимок» в правой панели сохраняет текущий вид сцены — до D_SHOTS_MAX кадров.
-// Снимки показываются миниатюрами над кнопкой и крупно в смете. Хранятся только
-// в памяти страницы: в снимок проекта и заявку не идут — формат с бэкендом не
-// согласован. Слой редактора (контуры, маркеры) на время кадра прячется:
+// Снимки показываются миниатюрами над кнопкой и крупно в смете, а с заявкой
+// уходят изображениями на первый лист сметы в письме (saveProjectToServer,
+// project-io.js; правка 2026-11-13). Хранятся только в памяти страницы — в
+// описание проекта не входят. Слой редактора (контуры, маркеры) на время кадра прячется:
 // снимок — это рендер, а не экран редактирования; подписи размеров — HTML
 // поверх канваса, в кадр они не попадают.
 const D_SHOTS_MAX = 3;
@@ -1776,6 +1783,14 @@ function _dRenderPanelContent() {
 let _dFiltersOpen = false;
 
 function _dRenderFilters() {
+  // Фильтры с сервера есть — рисуем их, локальные блоки прячем.
+  const dyn = _dDynReady(_activeSectionId());
+  _dRenderDynFilters(dyn);
+  for (const id of ['d-spec-filters', 'd-color-section', 'd-price-section']) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = dyn ? 'none' : '';
+  }
+  if (dyn) { _dSyncFiltersBox(); return; }
   const spec = document.getElementById('d-spec-filters');
   if (spec) spec.innerHTML = D_SECTION_FILTERS[dActiveItem] || '';
   _dRenderRailFilters();
@@ -1784,6 +1799,163 @@ function _dRenderFilters() {
   _dRenderColorGrid();
   _dRenderPriceGrid();
   _dSyncFiltersBox();
+}
+
+// ── Фильтры каталога с сервера (правка 2026-11-13) ──
+// GET /api/v1/products/filters/?tags=… отдаёт фильтры категории и их значения
+// (catalog_api.md, «Какие фильтры есть у категории»): цвет, цена, ценовая
+// категория, бренд, размеры, сечение доски, крышка и столб ограждения… Новое
+// поле товара появляется в панели само, без правки фронта. Выбор хранится в
+// catFilter(раздел).dyn ({key: Set(JSON значения)}) и dynRange ({key: {min, max}});
+// в фильтры запроса его переводит ResourceManager.filtersFromSelection. Сервер
+// фильтров не отдал (ошибка, старый бэкенд) — работает прежняя локальная панель.
+const _dDyn = {};   // теги через запятую → { state: 'loading'|'ok'|'err', filters }
+
+// Подписи значений, о которых договорились в интерфейсе раньше серверных.
+const DYN_VALUE_LABELS = {
+  price_category: { budget: 'Эконом', balance: 'Средний', premium: 'Премиум' },
+};
+// Выбор, с которым раздел открывается впервые (как CAT_FILTER_DEFAULTS).
+const DYN_FILTER_DEFAULTS = {
+  terrace: { core_type: ['hollow'] },
+};
+
+// Теги, по которым запрашивается раздел каталога (они же — категория фильтров).
+function _dSectionTags(sectionId) {
+  const tag = (typeof SECTION_TAGS !== 'undefined') ? SECTION_TAGS[sectionId] : null;
+  const merge = ((typeof SECTION_MERGE !== 'undefined') && SECTION_MERGE[sectionId]) || [];
+  return tag ? [tag, ...merge.map(id => SECTION_TAGS[id]).filter(Boolean)] : [];
+}
+
+// Набор фильтров раздела, если он загружен и не пуст; иначе null.
+function _dDynReady(sectionId) {
+  const tags = _dSectionTags(sectionId);
+  const d = tags.length ? _dDyn[tags.join(',')] : null;
+  return (d && d.state === 'ok' && d.filters.length) ? d : null;
+}
+
+// Запускает загрузку набора фильтров раздела; возвращает её состояние.
+function _dDynEnsure(sectionId) {
+  const tags = _dSectionTags(sectionId);
+  if (!tags.length || _catalogDown) return 'err';
+  const key = tags.join(',');
+  if (_dDyn[key]) return _dDyn[key].state;
+  const rm = _getRM();
+  if (!rm || typeof rm.getFilters !== 'function') { _dDyn[key] = { state: 'err', filters: [] }; return 'err'; }
+  const d = _dDyn[key] = { state: 'loading', filters: [] };
+  rm.getFilters(tags)
+    .then(res => {
+      d.filters = (res && Array.isArray(res.filters)) ? res.filters : [];
+      d.state = res ? 'ok' : 'err';
+      if (!res) console.warn('[catalog] фильтры категории не пришли — локальная панель:', key);
+    })
+    .catch(e => { console.warn('[catalog] фильтры категории', key, e); d.state = 'err'; })
+    .then(() => {
+      if (_dSectionTags(_activeSectionId()).join(',') !== key) return;
+      _dRenderFilters();
+      dShowResults();
+    });
+  return 'loading';
+}
+
+// Выбор пользователя в виде, который понимает filtersFromSelection: значения —
+// в исходном типе (20 и "20" для сервера разные). Ключи, которых нет в наборе
+// раздела, пропускаются.
+function _dDynSelection(dyn) {
+  const f = catFilter(dActiveItem);
+  if (!f.dyn) f.dyn = {};
+  if (!f.dynRange) f.dynRange = {};
+  if (!f.dynSeeded) {
+    f.dynSeeded = true;
+    const def = DYN_FILTER_DEFAULTS[dActiveItem] || {};
+    for (const k of Object.keys(def)) f.dyn[k] = new Set(def[k].map(v => JSON.stringify(v)));
+  }
+  const out = {};
+  for (const flt of dyn.filters) {
+    if (flt.type === 'range') {
+      const r = f.dynRange[flt.key];
+      if (r && (typeof r.min === 'number' || typeof r.max === 'number')) out[flt.key] = { ...r };
+      continue;
+    }
+    const sel = f.dyn[flt.key];
+    if (!sel || !sel.size) continue;
+    const vals = (flt.values || []).filter(v => sel.has(JSON.stringify(v.value))).map(v => v.value);
+    if (vals.length) out[flt.key] = vals;
+  }
+  return out;
+}
+
+const _dEsc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function _dDynColorHex(name) {
+  const hex = (typeof CATALOG_COLOR_HEX !== 'undefined') ? CATALOG_COLOR_HEX : {};
+  if (hex[name]) return hex[name];
+  const norm = _colorNorm(name);
+  const k = Object.keys(hex).find(n => _colorNorm(n) === norm);
+  return k ? hex[k] : '#999999';
+}
+
+function _dRenderDynFilters(dyn) {
+  const host = document.getElementById('d-dyn-filters');
+  if (!host) return;
+  if (!dyn) { host.innerHTML = ''; host.style.display = 'none'; return; }
+  host.style.display = '';
+  const f = catFilter(dActiveItem);
+  _dDynSelection(dyn);                      // засевает выбор по умолчанию
+  host.innerHTML = dyn.filters.map((flt, fi) => {
+    const title = `<div class="d-color-title">${_dEsc(flt.label || flt.key)}${flt.unit && flt.type === 'range' ? ', ' + _dEsc(flt.unit) : ''}:</div>`;
+    if (flt.type === 'range') {
+      const r = f.dynRange[flt.key] || {};
+      const box = (b, ph) => `<input class="d-dyn-range" type="text" inputmode="numeric"
+          placeholder="${b === 'min' ? 'от' : 'до'} ${Math.round(ph)}" value="${typeof r[b] === 'number' ? r[b] : ''}"
+          onchange="dSetDynRange(${fi}, '${b}', this.value)">`;
+      return `<div class="d-color-section">${title}
+          <div class="d-dyn-range-row">${box('min', flt.min)}<span>—</span>${box('max', flt.max)}</div></div>`;
+    }
+    const sel = f.dyn[flt.key] || new Set();
+    const vals = flt.values || [];
+    if (flt.param === 'colors') {
+      return `<div class="d-color-section">${title}<div class="d-color-grid">${vals.map((v, vi) =>
+        `<div class="d-color-dot ${sel.has(JSON.stringify(v.value)) ? 'selected' : ''}"
+              data-label="${_dEsc(v.label)}" style="background:${_dDynColorHex(String(v.value))};"
+              onclick="dToggleDyn(${fi}, ${vi})"></div>`).join('')}</div></div>`;
+    }
+    const labels = DYN_VALUE_LABELS[flt.key] || {};
+    return `<div class="d-color-section">${title}<div class="d-price-grid">${vals.map((v, vi) => {
+      const lbl = labels[v.value] || (v.label + (flt.unit ? ' ' + flt.unit : ''));
+      return `<button class="d-price-btn ${sel.has(JSON.stringify(v.value)) ? 'selected' : ''}"
+                      title="${_dEsc(v.count != null ? v.count + ' шт.' : '')}"
+                      onclick="dToggleDyn(${fi}, ${vi})">
+                <span class="d-radio"></span><span class="d-price-txt">${_dEsc(lbl)}</span>
+              </button>`;
+    }).join('')}</div></div>`;
+  }).join('');
+}
+
+// Повторный клик снимает значение; значения одного фильтра складываются по ИЛИ.
+function dToggleDyn(fi, vi) {
+  const dyn = _dDynReady(_activeSectionId());
+  if (!dyn) return;
+  const flt = dyn.filters[fi], v = flt && (flt.values || [])[vi];
+  if (!v) return;
+  const f = catFilter(dActiveItem);
+  const sel = f.dyn[flt.key] || (f.dyn[flt.key] = new Set());
+  const id = JSON.stringify(v.value);
+  if (sel.has(id)) sel.delete(id); else sel.add(id);
+  _dRenderDynFilters(dyn);
+  dShowResults();
+}
+
+function dSetDynRange(fi, bound, text) {
+  const dyn = _dDynReady(_activeSectionId());
+  if (!dyn) return;
+  const flt = dyn.filters[fi];
+  if (!flt) return;
+  const f = catFilter(dActiveItem);
+  const r = f.dynRange[flt.key] || (f.dynRange[flt.key] = {});
+  const n = parseFloat(String(text).replace(',', '.').replace(/\s/g, ''));
+  if (isFinite(n) && n >= 0) r[bound] = n; else delete r[bound];
+  dShowResults();
 }
 
 function _dSyncFiltersBox() {
@@ -2386,6 +2558,7 @@ function _availableColors(elId) {
 function _dRenderColorGrid() {
   const grid = document.getElementById('d-color-grid');
   if (!grid) return;
+  if (_dDynReady(_activeSectionId())) return;   // цвет — среди фильтров сервера
   // Мебель: у товаров каталога поле color пустое (проверено 2026-08-02) — любой
   // выбранный чип обнулил бы выдачу. Прячем блок, пока бэкенд не заполнит цвета.
   const sect = document.getElementById('d-color-section');
@@ -2409,6 +2582,7 @@ function _dRenderColorGrid() {
 function _dRenderPriceGrid() {
   const grid = document.getElementById('d-price-grid');
   if (!grid) return;
+  if (_dDynReady(_activeSectionId())) return;   // ценовая категория — среди фильтров сервера
   // Разделы без ценовых категорий: у мебели цена за изделие (тиры заданы для
   // доски), у забора и грядок категорий в каталоге нет — фильтр давал бы пустую
   // выдачу. Блок прячем целиком и выбор сбрасываем.
@@ -2589,20 +2763,24 @@ async function _ensureCatalogSection(sectionId, opts) {
     // разных разделах, section_id отрезал бы часть выдачи.
     // Наборы из SECTION_MERGE показываются одним списком (доска ДПК + МПК): берём их
     // МУЛЬТИТЕГОМ и без section_id — он отрезал бы вторую половину выдачи.
-    const merge = ((typeof SECTION_MERGE !== 'undefined') && SECTION_MERGE[sectionId]) || [];
-    const tags = tag ? [tag, ...merge.map(id => SECTION_TAGS[id]).filter(Boolean)] : [];
+    const tags = _dSectionTags(sectionId);
     const tagOnly = tags.length > 1
       || ((typeof SECTION_TAG_ONLY !== 'undefined') && SECTION_TAG_ONLY.has(sectionId) && tag);
     const filters = tagOnly ? [] : [new Filter(FilterType.SECTION_ID, sectionId)];
     if (tags.length) filters.push(new Filter(FilterType.TAGS, tags));
     // Объединённому набору лимит вдвое: 50 позиций делились бы между двумя тегами.
     filters.push(new Filter(FilterType.LIMIT, tags.length > 1 ? 100 : 50));
+    // Фильтры с сервера (правка 2026-11-13): выбор пользователя переводит в
+    // фильтры запроса сам ResourceManager. Прежние предикаты ниже — запасной
+    // путь, когда сервер своих фильтров не отдал.
+    const dyn = raw ? null : _dDynReady(sectionId);
+    const dynFilters = dyn ? ResourceManager.filtersFromSelection(dyn.filters, _dDynSelection(dyn)) : [];
     // Ценовая категория — предикат по характеристике товара (ТЗ п. 4): вилки цен
     // на клиенте больше не считаются. Несколько выбранных категорий идут одним
     // предикатом IN.
-    const cats = raw ? [] : _selectedPriceCats();
+    const cats = (raw || dyn) ? [] : _selectedPriceCats();
     const props = {};
-    for (const k of Object.keys(D_PROP_FILTERS)) props[k] = raw ? [] : _selectedProp(k);
+    for (const k of Object.keys(D_PROP_FILTERS)) props[k] = (raw || dyn) ? [] : _selectedProp(k);
     const preds = [];
     if (typeof PropertyPath !== 'undefined' && typeof PropertyOp !== 'undefined') {
       const pred = (path, list) => ({
@@ -2620,6 +2798,7 @@ async function _ensureCatalogSection(sectionId, opts) {
       }
     }
     if (preds.length) filters.push(new Filter(FilterType.PROPERTIES, preds));
+    filters.push(...dynFilters);
     const res = await rm.getResources(...filters);
     // res === null → ошибка запроса → null (повторяемо); иначе массив (возможно пустой).
     let products = res ? (res.products || []) : null;
@@ -2633,6 +2812,7 @@ async function _ensureCatalogSection(sectionId, opts) {
       // показывал весь раздел без отбора.
       const retry = [new Filter(FilterType.TAGS, tags), new Filter(FilterType.LIMIT, 50)];
       if (preds.length) retry.push(new Filter(FilterType.PROPERTIES, preds));
+      retry.push(...dynFilters);
       const byTag = await rm.getResources(...retry);
       const alt = byTag ? (byTag.products || []) : [];
       if (alt.length) {
@@ -2646,6 +2826,7 @@ async function _ensureCatalogSection(sectionId, opts) {
                  tags.length ? `(тег${tags.length > 1 ? 'и' : ''} «${tags.join(', ')}»)` : '(без тега)',
                  cats.length ? `(категор${cats.length > 1 ? 'ии' : 'ия'} «${cats.join(', ')}»)` : '',
                  ...Object.keys(props).filter(k => props[k].length).map(k => `(${k} «${props[k].join(', ')}»)`),
+                 dyn ? `(фильтры сервера ${JSON.stringify(_dDynSelection(dyn))})` : '',
                  '→', products === null ? 'ошибка запроса' : products.length + ' товар(ов)');
     _catalogCache[key] = products;
     if (products === null) _catalogNoteFail(sectionId);
@@ -2716,6 +2897,8 @@ function _selectedPriceCats() {
 // Ключ кэша каталога: раздел плюс выбранные категории и значения фильтров по
 // характеристикам — выдачи для разных наборов разные, потому что фильтрует сервер.
 function _catKey(sectionId) {
+  const dyn = _dDynReady(sectionId);
+  if (dyn) return `${sectionId}|dyn|${JSON.stringify(_dDynSelection(dyn))}`;
   const parts = [String(sectionId), _selectedPriceCats().join(','),
                  ...Object.keys(D_PROP_FILTERS).map(k => _selectedProp(k).join(','))];
   while (parts.length > 1 && !parts[parts.length - 1]) parts.pop();
@@ -2785,9 +2968,14 @@ function _dRenderCatalogLoading() {
 // раздел и недоступный каталог подменялись заглушками STUB_RESULTS, и их можно
 // было «применить» и увидеть в смете. Теперь в этих случаях — сообщение.
 function dShowResults() {
+  const secId = _activeSectionId();
+  // Сначала — набор фильтров раздела с сервера: от него зависит и запрос
+  // товаров, и ключ кэша. Пока он едет, показываем «Загрузка»; не приехал —
+  // работает прежняя локальная панель.
+  const dynState = _dDynEnsure(secId);
+  if (dynState === 'loading') { _dRenderCatalogLoading(); return; }
   _dRenderColorGrid();
   _dRenderPriceGrid();
-  const secId = _activeSectionId();
   const key = _catKey(secId);
   const cached = _catalogCache[key];
   if (Array.isArray(cached)) {
@@ -2819,6 +3007,8 @@ function dShowResults() {
 // (сечение доски, направление, заполнение забора). Пустой ответ при таких
 // фильтрах — «под фильтры ничего нет», а не «раздел пуст».
 function _dServerFiltersActive() {
+  const dyn = _dDynReady(_activeSectionId());
+  if (dyn) return Object.keys(_dDynSelection(dyn)).length > 0;
   return _selectedPriceCats().length > 0
     || Object.keys(D_PROP_FILTERS).some(k => _selectedProp(k).length > 0);
 }
@@ -2845,6 +3035,7 @@ function _dRenderNoMatch() {
 function dResetCatFilters() {
   const f = catFilter(dActiveItem);
   for (const k of ['colors', 'prices', ...Object.keys(D_PROP_FILTERS)]) if (f[k]) f[k].clear();
+  f.dyn = {}; f.dynRange = {};
   if (dActiveItem === 'beds' && S.bedFilters) for (const k of Object.keys(S.bedFilters)) S.bedFilters[k] = [];
   if (dActiveItem === 'railing' && S.railFilters) for (const k of Object.keys(S.railFilters)) S.railFilters[k] = [];
   _dRenderFilters();
@@ -2908,7 +3099,9 @@ function _dRenderRealResults(allProducts) {
   if (!list) return;
   // Цвет — приоритетно из ПОЛЯ color (появилось в API 2026-07-29, имена совпадают
   // с палитрой COLORS.md); затем название; preview_text — fallback (см. _itemColors).
-  const products = _bedFilterProducts(_railingFilterProducts(_filterByColors(_filterRealByPrice(allProducts),
+  // Серверные фильтры отобрали выдачу сами — клиентские отборы не нужны.
+  const products = _dDynReady(_activeSectionId()) ? allProducts
+    : _bedFilterProducts(_railingFilterProducts(_filterByColors(_filterRealByPrice(allProducts),
     p => [p.color || '', p.name || '', p.previewText || ''])));
   // Связанный товар (терраса ↔ ступени ↔ ограждение) виден всегда: если его
   // отсеяли фильтры или он не попал в выдачу раздела — ставим первым.
@@ -3328,6 +3521,62 @@ function _linesToMm(name, markHouse) {
   });
 }
 
+// Перила лестницы (тумблер «Перила лестницы») в расчёте оградки (правка
+// 2026-11-13): у точек высота z, мм — отрезок с концами на разной высоте сервер
+// считает перилами на ступенях (длина вдоль уклона, поворотные крепления
+// railSwivelBracket; calculation_api.md, «Перила на ступенях»). Геометрия — как
+// в 3D (buildSteps3d): по линии с каждого бока лестницы, верх — на оси столба
+// ограждения террасы (RAIL_INSET вглубь от кромки) на высоте настила, низ — на
+// земле, где уклон перил через верх последней проступи её достигает. Верх
+// совпадает с концом линии ограждения у прохода — сервер ставит там общий столб.
+function _stairRailLines() {
+  if (!S.sections.includes('steps') || !(S.toggles && S.toggles['steps-railing'])) return [];
+  const G = _GRIDm();
+  const found = (parseFloat(document.getElementById('v-found')?.value || 80)) / 100;
+  const minH = (typeof TERRACE_MIN_H !== 'undefined') ? TERRACE_MIN_H : 0.15;
+  const bh = (typeof isEmptyLot === 'function' && isEmptyLot()) ? 0.35
+    : Math.min(found, Math.max(minH, (typeof S.terraceH === 'number') ? S.terraceH : found));
+  const rise = (typeof STEP_RISE !== 'undefined') ? STEP_RISE : 0.17;
+  const depth = (typeof STEP_DEPTH !== 'undefined') ? STEP_DEPTH : 0.28;
+  const nose = (typeof STEP_NOSING !== 'undefined') ? STEP_NOSING : 0.035;
+  const inset = (typeof RAIL_INSET !== 'undefined') ? RAIL_INSET : 0.10;
+  const n = Math.max(1, Math.ceil(bh / rise));
+  const realRise = bh / n;
+  const stairDepth = (n - 1) * depth + nose;
+  // Продление низа до земли по тому же уклону (как B в buildSteps3d).
+  const ext = (n > 1 && bh > realRise) ? stairDepth * realRise / (bh - realRise) : 0;
+  const zTop = Math.round(bh * 1000), zBot = n > 1 ? 0 : zTop;
+  const Dn = _stepsDepthNorm();
+  const sides = _stepsSupportSides();
+  const out = [];
+  for (const s of (typeof stepsAll === 'function' ? stepsAll() : [])) {
+    if (!s || !(s.w > 0) || !(s.h > 0)) continue;
+    const alongY = Math.abs(s.h - Dn) <= Math.abs(s.w - Dn);   // спуск по Y
+    const axis = alongY ? 'y' : 'x';
+    const lo = alongY ? s.y : s.x, hi = lo + (alongY ? s.h : s.w);
+    let edge = null, dir = 0, best = Infinity;
+    for (const sd of sides) {
+      if (sd.axis !== axis) continue;
+      const d = sd.out > 0 ? Math.abs(sd.coord - lo) : Math.abs(sd.coord - hi);
+      if (d < best) { best = d; edge = sd.coord; dir = sd.out; }
+    }
+    if (edge === null || best > 0.3 / G) continue;          // лестница не у террасы
+    const width = alongY ? s.w : s.h;
+    const c = (alongY ? s.x : s.y) + width / 2;
+    const off = _stepsRailOffsetNorm(width);
+    const top = edge - dir * inset / G, bot = edge + dir * (stairDepth + ext) / G;
+    for (const sign of [-1, 1]) {
+      const lat = c + sign * off;
+      const a = alongY ? { x: lat, y: top } : { x: top, y: lat };
+      const b = alongY ? { x: lat, y: bot } : { x: bot, y: lat };
+      const mm = _ptsToMm([a, b]);
+      mm[0].z = zTop; mm[1].z = zBot;
+      out.push(mm);
+    }
+  }
+  return out;
+}
+
 // Ступень по умолчанию для выбранной доски террасы: свойство default_steps_id
 // (контракт бэкенда от 2026-08-31). Поля может не быть или оно может быть null —
 // тогда возвращаем null и всё работает как раньше.
@@ -3479,9 +3728,33 @@ function _projectObjects() {
   if (S.sections.includes('paths')) {
     for (const o of _pathProjectObjects(lbl('paths'))) objs.push(o);
   }
+  // Перила лестницы — та же оградка, тем же запросом (с высотами точек). Нет
+  // ограждения террасы — идут своим объектом оградки.
+  const stairRails = _stairRailLines();
+  // Верх перил стоит у угла прохода, но на отступе перил от края ступеней — в
+  // паре сантиметров от конца линии ограждения. Притягиваем его к этому концу
+  // (до 20 см): там один общий столб, а не два рядом.
+  if (stairRails.length && S.sections.includes('railing')) {
+    const ends = [];
+    for (const ln of _linesToMm('railing', false)) ends.push(ln[0], ln[ln.length - 1]);
+    for (const ln of stairRails) {
+      const t = ln[0];
+      let best = null, bd = 200;
+      for (const e of ends) {
+        const d = Math.hypot(e.x - t.x, e.y - t.y);
+        if (d < bd) { bd = d; best = e; }
+      }
+      if (best) { t.x = best.x; t.y = best.y; }
+    }
+  }
+  if (stairRails.length && !S.sections.includes('railing')) {
+    objs.push({ type: CalculationType.RAILING, name: 'Перила лестницы', lines: stairRails,
+                sectionProductId: _elementProductId('railing') });
+  }
   for (const el of ['railing', 'fence']) {
     if (!S.sections.includes(el)) continue;
     const lines = _linesToMm(el, el === 'railing');
+    if (el === 'railing') lines.push(...stairRails);
     if (!lines.length) continue;
     const o = { type: el === 'fence' ? CalculationType.FENCE : CalculationType.RAILING,
                 name: lbl(el), lines, sectionProductId: _elementProductId(el) };
@@ -3895,7 +4168,7 @@ async function dSendRequest() {
   if (consent && !consent.checked) { say('Отметьте согласие на обработку данных.'); return; }
   if (typeof saveProjectToServer !== 'function') { say('Сервис недоступен.'); return; }
   say('');
-  if (btn) { btn.disabled = true; btn.textContent = 'Отправляем…'; }
+  if (btn) { btn.disabled = true; btn.textContent = _dShots.length ? 'Отправляем со снимками…' : 'Отправляем…'; }
   const dump = document.getElementById('d-req-dump');
   if (dump) dump.hidden = true;
   let res = null;
@@ -3912,6 +4185,15 @@ async function dSendRequest() {
   dCloseRequest();
   dCloseSummary();
   const done = document.getElementById('d-req-done');
+  const txt = document.getElementById('d-req-done-text');
+  if (txt) {
+    // Отладочный режим (?debug=…): писем нет, смета — ссылкой на PDF.
+    txt.innerHTML = res.debug
+      ? ('Отладочная заявка: писем нет. ' + (res.reportUrl
+          ? `<a href="${res.reportUrl}" target="_blank" rel="noopener">Смета (PDF)</a>`
+          : 'Смета не собралась — подробности в консоли.'))
+      : 'Смета и ссылка на текущий проект отправлены менеджеру и вам на почту';
+  }
   if (done) done.classList.add('active');
 }
 
