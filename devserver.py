@@ -93,6 +93,10 @@ class Handler(SimpleHTTPRequestHandler):
         self._proxy(method="POST", body=body,
                     ctype=self.headers.get("Content-Type", "application/json"))
 
+    # Заголовки клиента, которые уходят на апстрим как есть: отладочные адреса
+    # заявки (/api/v1/debug/...) требуют X-Debug-Token (catalog_api.md).
+    PASS_HEADERS = ("X-Debug-Token",)
+
     def _fetch_upstream(self, url, head, method="GET", body=None, ctype=None):
         # Апстрим (sollersdev.ru) нестабилен: TLS-рукопожатие периодически виснет
         # (~1 из 3 запросов). Сбои независимы, поэтому делаем несколько попыток с
@@ -107,6 +111,9 @@ class Handler(SimpleHTTPRequestHandler):
                 req.add_header("Connection", "close")
                 if body is not None:
                     req.add_header("Content-Type", ctype or "application/json")
+                for name in self.PASS_HEADERS:
+                    if self.headers.get(name):
+                        req.add_header(name, self.headers.get(name))
                 with urllib.request.urlopen(req, timeout=ATTEMPT_TIMEOUT) as resp:
                     ctype = resp.headers.get("Content-Type", "application/octet-stream")
                     body = b"" if head else resp.read()

@@ -183,12 +183,12 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-color-management.js?v=1   styles-desktop.css?v=57   styles-mobile.css?v=5
+color-management.js?v=1   styles-desktop.css?v=58   styles-mobile.css?v=6
 state.js?v=78             canvas.js?v=70            shared/house-builder.js?v=92
-ResourceManager.js?v=15   webgl-guard.js?v=1        viewer3d-core.js?v=170
+ResourceManager.js?v=16   webgl-guard.js?v=1        viewer3d-core.js?v=170
 viewer3d-builders.js?v=69 viewer3d-railing.js?v=18  viewer3d-entourage.js?v=14
-editor3d.js?v=25          nav-desktop.js?v=148      nav-mobile.js?v=8
-project-io.js?v=7         backend_API/Calculator.js?v=5
+editor3d.js?v=25          nav-desktop.js?v=149      nav-mobile.js?v=9
+project-io.js?v=8         backend_API/Calculator.js?v=5
 ```
 
 `viewer3d-entourage.js` автоматически детектит `IS_MOBILE` (UA + `innerWidth<768`)
@@ -950,6 +950,51 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Ветка **Mobile**: правки 2026-11-13 — стартовый экран, мобильная раскладка, API бэкенда.
+
+- **Стартовый экран (десктоп)** `#d-start` по макету заказчика: подпись,
+  заголовок, рендер (`assets/start_hero.jpg`, вырезан из макета), пять шагов,
+  «НАЧАТЬ →» (`dStart`). Заменяет окно-приветствие; на телефоне остаётся окно
+  `#d-welcome-overlay` (CSS по `body.m-mode`, классы снимает nav-mobile.js при
+  старте). По ссылке на проект (`?project=`) не показывается ни то, ни другое.
+- **«Фильтры»**: значок раскрытия — серый кружок со стрелкой, как `.d-mat-exp`
+  у карточки товара.
+- **Мобильная раскладка**: высота экранов — видимая часть окна (`--app-h` =
+  `innerHeight`, nav-mobile.js `mSyncAppHeight`; запасной вариант 100dvh). С
+  `bottom: 0`/`100vh` низ экранов уходил под адресную строку браузера, и «Назад /
+  Дальше» и «Смета» появлялись только после прокрутки. Вид 3D — треть видимой
+  высоты (было 42vh), «Снимок» — в одной строке со «Сметой». В редакторах вместо
+  «К параметрам дома» — «Назад» (`mBack`): из раздела к списку элементов, из
+  списка к параметрам. Плашка WebGL на телефоне компактнее.
+- **Фильтры каталога с сервера** (`GET /api/v1/products/filters/?tags=…`,
+  `ResourceManager.getFilters` / `filtersFromSelection`, перенесены из
+  backend_API): панель «Фильтры» строится по ответу — цвет (кружки по
+  CATALOG_COLOR_HEX), цена (поля «от / до»), размеры, ценовая категория (подписи
+  Эконом / Средний / Премиум), бренд, сечение, направление доски, тип забора,
+  столб и крышка ограждения… Новые поля товаров появляются сами. Выбор —
+  `catFilter(раздел).dyn` / `dynRange`, по умолчанию у террасы «Пустотелая»
+  (`DYN_FILTER_DEFAULTS`); отбирает сервер, клиентские отборы в этом режиме не
+  работают. Нет ответа сервера — прежняя локальная панель (`_dDynReady` → null).
+- **Снимки в заявку**: `saveProject(…, images)` + `uploadProjectImages`
+  (multipart, поле `images`): снимки рендера встают на первый лист сметы в
+  письме. Изображения ждут только при `calculation`; сколько на деле — поле
+  `images` ответа. Сетевую ошибку загрузки повторяем (до 3 раз, в пределах
+  ~2 минут), 409 — не повторяем; заявка от снимков не зависит.
+- **Отладочный режим заявки**: `?debug=<токен>` в адресе (запоминается в
+  sessionStorage вкладки) — `saveProjectDebug` / `uploadProjectImagesDebug` /
+  `getProjectReportDebug`: писем нет, в окне «Заявка отправлена» ссылка на PDF
+  сметы. Токен в репозитории не хранится. devserver.py пробрасывает заголовок
+  `X-Debug-Token` на апстрим.
+- **Перила лестницы в расчёте оградки** (`_stairRailLines`): по линии с каждого
+  бока лестницы с высотами `z` (верх — высота настила на оси столба ограждения,
+  низ — земля по уклону перил, как в buildSteps3d); сервер считает их перилами
+  на ступенях (поворотные крепления `railSwivelBracket`). Верх притягивается к
+  концу линии ограждения у прохода (до 20 см) — общий столб. Нет ограждения
+  террасы — отдельный объект «Перила лестницы».
+- Cache-bust: `styles-desktop.css?v=58`, `styles-mobile.css?v=6`,
+  `ResourceManager.js?v=16`, `nav-desktop.js?v=149`, `nav-mobile.js?v=9`,
+  `project-io.js?v=8`.
 
 Ветка **Mobile**: правки 2026-11-01 — смета по вкладкам, снимки, ступени у прохода.
 

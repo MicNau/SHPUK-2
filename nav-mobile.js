@@ -11,7 +11,7 @@
 //   1 — выбор дома (вертикальный скролл карточек, «Дальше» при возврате);
 //   2 — параметры дома (левая панель десктопа, 3D-вида нет);
 //   3 — благоустройство: список разделов, а в открытом разделе сверху 3D-вид,
-//       снизу его настройки и кнопки; внизу «К параметрам дома» и «Каталог»,
+//       снизу его настройки и кнопки; внизу «Назад» и «Каталог»,
 //       самой нижней — «Смета»;
 //   4 — каталог: скролл карточек товаров, внизу «Меню».
 // «Применить» в каталоге возвращает на экран 3, «Меню» — к списку разделов.
@@ -56,7 +56,7 @@ function mBuildFrame() {
   const zone3d = _mEl('m-3d', 'm-3d');
   const zoneSec = _mEl('m-sec', 'm-sec');
   const bar = _mEl('m-bar', 'm-bar',
-    `<button class="d-btn d-btn-back" onclick="dBack()">← К параметрам дома</button>
+    `<button class="d-btn d-btn-back" onclick="mBack()">← Назад</button>
      <button class="d-btn d-btn-back" id="m-btn-catalog" onclick="mGoCatalog()">Каталог</button>`);
   _mMove(view, zone3d);
   _mMove(sidebar, zoneSec);
@@ -110,6 +110,13 @@ function mGoCatalog() {
   // Карточку связанного товара (терраса ↔ ступени ↔ ограждение) раскрываем, когда
   // каталог уже виден: в скрытом списке её не прокрутить к центру.
   if (typeof _dApplyLinkFocus === 'function') setTimeout(_dApplyLinkFocus, 60);
+}
+
+// «Назад» на экране благоустройства (правка 2026-11-13; было «К параметрам
+// дома»): из открытого раздела — к списку элементов, из списка — к параметрам.
+function mBack() {
+  if (dActiveItem) mBackToMenu();
+  else dBack();
 }
 
 // «Меню» — назад к списку разделов: активный раздел закрывается, как по клику
@@ -258,6 +265,13 @@ function mHintText(secId) {
 // ══════════════════════════════════════════════
 // ЗАПУСК
 // ══════════════════════════════════════════════
+// Видимая высота окна → --app-h (styles-mobile.css): по ней считаются высоты
+// экранов и вида. innerHeight у мобильных браузеров — высота видимой области
+// (с адресной строкой и без неё — по факту), в отличие от 100vh.
+function mSyncAppHeight() {
+  document.documentElement.style.setProperty('--app-h', window.innerHeight + 'px');
+}
+
 function mApplyMode() {
   const want = mIsMobile();
   if (want === M_ON) return;
@@ -272,7 +286,23 @@ function mApplyMode() {
 
 if (typeof document !== 'undefined') {
   const start = () => {
+    mSyncAppHeight();
+    window.addEventListener('resize', mSyncAppHeight);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', mSyncAppHeight);
     mApplyMode();
+    // Приветствие: на телефоне — окно, на десктопе — стартовый экран (#d-start).
+    // Окно в разметке открыто: на десктопе снимаем с него active, иначе редактор
+    // считал бы, что поверх открыто окно, и не слушал клавиши. Проект по ссылке
+    // (?project=…) открывается сразу, без приветствия.
+    const byLink = (typeof projectKeyFromUrl === 'function') && !!projectKeyFromUrl();
+    if (!M_ON || byLink) {
+      const w = document.getElementById('d-welcome-overlay');
+      if (w) w.classList.remove('active');
+    }
+    if (M_ON || byLink) {
+      const st = document.getElementById('d-start');
+      if (st) st.classList.remove('active');
+    }
     if (M_ON) mScreenHint(dStep);
     window.addEventListener('resize', mApplyMode);
   };

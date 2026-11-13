@@ -716,7 +716,12 @@ button, input, select, textarea { font-family: inherit; }
   font-size: 14px; font-weight: 600; color: var(--text); cursor: pointer;
 }
 .d-filters-toggle:hover { box-shadow: var(--hover-shadow); }
-.d-filters-caret { transition: transform .15s; }
+/* Значок раскрытия — как у карточки товара (.d-mat-exp): серый кружок со стрелкой. */
+.d-filters-caret {
+  width: 22px; height: 22px; background: rgba(0,0,0,.05); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  font-size: 11px; font-weight: 400; color: #555; transition: transform .25s;
+}
 .d-filters-toggle.open .d-filters-caret { transform: rotate(180deg); }
 .d-filters-box { display: none; padding: 0 2px 8px; }
 .d-filters-box.open { display: block; }
@@ -944,6 +949,36 @@ button, input, select, textarea { font-family: inherit; }
 .d-hint-text { font-size: 16px; font-weight: 400; line-height: 1.4; color: var(--text); }
 /* Кнопка «Понятно»: .d-btn рассчитана на футер панели (flex:1), в окне её надо
    задать явно, иначе она сжимается до ширины текста. */
+/* ═══ СТАРТОВЫЙ ЭКРАН (десктоп) ═══ */
+.d-start {
+  display: none; position: fixed; inset: 0; z-index: 400; background: #fff;
+  overflow: auto; align-items: center; justify-content: center; padding: 40px;
+}
+.d-start.active { display: flex; }
+body.m-mode .d-start { display: none; }
+/* Окно-приветствие — только на телефоне; на десктопе его заменяет стартовый экран. */
+body:not(.m-mode) #d-welcome-overlay { display: none; }
+.d-start-wrap { display: flex; gap: 22px; align-items: flex-start; max-width: 1160px; width: 100%; }
+.d-start-left { flex: 0 1 594px; min-width: 0; display: flex; flex-direction: column; }
+.d-start-kicker { font-size: 17px; color: #999; margin-bottom: 26px; }
+.d-start-title { font-size: 36px; font-weight: 400; line-height: 1.15; margin: 0 0 12px; color: var(--text);
+  white-space: nowrap; }
+.d-start-img { width: 100%; height: auto; display: block; }
+.d-start-actions { display: flex; justify-content: flex-end; margin-top: 18px; }
+.d-start-go { flex: none; min-width: 132px; height: 48px; padding: 0 24px; font-size: 17px; font-weight: 700; }
+.d-start-right {
+  flex: 1 1 420px; min-width: 0; align-self: stretch; display: flex; flex-direction: column;
+  /* Первый шаг — вровень с верхом картинки: высота подписи и заголовка слева. */
+  padding-top: 99px;
+}
+.d-start-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 22px; }
+.d-start-steps li { display: flex; align-items: center; gap: 22px; font-size: 17px; font-weight: 600; line-height: 1.4; }
+.d-start-num {
+  flex: none; width: 48px; height: 48px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 34px; font-weight: 400;
+}
+.d-start-note { margin-top: auto; padding: 40px 0 6px 70px; font-size: 17px; color: #999; }
+
 /* Приветствие при запуске: текст длиннее подсказок — окно шире. */
 .d-welcome-box { width: 560px; }
 .d-hint-box .d-btn {
@@ -1058,6 +1093,13 @@ button, input, select, textarea { font-family: inherit; }
 /* Смета: только расчёт по спецификации (правка 2026-10-04) */
 .est-title { font-size:16px; font-weight:700; margin:4px 0 10px; }
 .est-empty { font-size:13px; color:#999; padding:8px 0; }
+/* Диапазон из фильтров сервера (цена): два поля «от» и «до». */
+.d-dyn-range-row { display: flex; align-items: center; gap: 8px; }
+.d-dyn-range {
+  width: 100%; min-width: 0; height: 32px; padding: 0 8px; font-size: 14px;
+  border: 1px solid #d0d0d0; border-radius: var(--r); background: #fff; color: var(--text);
+}
+.d-dyn-range:focus { outline: none; border-color: var(--accent); }
 .est-shots { margin-top: 18px; }
 .est-shot { display: block; width: 100%; margin-bottom: 8px; border: 1px solid #e0e0e0; cursor: zoom-in; }
 .est-table { width:100%; border-collapse:collapse; font-size:13px; }
