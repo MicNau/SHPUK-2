@@ -2076,6 +2076,56 @@ function stepsPlaceAtTerrace() {
   return false;
 }
 
+// Новая лестница — к ПРОХОДУ в ограждении террасы (правка 2026-11-01): если в
+// ограждении сделан вход, ступени встают в него — по центру прохода, шириной с
+// проход, спуском наружу от террасы. Вход, перед которым уже стоит другая
+// лестница, пропускается. Вход через угол террасы (концы на разных сторонах)
+// не годится — по нему не понять, куда спускаться. Возвращает true, если
+// лестница поставлена; иначе работают прежние правила.
+function stepsPlaceAtRailingEntry() {
+  const s = S.steps; if (!s) return false;
+  if (!(S.sections || []).includes('railing') || typeof railingEntryPointsNorm !== 'function') return false;
+  const entries = railingEntryPointsNorm() || [];
+  if (!entries.length) return false;
+  const rects = secRects('terrace').filter(r => r && r.w > 0 && r.h > 0);
+  const D = _stepsDepthNorm();
+  const tol = 0.05 / GRID;
+  // Линия ограждения отступает от кромки террасы внутрь на RAIL_INSET — проход
+  // лежит не на самой кромке.
+  const sideTol = (((typeof RAIL_INSET !== 'undefined') ? RAIL_INSET : 0.10) + 0.05) / GRID;
+  const idx = S.activeSteps | 0;
+  const others = stepsAll().filter((o, k) => k !== idx);
+  const overlaps = (r, o) => r.x < o.x + o.w - 1e-6 && o.x < r.x + r.w - 1e-6
+                          && r.y < o.y + o.h - 1e-6 && o.y < r.y + r.h - 1e-6;
+  for (const e of entries) {
+    const { a, b } = e;
+    const horiz = Math.abs(a.y - b.y) < tol, vert = Math.abs(a.x - b.x) < tol;
+    if (horiz === vert) continue;
+    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const w = Math.max(SNAP / GRID, horiz ? Math.abs(b.x - a.x) : Math.abs(b.y - a.y));
+    let out = 0, edge = 0;   // сторона террасы с проходом: куда наружу и где её кромка
+    for (const r of rects) {
+      if (horiz && m.x >= r.x - tol && m.x <= r.x + r.w + tol) {
+        if (Math.abs(m.y - (r.y + r.h)) < sideTol) { out = 1; edge = r.y + r.h; }
+        else if (Math.abs(m.y - r.y) < sideTol) { out = -1; edge = r.y; }
+      } else if (vert && m.y >= r.y - tol && m.y <= r.y + r.h + tol) {
+        if (Math.abs(m.x - (r.x + r.w)) < sideTol) { out = 1; edge = r.x + r.w; }
+        else if (Math.abs(m.x - r.x) < sideTol) { out = -1; edge = r.x; }
+      }
+      if (out) break;
+    }
+    if (!out) continue;
+    const r = horiz
+      ? { x: m.x - w / 2, y: out > 0 ? edge : edge - D, w, h: D }
+      : { x: out > 0 ? edge : edge - D, y: m.y - w / 2, w: D, h: w };
+    if (r.x < 0 || r.y < 0 || r.x + r.w > 1 || r.y + r.h > 1) continue;
+    if (others.some(o => overlaps(r, o))) continue;
+    Object.assign(s, r);
+    return true;
+  }
+  return false;
+}
+
 // Площадь дома изменилась (правка 2026-10-16: разметка больше не сбрасывается).
 // Дом растёт и сжимается от центра участка, поэтому объекты, пристроенные к
 // стене (зазор до 35 см), едут вместе с ней: поперёк — на сдвиг стены, вдоль —
@@ -2173,11 +2223,12 @@ function addSteps() {
   const base = S.steps ? { ...S.steps } : { ...DEFAULT_STEPS_RECT };
   S.stepsList.push({ x: base.x, y: base.y, w: base.w, h: base.h });
   S.activeSteps = S.stepsList.length - 1;
-  // Нормализация прижимает лестницу к ближайшей опоре (террасе или дому), поэтому
-  // сначала ставим её на место, а потом РАЗВОДИМ вдоль этой же опоры: иначе новая
-  // ложится ровно поверх старой.
+  // Есть свободный проход в ограждении террасы — лестница встаёт в него.
+  // Иначе нормализация прижимает её к ближайшей опоре (террасе или дому), а
+  // потом РАЗВОДИМ вдоль этой же опоры: иначе новая ложится ровно поверх старой.
+  const atEntry = stepsPlaceAtRailingEntry();
   if (typeof _stepsNormalize === 'function') _stepsNormalize();
-  _stepsSpreadActive();
+  if (!atEntry) _stepsSpreadActive();
   drawStepsCanvas();
   if (typeof onParamChange === 'function') onParamChange();
 }
@@ -2190,7 +2241,11 @@ function _stepsSpreadActive() {
   const i = S.activeSteps | 0;
   const cur = list[i];
   if (!cur || list.length < 2) return;
-  const alongX = cur.w >= cur.h;
+  // Вдоль опоры — по оси, ПОПЕРЁК которой идёт спуск (размер по спуску —
+  // расчётная глубина). «Длинная сторона» не годится: лестница в проход
+  // ограждения бывает уже своей глубины, и её уводило от террасы.
+  const D = _stepsDepthNorm();
+  const alongX = Math.abs(cur.h - D) <= Math.abs(cur.w - D);
   const step = 0.25 / GRID;
   const hits = r => list.some((o, k) => k !== i &&
     r.x < o.x + o.w - 1e-6 && o.x < r.x + r.w - 1e-6 &&
