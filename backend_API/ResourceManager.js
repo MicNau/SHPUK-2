@@ -10,10 +10,17 @@ const THREE = await import('https://cdn.jsdelivr.net/npm/three@0.160.0/build/thr
     PRICE_MIN: 'PRICE_MIN',
     TAGS: 'TAGS',
     PROPERTIES: 'PROPERTIES',
+    COLORS: 'COLORS',
     SORT: 'SORT',
     SORT_ORDER: 'SORT_ORDER',
     LIMIT: 'LIMIT',
     PAGE: 'PAGE',
+});
+
+// Параметр границы диапазона из ответа getFilters → тип фильтра.
+const RANGE_PARAM_FILTERS = Object.freeze({
+    price_min: FilterType.PRICE_MIN,
+    price_max: FilterType.PRICE_MAX,
 });
 
 const SORT_FILEDS = Object.freeze({
@@ -51,9 +58,12 @@ const PropertyPath = Object.freeze({
     PRICE_CATEGORY: 'price_category',
 
     CORE_TYPE: 'core_type',
+
     BOARD_DIRECTION: 'board_direction',
+
     FENCE_TYPE: 'fence_type',
-    BRAND: 'brand'
+
+    BRAND: 'brand',
 });
 
 // Ценовая категория товара: значение характеристики по пути
@@ -254,6 +264,7 @@ class ResourceManager {
     #treeCache = null;
     #productsCache = new Map();
     #api_domain = 'https://sollersdev.ru'
+    #debugToken = null;
 
     #FILTER_HANDLERS = {
         [FilterType.SECTION_ID]: (value) => ({ 'section_id': value }),
@@ -274,6 +285,7 @@ class ResourceManager {
             return {'tags': value.join(',') }
         },
         [FilterType.PROPERTIES]: (value) => ({'properties': JSON.stringify(value)}),
+        [FilterType.COLORS]: (value) => ({'colors': value.join(',')}),
         [FilterType.SORT]: (value) => ({'sort': value}),
         [FilterType.SORT_ORDER]: (value) => ({'sort_order': value}),
         [FilterType.LIMIT]: (value) => ({'limit': value}),
@@ -357,6 +369,14 @@ class ResourceManager {
                 else if (!isScalar(predicate.value)) {
                     throw new Error(`PROPERTIES value for "${predicate.property}" must be a scalar`);
                 }
+            }
+        },
+        [FilterType.COLORS]: (value) => {
+            if (!Array.isArray(value) || value.length === 0) {
+                throw new Error('COLORS must be a non-empty array of strings');
+            }
+            if (!value.every(v => typeof v === 'string' && v.trim() !== '' && !v.includes(','))) {
+                throw new Error('All COLORS must be non-empty strings without commas');
             }
         },
         [FilterType.SORT]: (value) => {
@@ -472,6 +492,57 @@ class ResourceManager {
         return null
     }
 
+    /**
+     * Фильтры категории: только те, у которых в ней два значения и больше.
+     * Ответ — как в catalog_api.md, раздел «Какие фильтры есть у категории».
+     * @param {string[]} tags
+     * @returns {Promise<{tags: string[], total: number, filters: Object[]}|null>}
+     */
+    async getFilters(tags) {
+        const filters = [new Filter(FilterType.TAGS, tags)];
+        if (!this.#validateFilters(filters)) return null;
+        const params = await this.#collectQueryParams(filters);
+        return await this.#requestProducts(`${this.#api_domain}/api/v1/products/filters/?${params}`);
+    }
+
+    /**
+     * Фильтры для getResources из выбора пользователя по ответу getFilters.
+     * selection: {<key фильтра>: [value, ...]} для списков,
+     * {<key>: {min, max}} для диапазона. Предикаты по характеристикам
+     * собираются в один фильтр PROPERTIES: два таких фильтра схлопнулись бы.
+     * @param {Object[]} filters — поле filters ответа getFilters
+     * @param {Object} selection
+     * @returns {Filter[]}
+     */
+    static filtersFromSelection(filters, selection) {
+        const result = [];
+        const predicates = [];
+        for (const filter of filters) {
+            const chosen = selection[filter.key];
+            if (chosen === undefined || chosen === null) continue;
+            if (filter.type === 'range') {
+                for (const bound of ['min', 'max']) {
+                    const type = RANGE_PARAM_FILTERS[(filter.params || {})[bound]];
+                    if (type && typeof chosen[bound] === 'number') result.push(new Filter(type, chosen[bound]));
+                }
+            } else if (Array.isArray(chosen) && chosen.length > 0) {
+                if (filter.param === 'colors') {
+                    // Название с запятой параметр colors не передаст: пропускаем
+                    // его, а не роняем всю выдачу на проверке фильтра.
+                    const colors = chosen.filter(color => !color.includes(','));
+                    if (colors.length < chosen.length) {
+                        console.warn('Colors with commas are skipped:', chosen.filter(color => color.includes(',')));
+                    }
+                    if (colors.length > 0) result.push(new Filter(FilterType.COLORS, colors));
+                } else if (filter.param === 'properties') {
+                    predicates.push({property: filter.property, op: PropertyOp.IN, value: chosen});
+                }
+            }
+        }
+        if (predicates.length > 0) result.push(new Filter(FilterType.PROPERTIES, predicates));
+        return result;
+    }
+
     async getProductById(productId){
         if (!this.#productsCache.has(productId)) {
             let response = await this.getResources(new Filter(FilterType.PRODUCT_IDS, [productId]))
@@ -548,12 +619,14 @@ class ResourceManager {
     // calculation - необязательные данные для сметы: то же тело, что у
     // calculation_report. Передали - клиенту придёт письмо со сметой в PDF,
     // не передали - письмо уйдёт с одной ссылкой на проект.
-    async saveProject(name, email, data, calculation = null) {
+    // images - сколько изображений будет догружено uploadProjectImages; письма
+    // ждут их до 2 минут. Сколько сервер ждёт на деле - поле images ответа.
+    async saveProject(name, email, data, calculation = null, images = 0) {
         try {
             const response = await fetch(`${this.#api_domain}/api/v1/create_project/`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({name, email, data, calculation}),
+                body: JSON.stringify({name, email, data, calculation, images}),
             });
             if (!response.ok) {
                 console.error(`HTTP ${response.status}`);
@@ -586,6 +659,28 @@ class ResourceManager {
         }
     }
 
+    // Изображения к заявке: встают в начало сметы в письме. blobs - Blob или
+    // File (JPEG, PNG, WEBP, до 5 МБ каждый), по порядку листов. Вызывать
+    // сразу после saveProject, если в его ответе images > 0. Возвращает
+    // {images} или null; повторять после сетевой ошибки можно, после 409 - нет.
+    async uploadProjectImages(saveId, blobs) {
+        try {
+            const form = new FormData();
+            blobs.forEach((blob, index) => form.append('images', blob, `view${index + 1}.jpg`));
+            const response = await fetch(
+                `${this.#api_domain}/api/v1/project/${encodeURIComponent(saveId)}/images/`,
+                {method: 'POST', body: form});
+            if (!response.ok) {
+                console.error(`HTTP ${response.status}`);
+                return null;
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to upload project images:', error);
+            return null;
+        }
+    }
+
     async getProject(saveId) {
         try {
             const response = await fetch(
@@ -597,6 +692,95 @@ class ResourceManager {
             return await response.json();
         } catch (error) {
             console.error('Failed to load project:', error);
+            return null;
+        }
+    }
+
+    // Отладочные методы: заявка целиком, но без писем, а смета - файлом.
+    // Работают только с отладочным токеном, который выдаётся отдельно:
+    // manager.setDebugToken('...'). Порядок как у боевой заявки:
+    //   const saved = await manager.saveProjectDebug(name, email, data, calculation, 2);
+    //   await manager.uploadProjectImagesDebug(saved.save_id, [blob1, blob2]);
+    //   const pdfUrl = await manager.getProjectReportDebug(saved.save_id);
+    setDebugToken(token) {
+        this.#debugToken = token || null;
+    }
+
+    async #debugRequest(path, options = {}) {
+        if (!this.#debugToken) {
+            console.error('Debug token is not set: call setDebugToken first');
+            return null;
+        }
+        const response = await fetch(`${this.#api_domain}/api/v1/debug/${path}`, {
+            method: 'POST',
+            ...options,
+            headers: {...(options.headers || {}), 'X-Debug-Token': this.#debugToken},
+        });
+        if (!response.ok) {
+            const body = await response.json().catch(() => null);
+            console.error(`HTTP ${response.status}`, body?.error ?? '');
+            return null;
+        }
+        return await response.json();
+    }
+
+    // Копия saveProject: проект сохраняется со статусом test, писем нет
+    // никому. images - сколько изображений будет догружено
+    // uploadProjectImagesDebug; ждут их, только если передан calculation.
+    async saveProjectDebug(name, email, data, calculation = null, images = 0) {
+        try {
+            return await this.#debugRequest('create_project/', {
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name, email, data, calculation, images}),
+            });
+        } catch (error) {
+            console.error('Failed to save debug project:', error);
+            return null;
+        }
+    }
+
+    // Копия uploadProjectImages для проекта из saveProjectDebug.
+    async uploadProjectImagesDebug(saveId, blobs) {
+        try {
+            const form = new FormData();
+            blobs.forEach((blob, index) => form.append('images', blob, `view${index + 1}.jpg`));
+            return await this.#debugRequest(
+                `project/${encodeURIComponent(saveId)}/images/`, {body: form});
+        } catch (error) {
+            console.error('Failed to upload debug project images:', error);
+            return null;
+        }
+    }
+
+    // Смета проекта из saveProjectDebug - та, что ушла бы вложением в письме,
+    // с загруженными изображениями. Ждёт сборки и возвращает адрес PDF или
+    // null; текст ошибки расчёта - в консоли. Можно звать повторно.
+    async getProjectReportDebug(saveId, {interval = 1000, timeout = 120000} = {}) {
+        try {
+            const started = await this.#debugRequest(
+                `project/${encodeURIComponent(saveId)}/report/`);
+            if (!started) return null;
+
+            const deadline = Date.now() + timeout;
+            while (Date.now() < deadline) {
+                await new Promise(resolve => setTimeout(resolve, interval));
+                const response = await fetch(
+                    `${this.#api_domain}/api/v1/calculation_report/${started.taskId}/`);
+                if (!response.ok) {
+                    console.error(`HTTP ${response.status}`);
+                    return null;
+                }
+                const state = await response.json();
+                if (state.status === 'ready') return `${this.#api_domain}${state.url}`;
+                if (state.status === 'failed') {
+                    console.error('Debug report failed:', state.error);
+                    return null;
+                }
+            }
+            console.error('Debug report timed out');
+            return null;
+        } catch (error) {
+            console.error('Failed to build debug report:', error);
             return null;
         }
     }
