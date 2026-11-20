@@ -614,7 +614,8 @@ function railingMainPath(houseL, houseW) {
 // Входы по умолчанию — ПО ОДНОМУ НА КАЖДУЮ петлю: середина самого длинного свободного
 // участка этой петли, ширина RAIL_ENTRY_W. Возвращает массив, выровненный по индексам
 // петель (null там, где ставить вход некуда — слишком короткие участки).
-function railingDefaultEntries(houseL, houseW) {
+function railingDefaultEntries(houseL, houseW, width) {
+  const W = (width > 0) ? width : RAIL_ENTRY_W;
   const lw = (houseL === undefined) ? lastHouseSize() : { L: houseL, W: houseW };
   const loops = railingLoopsWorld(lw.L, lw.W);
   if (!loops.length) return [];
@@ -630,11 +631,37 @@ function railingDefaultEntries(houseL, houseW) {
     }
     if (!best || bestL < 0.6) return null;
     const tMid = railingParamOf(path, { x: (best.ax + best.bx) / 2, z: (best.az + best.bz) / 2 });
-    const half = Math.min(RAIL_ENTRY_W, bestL - 0.4) / 2 / path.L;
+    const half = Math.min(W, bestL - 0.4) / 2 / path.L;
     return { t0: (tMid - half + 1) % 1, t1: (tMid + half + 1) % 1 };
   });
   S.railingEntries = saved;
   return out;
+}
+
+// Ширина прохода цифрами (правка 2026-11-20). Ширина входа li в метрах — по
+// параметрам вдоль его петли (вход может перескакивать через начало петли).
+function railingEntryWidth(li) {
+  const e = railingEntryOf(li || 0);
+  const path = e ? railingLoopPathAt(li || 0) : null;
+  if (!e || !path || !path.L) return null;
+  const d = ((e.t1 - e.t0) % 1 + 1) % 1;
+  return d * path.L;
+}
+
+// Задаёт ширину всех входов, сохраняя их середины. Ширина, которой нет места
+// на участке входа, не проверяется здесь: проход просто встанет как задан.
+function railingSetEntryWidth(width) {
+  const list = (typeof S !== 'undefined' && Array.isArray(S.railingEntries)) ? S.railingEntries : [];
+  list.forEach((e, li) => {
+    if (!e) return;
+    const path = railingLoopPathAt(li);
+    if (!path || !path.L) return;
+    const d = ((e.t1 - e.t0) % 1 + 1) % 1;
+    const mid = e.t0 + d / 2;
+    const half = Math.min(width, path.L) / 2 / path.L;
+    e.t0 = ((mid - half) % 1 + 1) % 1;
+    e.t1 = ((mid + half) % 1 + 1) % 1;
+  });
 }
 
 // Точки входов в координатах плана: массив [{ li, a, b }] — по одному входу на петлю.

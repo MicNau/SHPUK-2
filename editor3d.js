@@ -840,6 +840,9 @@ function _e3dDragMove(np) {
     }
   } else if (d.kind === 'entry') {
     if (typeof railingEntryDrag === 'function') railingEntryDrag(d.idx, d.handle, np);
+    // Ступени в проходе следуют за ним (правка 2026-11-20).
+    if (typeof _railingSync === 'function') _railingSync();
+    if (typeof stepsFitToRailingEntries === 'function') stepsFitToRailingEntries();
   } else if (d.kind === 'line' && d.idx === 'gate') {
     const q = _fenceProjectToLine(np);      // калитка не сходит с линии забора
     if (q) S.fenceGate = q;

@@ -1755,11 +1755,14 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         const topExt = RAIL_INSET * slopeLen0 / run;
         const u = slope0.clone().multiplyScalar(1 / slopeLen0);       // единичный вектор вниз по скату
         const A = P0.clone().addScaledVector(u, -topExt);             // верх с продлением
-        // Низ ПРОДЛЕВАЕМ по скату до земли: P1 лежит на уровне последней проступи
-        // (realRise над грунтом), и столб-ньюэл там висел в воздухе — перед лестницей
-        // проступей уже нет. Идём по тому же уклону, пока Y не станет 0.
-        const B = P1.clone();
-        if (u.y < -1e-6 && B.y > 1e-4) B.addScaledVector(u, B.y / -u.y);
+        // Низ перил — на НИЖНЕЙ СТУПЕНЬКЕ (правка 2026-11-20, требование заказчика;
+        // раньше перила продлевались по скату до земли): столб-ньюэл стоит по центру
+        // последней проступи, перила кончаются на линии ската над ним. Лестница без
+        // видимых проступей (одна ступень) — низ в P1, как прежде.
+        const lastOff = n >= 2
+          ? (n - 2) * STEP_DEPTH + (RISER_THICKNESS + STEP_DEPTH + STEP_NOSING) / 2 : stairDepth;
+        const B = P0.clone().lerp(P1, lastOff / stairDepth);
+        const postBaseY = n >= 2 ? realRise : B.y;          // верх нижней проступи
 
         // ── Перила (rails) под рейк: ось X — вдоль ската (наклон), Y — вертикаль (сдвиг) ──
         const slopeVec = new THREE.Vector3().subVectors(B, A);
@@ -1771,19 +1774,20 @@ function buildSteps3d(parent, M, stepsRect, bh, houseL, houseW) {
         mRail.multiply(new THREE.Matrix4().makeScale(L, ky, 1));       // длина ската × высота модуля
         placeGeo(RC.rails, mRail);
 
-        // ── Нижний столб-ньюэл (post), вертикальный, стоит НА ЗЕМЛЕ (B продлён до Y=0) ──
+        // ── Нижний столб-ньюэл (post), вертикальный, стоит НА НИЖНЕЙ ПРОСТУПИ ──
         // Сечение — как у столбов ограждения террасы: это один товар, поэтому
         // берётся из него же (S.railPostW, мм), а не из фильтра каталога.
         const postK = (typeof S !== 'undefined' && S.railPostW) ? S.railPostW / 100 : 1;
         const mPost = new THREE.Matrix4().makeBasis(headX, up, crossH);
-        mPost.setPosition(B.x, B.y, B.z);
+        mPost.setPosition(B.x, postBaseY, B.z);
         mPost.multiply(new THREE.Matrix4().makeScale(postK, ky, postK));
         placeGeo(RC.post, mPost);
         if (RC.cap) placeGeo(RC.cap, mPost, stairCapMat);
 
         // ── Балясины по видимым проступям (i=0..n-2): вертикальные, нативное сечение,
         //    высота по уровню (от проступи до поручня) — учитывает разницу уровней ──
-        for (let i = 0; i < n - 1; i++) {
+        // Нижняя проступь занята столбом — балясина на ней не нужна.
+        for (let i = 0; i < n - 2; i++) {
           const off = i * STEP_DEPTH + (RISER_THICKNESS + STEP_DEPTH + STEP_NOSING) / 2; // центр проступи i
           const t = off / stairDepth;
           const bx = topPx + (botPx - topPx) * t;

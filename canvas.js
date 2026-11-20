@@ -1444,6 +1444,7 @@ function initRailingCanvas() {
     if (!_railDragIdx) return;
     railingEntryDrag(_railDragIdx.li, _railDragIdx.idx, norm(e));
     _railingSync();
+    if (stepsFitToRailingEntries() && typeof onParamChange === 'function') onParamChange();
     drawSnapCanvas('railing');
   });
 
@@ -2084,46 +2085,89 @@ function stepsPlaceAtTerrace() {
 // лестница поставлена; иначе работают прежние правила.
 function stepsPlaceAtRailingEntry() {
   const s = S.steps; if (!s) return false;
-  if (!(S.sections || []).includes('railing') || typeof railingEntryPointsNorm !== 'function') return false;
+  const idx = S.activeSteps | 0;
+  const others = stepsAll().filter((o, k) => k !== idx);
+  for (const e of _railingEntryStepRects()) {
+    const r = e.r;
+    if (r.x < 0 || r.y < 0 || r.x + r.w > 1 || r.y + r.h > 1) continue;
+    if (others.some(o => _rectsOverlap(r, o))) continue;
+    Object.assign(s, r);
+    return true;
+  }
+  return false;
+}
+
+function _rectsOverlap(r, o) {
+  return r.x < o.x + o.w - 1e-6 && o.x < r.x + r.w - 1e-6
+      && r.y < o.y + o.h - 1e-6 && o.y < r.y + r.h - 1e-6;
+}
+
+// Место лестницы в каждом проходе ограждения: { li, horiz, out, edge, r } —
+// r по центру прохода, шириной с проход, спуском наружу от террасы. Проход через
+// угол террасы (концы на разных сторонах) пропускается.
+function _railingEntryStepRects() {
+  if (!(S.sections || []).includes('railing') || typeof railingEntryPointsNorm !== 'function') return [];
   const entries = railingEntryPointsNorm() || [];
-  if (!entries.length) return false;
+  if (!entries.length) return [];
   const rects = secRects('terrace').filter(r => r && r.w > 0 && r.h > 0);
   const D = _stepsDepthNorm();
   const tol = 0.05 / GRID;
   // Линия ограждения отступает от кромки террасы внутрь на RAIL_INSET — проход
   // лежит не на самой кромке.
   const sideTol = (((typeof RAIL_INSET !== 'undefined') ? RAIL_INSET : 0.10) + 0.05) / GRID;
-  const idx = S.activeSteps | 0;
-  const others = stepsAll().filter((o, k) => k !== idx);
-  const overlaps = (r, o) => r.x < o.x + o.w - 1e-6 && o.x < r.x + r.w - 1e-6
-                          && r.y < o.y + o.h - 1e-6 && o.y < r.y + r.h - 1e-6;
+  const out = [];
   for (const e of entries) {
     const { a, b } = e;
     const horiz = Math.abs(a.y - b.y) < tol, vert = Math.abs(a.x - b.x) < tol;
     if (horiz === vert) continue;
     const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     const w = Math.max(SNAP / GRID, horiz ? Math.abs(b.x - a.x) : Math.abs(b.y - a.y));
-    let out = 0, edge = 0;   // сторона террасы с проходом: куда наружу и где её кромка
+    let dir = 0, edge = 0;   // сторона террасы с проходом: куда наружу и где её кромка
     for (const r of rects) {
       if (horiz && m.x >= r.x - tol && m.x <= r.x + r.w + tol) {
-        if (Math.abs(m.y - (r.y + r.h)) < sideTol) { out = 1; edge = r.y + r.h; }
-        else if (Math.abs(m.y - r.y) < sideTol) { out = -1; edge = r.y; }
+        if (Math.abs(m.y - (r.y + r.h)) < sideTol) { dir = 1; edge = r.y + r.h; }
+        else if (Math.abs(m.y - r.y) < sideTol) { dir = -1; edge = r.y; }
       } else if (vert && m.y >= r.y - tol && m.y <= r.y + r.h + tol) {
-        if (Math.abs(m.x - (r.x + r.w)) < sideTol) { out = 1; edge = r.x + r.w; }
-        else if (Math.abs(m.x - r.x) < sideTol) { out = -1; edge = r.x; }
+        if (Math.abs(m.x - (r.x + r.w)) < sideTol) { dir = 1; edge = r.x + r.w; }
+        else if (Math.abs(m.x - r.x) < sideTol) { dir = -1; edge = r.x; }
       }
-      if (out) break;
+      if (dir) break;
     }
-    if (!out) continue;
+    if (!dir) continue;
     const r = horiz
-      ? { x: m.x - w / 2, y: out > 0 ? edge : edge - D, w, h: D }
-      : { x: out > 0 ? edge : edge - D, y: m.y - w / 2, w: D, h: w };
-    if (r.x < 0 || r.y < 0 || r.x + r.w > 1 || r.y + r.h > 1) continue;
-    if (others.some(o => overlaps(r, o))) continue;
-    Object.assign(s, r);
-    return true;
+      ? { x: m.x - w / 2, y: dir > 0 ? edge : edge - D, w, h: D }
+      : { x: dir > 0 ? edge : edge - D, y: m.y - w / 2, w: D, h: w };
+    out.push({ li: e.li, horiz, out: dir, edge, r });
   }
-  return false;
+  return out;
+}
+
+// Ступени в проходе следуют за ним (правка 2026-11-20): изменилась ширина или
+// место прохода — лестница, стоявшая в нём, встаёт заново по центру, шириной с
+// проход. «Стояла в проходе» — примыкает к той же кромке и перекрывается с ним
+// вдоль неё; prev — места до изменения (когда проход переставлен разом, например
+// шириной из окна), без него сравнение идёт с текущими.
+function stepsFitToRailingEntries(prev) {
+  const cur = _railingEntryStepRects();
+  if (!cur.length) return false;
+  const base = prev || cur;
+  const tol = 0.05 / GRID;
+  let changed = false;
+  for (const s of stepsAll()) {
+    if (!s || !(s.w > 0) || !(s.h > 0)) continue;
+    const hit = base.find(e => {
+      const sEdge = e.horiz ? (e.out > 0 ? s.y : s.y + s.h) : (e.out > 0 ? s.x : s.x + s.w);
+      if (Math.abs(sEdge - e.edge) > tol) return false;
+      return e.horiz ? (s.x < e.r.x + e.r.w && e.r.x < s.x + s.w)
+                     : (s.y < e.r.y + e.r.h && e.r.y < s.y + s.h);
+    });
+    const to = hit && cur.find(e => e.li === hit.li);
+    if (!to) continue;
+    const r = to.r;
+    if (r.x < 0 || r.y < 0 || r.x + r.w > 1 || r.y + r.h > 1) continue;
+    if (s.x !== r.x || s.y !== r.y || s.w !== r.w || s.h !== r.h) { Object.assign(s, r); changed = true; }
+  }
+  return changed;
 }
 
 // Площадь дома изменилась (правка 2026-10-16: разметка больше не сбрасывается).
