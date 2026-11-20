@@ -154,6 +154,11 @@ function mSyncSection() {
   if (dActiveItem !== _mCollapsedSec) {
     _mCollapsedSec = dActiveItem;
     if (_mCollapsed) mSetCollapsed(false, true);
+    // Подсказка раздела в углу вида — развёрнута, пока не начали настраивать.
+    if (typeof _dHintCollapsed !== 'undefined' && dActiveItem) {
+      _dHintCollapsed = false;
+      if (typeof _dSyncSectionHint === 'function') _dSyncSectionHint();
+    }
   }
   _mSyncCollapseBtn();
   const cat = document.getElementById('m-btn-catalog');
@@ -176,7 +181,7 @@ function mAfterSidebar() {
   if (!M_ON) return;
   mSyncSection();
   // Вид появляется вместе с первым открытым разделом — здесь же объясняем жесты.
-  if (dActiveItem) mQueueHint('view3d', 'Управление видом', M_3D_HINT);
+  if (dActiveItem) mQueueHint(M_3D_KEY, 'Управление видом', M_3D_HINT);
 }
 
 // «Применить» в каталоге возвращает на экран элемента, и вид сразу развёрнут на
@@ -224,6 +229,12 @@ function mSetCollapsed(on, instant) {
     _mKeepFraming(a0, _mViewAspect());
     if (typeof resizeThree === 'function') { resizeThree(); setTimeout(resizeThree, 60); }
   };
+  // Настройки уехали — подсказка в углу вида сворачивается к краю («>»):
+  // пользователь уже начал работать, а вид нужен целиком.
+  if (on && typeof _dHintCollapsed !== 'undefined' && !_dHintCollapsed) {
+    _dHintCollapsed = true;
+    if (typeof _dSyncSectionHint === 'function') _dSyncSectionHint();
+  }
   if (on && !instant) {
     // Уезжают вниз, потом вид забирает место.
     parts.forEach(el => el.classList.add('m-slide-out'));
@@ -332,14 +343,18 @@ function mHintClosed() {
 // они идут той же очередью. Возвращает true — десктопный показ не нужен.
 function mHintTake(key, title, text) {
   if (!M_ON) return false;
-  // На экране параметров 3D-вида нет: подсказку об управлении покажем, когда он
-  // появится (mAfterSidebar).
-  if (key !== 'view3d' || dStep === 3) mQueueHint(key, title, text);
+  // Управление видом на телефоне — свой текст (палец, а не мышь). На экране
+  // параметров 3D-вида нет: подсказку покажем, когда он появится (mAfterSidebar).
+  if (key === 'view3d') { if (dStep === 3) mQueueHint(M_3D_KEY, title, M_3D_HINT); }
+  else mQueueHint(key, title, text);
   return true;
 }
 
-const M_3D_HINT = 'Одно касание — выбор и перетаскивание объекта.\n'
-                + 'Два пальца — поворот и масштаб вида.';
+// Жесты с правки 2026-11-20 другие — ключ новый, чтобы окно показалось и тем,
+// кто видел прежнее.
+const M_3D_KEY = 'view3d-2';
+const M_3D_HINT = 'Один палец — поворот вида, а на объекте раздела — выбор и перетаскивание.\n'
+                + 'Два пальца — масштаб (сведите или разведите) и сдвиг вида вправо-влево-вверх-вниз.';
 
 const M_SCREEN_HINTS = {
   1: ['Выбор дома', 'Пролистайте карточки и коснитесь дома — откроются его параметры. '
