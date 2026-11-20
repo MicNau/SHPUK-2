@@ -164,3 +164,11 @@ body.m-mode .d-photo-overlay { padding: 16px; }
 body.m-mode .gl-banner { left: 8px; right: 8px; bottom: 8px; padding: 8px 30px 8px 10px; }
 body.m-mode .gl-banner .gl-lead { font-size: 11px; }
 body.m-mode .gl-banner .gl-info { display: none; }
+
+/* Окно «Подробнее» о товаре на телефоне: картинка над сведениями. */
+body.m-mode .d-hint-box.d-prod-box { width: 100%; max-width: calc(100vw - 24px); max-height: calc(var(--app-h, 100dvh) * 0.9); padding: 16px; }
+body.m-mode .d-prod-body { flex-direction: column; }
+body.m-mode .d-prod-pic { flex: none; }
+body.m-mode .d-prod-pic img { max-height: 40vh; }
+body.m-mode .d-prod-pic img.loading { min-height: 30vh; }
+body.m-mode .d-prod-info { padding-right: 0; }

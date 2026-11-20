@@ -183,11 +183,11 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-color-management.js?v=1   styles-desktop.css?v=58   styles-mobile.css?v=6
-state.js?v=78             canvas.js?v=70            shared/house-builder.js?v=92
+color-management.js?v=1   styles-desktop.css?v=59   styles-mobile.css?v=7
+state.js?v=78             canvas.js?v=71            shared/house-builder.js?v=92
 ResourceManager.js?v=16   webgl-guard.js?v=1        viewer3d-core.js?v=170
-viewer3d-builders.js?v=69 viewer3d-railing.js?v=18  viewer3d-entourage.js?v=14
-editor3d.js?v=25          nav-desktop.js?v=149      nav-mobile.js?v=9
+viewer3d-builders.js?v=70 viewer3d-railing.js?v=19  viewer3d-entourage.js?v=14
+editor3d.js?v=26          nav-desktop.js?v=150      nav-mobile.js?v=9
 project-io.js?v=8         backend_API/Calculator.js?v=5
 ```
 
@@ -950,6 +950,37 @@ JSON-контракта `POST /api/calculate` и схемы БД лежит в g
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Ветка **Mobile**: правки 2026-11-20 — проход и ступени, шапка, карточки товаров.
+
+- **Перила лестницы кончаются на нижней ступеньке**, а не на земле: нижний
+  столб стоит на нижней проступи (buildSteps3d, балясины — до предпоследней
+  ступени); `_stairRailLines` отдаёт низ линии в той же точке с `z` = высота
+  одной ступени.
+- **Ширина прохода цифрами**: «Обозначить вход» открывает окно
+  `#d-entry-overlay` (0,6…4 м, по умолчанию текущая или `RAIL_ENTRY_W`;
+  «Убрать проход», если он есть). `railingDefaultEntries(…, width)`,
+  `railingEntryWidth(li)`, `railingSetEntryWidth(w)` (центры проходов на месте).
+- **Ступени подстраиваются под проход**: `stepsFitToRailingEntries(prev)`
+  (canvas.js) — ступени, стоявшие в проходе (тот же край, перекрытие вдоль
+  него), получают ширину и положение нового прохода. Зовётся из окна ширины,
+  перетаскивания прохода на плане и в 3D. `_railingEntryStepRects()` — общая
+  часть со `stepsPlaceAtRailingEntry`.
+- **Без шапки на десктопе**: `--header-h: 0`; поверх 3D слева — «Конфигуратор
+  дома» (`.d-3d-brand`), справа вверху — «На сайт» (`.d-3d-site`), на выборе
+  дома — `.d-select-site`. На стартовом экране «На сайт» слева от «НАЧАТЬ».
+  На телефоне шапка прежняя («На сайт» вместо «На главную»).
+- **Подсказка раздела в 3D** сворачивается влево кнопкой «<» / «>»
+  (`dToggleSectionHint`, состояние на сессию).
+- **Фильтры**: кнопка «Применить» (`dApplyFilters`) закрывает панель.
+- **Карточки товаров**: свёрнутая — по высоте картинки (имя в 2 строки);
+  в раскрытой описание в 3 строки и «Подробнее» вместо «Посмотреть текстуру».
+  «Подробнее» (`dShowProduct`) — окно `#d-prod-overlay`: текстура (мебель и
+  товары без текстуры — фото), имя, цена, все свойства товара (подписи из
+  ответа products/filters, иначе `D_PROP_LABELS`) и полный текст; «Применить».
+- Cache-bust: `styles-desktop.css?v=59`, `styles-mobile.css?v=7`,
+  `canvas.js?v=71`, `viewer3d-builders.js?v=70`, `viewer3d-railing.js?v=19`,
+  `editor3d.js?v=26`, `nav-desktop.js?v=150`.
 
 Ветка **Mobile**: правки 2026-11-13 — стартовый экран, мобильная раскладка, API бэкенда.
 

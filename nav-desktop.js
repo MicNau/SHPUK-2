@@ -1376,18 +1376,72 @@ function dFenceGate() {
 // независимую террасу (правка 2026-08-30): у отдельно стоящих террас свои контуры,
 // и одного общего входа им мало. Дальше пользователь двигает точки прямо на плане.
 // Повторное нажатие входы убирает.
+// С правки 2026-11-20 кнопка сначала открывает окно ширины прохода (цифрами):
+// «Применить» ставит вход заданной ширины (или меняет ширину уже стоящих,
+// сохраняя их места), «Убрать проход» — убирает. Дальше всё как прежде: точки
+// входа двигаются в сцене, ступени в проходе следуют за ним.
+const D_ENTRY_W_MIN = 0.6, D_ENTRY_W_MAX = 4;    // м
+
+function _dHasRailingEntry() {
+  return Array.isArray(S.railingEntries) && S.railingEntries.some(e => e);
+}
+
 function dRailingEntry() {
-  const has = Array.isArray(S.railingEntries) && S.railingEntries.some(e => e);
-  if (has) {
-    S.railingEntries = [];
+  const ov = document.getElementById('d-entry-overlay');
+  if (!ov) return;
+  const has = _dHasRailingEntry();
+  const cur = (has && typeof railingEntryWidth === 'function') ? railingEntryWidth(0) : null;
+  const w = cur || ((typeof RAIL_ENTRY_W !== 'undefined') ? RAIL_ENTRY_W : 1);
+  const inp = document.getElementById('d-entry-w');
+  inp.value = String(Math.round(w * 100) / 100).replace('.', ',');
+  document.getElementById('d-entry-err').textContent = '';
+  document.getElementById('d-entry-remove').style.display = has ? '' : 'none';
+  ov.classList.add('active');
+  setTimeout(() => { inp.focus(); inp.select(); }, 50);
+}
+
+function dCloseRailingEntry() {
+  const ov = document.getElementById('d-entry-overlay');
+  if (ov) ov.classList.remove('active');
+}
+
+function dApplyRailingEntry() {
+  const err = document.getElementById('d-entry-err');
+  const fmt = v => String(v).replace('.', ',');
+  const w = Number(String(document.getElementById('d-entry-w').value).trim().replace(',', '.') || NaN);
+  if (!(w >= D_ENTRY_W_MIN && w <= D_ENTRY_W_MAX)) {
+    err.textContent = `Ширина прохода — число от ${fmt(D_ENTRY_W_MIN)} до ${D_ENTRY_W_MAX} м.`;
+    return;
+  }
+  const width = Math.round(w * 100) / 100;
+  // Места ступеней в проходах ДО изменения: по ним ступени найдут свой проход.
+  const prev = (typeof _railingEntryStepRects === 'function') ? _railingEntryStepRects() : null;
+  if (_dHasRailingEntry()) {
+    if (typeof railingSetEntryWidth === 'function') railingSetEntryWidth(width);
   } else {
-    const list = (typeof railingDefaultEntries === 'function') ? railingDefaultEntries() : [];
-    if (!list.some(e => e)) { dToast('Сначала разметьте террасу — вход ставится на её периметре'); return; }
+    const list = (typeof railingDefaultEntries === 'function') ? railingDefaultEntries(undefined, undefined, width) : [];
+    if (!list.some(e => e)) { err.textContent = 'Сначала разметьте террасу — проход ставится на её периметре.'; return; }
     S.railingEntries = list;
   }
+  dCloseRailingEntry();
+  _dRailingEntryChanged(prev);
+  // Участок ограждения короче заданного — проход встал уже: говорим об этом.
+  const got = (typeof railingEntryWidth === 'function') ? railingEntryWidth(0) : null;
+  if (got && got < width - 0.01) dToast(`Проход ${fmt(Math.round(got * 100) / 100)} м — шире на этом участке не помещается`);
+}
+
+function dRemoveRailingEntry() {
+  S.railingEntries = [];
+  dCloseRailingEntry();
+  _dRailingEntryChanged(null);
+}
+
+function _dRailingEntryChanged(prev) {
   if (typeof _railingSync === 'function') _railingSync();
+  if (typeof stepsFitToRailingEntries === 'function' && prev && prev.length) stepsFitToRailingEntries(prev);
   if (typeof drawSnapCanvas === 'function') drawSnapCanvas('railing');
   if (typeof onParamChange === 'function') onParamChange();
+  if (typeof e3dSync === 'function') e3dSync();
 }
 
 // ── «Удалить всё» — раздел возвращается в нулевое состояние ──
@@ -1575,10 +1629,28 @@ function _dShowEditorHint(secId) {
   ov.classList.add('active');
 }
 
+// Плашка сворачивается влево кнопкой «<» / «>» (правка 2026-11-20): свёрнутой
+// остаётся одна кнопка у края вида. Состояние общее для всех разделов.
+let _dHintCollapsed = false;
+
 function _dSyncSectionHint() {
   const el = document.getElementById('d-3d-hint');
   if (!el) return;
-  el.textContent = (dStep === 3 && dActiveItem) ? _dHintText(dActiveItem) : '';
+  const txt = document.getElementById('d-3d-hint-text');
+  const text = (dStep === 3 && dActiveItem) ? _dHintText(dActiveItem) : '';
+  if (txt) txt.textContent = text;
+  el.classList.toggle('empty', !text);
+  el.classList.toggle('collapsed', _dHintCollapsed);
+  const tg = document.getElementById('d-3d-hint-tg');
+  if (tg) {
+    tg.textContent = _dHintCollapsed ? '>' : '<';
+    tg.title = _dHintCollapsed ? 'Показать подсказку' : 'Свернуть подсказку';
+  }
+}
+
+function dToggleSectionHint() {
+  _dHintCollapsed = !_dHintCollapsed;
+  _dSyncSectionHint();
 }
 
 // Приветствие при запуске (index.html, #d-welcome-overlay) открыто сразу в
@@ -1968,6 +2040,15 @@ function _dSyncFiltersBox() {
 function dToggleFilters() {
   _dFiltersOpen = !_dFiltersOpen;
   _dSyncFiltersBox();
+}
+
+// «Применить» в фильтрах (правка 2026-11-20): выбор уже применён — кнопка
+// закрывает блок и возвращает к началу выдачи.
+function dApplyFilters() {
+  _dFiltersOpen = false;
+  _dSyncFiltersBox();
+  const list = document.getElementById('d-mat-list');
+  if (list) list.scrollTop = 0;
 }
 
 
@@ -3061,7 +3142,7 @@ function dHidePhoto() {
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { dHidePhoto(); dCloseRectSize(); }
+  if (e.key === 'Escape') { dHidePhoto(); dCloseRectSize(); dCloseRailingEntry(); dCloseProduct(); }
 });
 
 // URL картинки из поля каталога. Битрикс отдаёт такие поля по-разному: строкой-URL,
@@ -3111,13 +3192,12 @@ function _dRenderRealResults(allProducts) {
   // В «Садовой мебели» по кнопке открывается фото товара, в остальных разделах —
   // текстура (TODO.md, этап 1 п.11). Раздел берём по пункту меню: _activeSectionId()
   // возвращает НОМЕР раздела каталога, а не его id.
-  const viewLabel = (dActiveItem === 'furniture') ? 'Посмотреть' : 'Посмотреть текстуру';
+  // С правки 2026-11-20 вместо «Посмотреть текстуру» — «Подробнее»: окно с
+  // текстурой (или фото) и полной информацией о товаре (dShowProduct).
   list.innerHTML = products.map(p => {
     const price = _productPrice(p);
     const thumbStyle = _productThumbStyle(p);
-    const desc = (p.previewText && p.previewTextType !== 'html') ? p.previewText : '';
-    const bigPic = _pictureUrl(p.detailPicture) || _pictureUrl(p.previewPicture)
-      || (p.textureUrls && p.textureUrls.textures_dpc_diffusion) || '';
+    const desc = _dProductText(p);
     return `
     <div class="d-mat-card" id="dmc-${p.id}">
       <div class="d-mat-head" onclick="dToggleMatCard(${p.id})">
@@ -3129,10 +3209,9 @@ function _dRenderRealResults(allProducts) {
         <button class="d-mat-exp">▼</button>
       </div>
       <div class="d-mat-body"><div class="d-mat-detail">
-        <div class="d-mat-desc">${desc}</div>
+        ${desc ? `<div class="d-mat-desc">${_dEsc(desc)}</div>` : ''}
         <div class="d-mat-actions">
-          ${bigPic ? `<button class="d-mat-btn d-mat-btn-view"
-             onclick="dShowPhoto(event, '${bigPic.replace(/'/g, "\\'")}')">${viewLabel}</button>` : ''}
+          <button class="d-mat-btn d-mat-btn-view" onclick="dShowProduct(event, ${p.id})">Подробнее</button>
           <button class="d-mat-btn d-mat-btn-apply" onclick="dApplyRealMat(event, ${p.id})"
                   ${_isProductApplied(p.id) ? 'disabled' : ''}>Применить</button>
         </div>
@@ -3140,6 +3219,113 @@ function _dRenderRealResults(allProducts) {
     </div>`;
   }).join('');
   _dApplyLinkFocus();
+}
+
+// ── «Подробнее» о товаре (правка 2026-11-20) ──
+// Окно с крупной текстурой (у мебели — фото) и всем, что о товаре отдаёт сервер:
+// название, цена, цвет, описание и характеристики. Подписи характеристик — из
+// фильтров раздела с сервера (те же «Ширина доски», «Толщина», «Столб:
+// ширина»…), для остального — свои (D_PROP_LABELS). Служебные поля (текстуры,
+// модели, связанные товары) не показываются.
+const D_PROP_LABELS = {
+  brand: ['Бренд'],
+  price_category: ['Ценовая категория', '', { budget: 'Эконом', balance: 'Средний', premium: 'Премиум' }],
+  core_type: ['Сечение доски', '', { solid: 'Полнотелая', hollow: 'Пустотелая' }],
+  board_direction: ['Направление доски', '', { horizontal: 'Горизонтально', vertical: 'Вертикально' }],
+  fence_type: ['Тип забора', '', { woven: 'Плетёный', board: 'Из доски' }],
+  'dimensions.length': ['Длина', 'мм'],
+  'dimensions.width': ['Ширина', 'мм'],
+  'dimensions.height': ['Высота', 'мм'],
+  'components.post.dimensions.width': ['Столб: ширина', 'мм'],
+  'components.post_cap.type': ['Крышка-юбка столба', '', { dpk: 'ДПК', plastic: 'Пластик', metal: 'Металл' }],
+  'components.corner_bracket.type': ['Тип уголка', '',
+    { plastic_joint: 'Пластиковый шарнир', plastic_angle: 'Пластиковый угол', metal: 'Металлический' }],
+  material: ['Материал'],
+};
+const D_PROP_SKIP = /^(textures|related_product_ids|glb_url)(\.|$)/;
+
+// Описание товара текстом: HTML-описание без разметки.
+function _dProductText(p) {
+  const t = (p && p.previewText) || '';
+  if (!t) return '';
+  if (p.previewTextType !== 'html') return t.trim();
+  const d = new DOMParser().parseFromString(t, 'text/html');
+  return (d.body.textContent || '').trim();
+}
+
+function _dFindProduct(pid) {
+  for (const k in _catalogCache) {
+    const arr = _catalogCache[k];
+    if (Array.isArray(arr)) { const f = arr.find(p => p.id === pid); if (f) return f; }
+  }
+  const lf = _dLinkFocus && _dLinkFocus.product;
+  return (lf && lf.id === pid) ? lf : null;
+}
+
+// Характеристики товара строками [подпись, значение].
+function _dProductProps(p) {
+  const flat = {};
+  const walk = (o, path) => {
+    for (const k of Object.keys(o || {})) {
+      const v = o[k], key = path ? path + '.' + k : k;
+      if (D_PROP_SKIP.test(key)) continue;
+      if (v && typeof v === 'object' && !Array.isArray(v)) walk(v, key);
+      else if (v !== null && v !== '' && v !== undefined) flat[key] = v;
+    }
+  };
+  walk(p.properties || {}, '');
+  const dyn = _dDynReady(_activeSectionId());
+  const rows = [];
+  if (p.color) rows.push(['Цвет', p.color]);
+  for (const key of Object.keys(flat)) {
+    const f = dyn && dyn.filters.find(x => x.key === key || x.property === key);
+    const loc = D_PROP_LABELS[key];
+    if (!f && !loc) continue;                         // неизвестное служебное поле
+    const label = (f && f.label) || loc[0];
+    const unit = (f && f.unit) || (loc && loc[1]) || '';
+    const raw = flat[key];
+    const vals = Array.isArray(raw) ? raw : [raw];
+    const shown = vals.map(v => {
+      const fv = f && (f.values || []).find(x => x.value === v);
+      return (loc && loc[2] && loc[2][v]) || (fv && fv.label) || String(v);
+    }).join(', ');
+    rows.push([label, shown + (unit && /^[\d.,\s]+$/.test(shown) ? ' ' + unit : '')]);
+  }
+  return rows;
+}
+
+function dShowProduct(ev, pid) {
+  if (ev) ev.stopPropagation();
+  const p = _dFindProduct(pid);
+  const ov = document.getElementById('d-prod-overlay');
+  if (!p || !ov) return;
+  const tex = (p.textureUrls && p.textureUrls.textures_dpc_diffusion) || '';
+  const pic = (dActiveItem === 'furniture' || !tex)
+    ? (_pictureUrl(p.detailPicture) || _pictureUrl(p.previewPicture) || tex) : tex;
+  const price = _productPrice(p);
+  const text = _dProductText(p);
+  const rows = _dProductProps(p);
+  document.getElementById('d-prod-body').innerHTML = `
+    <div class="d-prod-pic">${pic
+      ? `<img class="loading" src="${_dEsc(pic)}" alt="" onload="this.classList.remove('loading')" onclick="dShowPhoto(event, '${_dEsc(pic).replace(/'/g, "\\'")}')">`
+      : '<div class="d-prod-nopic">Нет изображения</div>'}</div>
+    <div class="d-prod-info">
+      <div class="d-prod-name">${_dEsc(p.name || '')}</div>
+      <div class="d-prod-price">${price != null ? 'от ' + Math.round(price) + ' ₽' : 'цена по запросу'}</div>
+      ${rows.length ? `<table class="d-prod-props">${rows.map(r =>
+        `<tr><td>${_dEsc(r[0])}</td><td>${_dEsc(r[1])}</td></tr>`).join('')}</table>` : ''}
+      ${text ? `<div class="d-prod-text">${_dEsc(text)}</div>` : ''}
+    </div>`;
+  const apply = document.getElementById('d-prod-apply');
+  apply.disabled = _isProductApplied(p.id);
+  apply.textContent = apply.disabled ? 'Применено' : 'Применить';
+  apply.onclick = async e => { await dApplyRealMat(e, p.id); dCloseProduct(); };
+  ov.classList.add('active');
+}
+
+function dCloseProduct() {
+  const ov = document.getElementById('d-prod-overlay');
+  if (ov) ov.classList.remove('active');
 }
 
 // Применить реальный товар к активному элементу (каждый элемент — независимо).
@@ -3527,7 +3713,7 @@ function _linesToMm(name, markHouse) {
 // railSwivelBracket; calculation_api.md, «Перила на ступенях»). Геометрия — как
 // в 3D (buildSteps3d): по линии с каждого бока лестницы, верх — на оси столба
 // ограждения террасы (RAIL_INSET вглубь от кромки) на высоте настила, низ — на
-// земле, где уклон перил через верх последней проступи её достигает. Верх
+// нижней ступеньке (правка 2026-11-20; раньше — на земле). Верх
 // совпадает с концом линии ограждения у прохода — сервер ставит там общий столб.
 function _stairRailLines() {
   if (!S.sections.includes('steps') || !(S.toggles && S.toggles['steps-railing'])) return [];
@@ -3540,12 +3726,14 @@ function _stairRailLines() {
   const depth = (typeof STEP_DEPTH !== 'undefined') ? STEP_DEPTH : 0.28;
   const nose = (typeof STEP_NOSING !== 'undefined') ? STEP_NOSING : 0.035;
   const inset = (typeof RAIL_INSET !== 'undefined') ? RAIL_INSET : 0.10;
+  const riser = (typeof RISER_THICKNESS !== 'undefined') ? RISER_THICKNESS : 0.025;
   const n = Math.max(1, Math.ceil(bh / rise));
   const realRise = bh / n;
   const stairDepth = (n - 1) * depth + nose;
-  // Продление низа до земли по тому же уклону (как B в buildSteps3d).
-  const ext = (n > 1 && bh > realRise) ? stairDepth * realRise / (bh - realRise) : 0;
-  const zTop = Math.round(bh * 1000), zBot = n > 1 ? 0 : zTop;
+  // Низ — на нижней ступеньке (правка 2026-11-20): центр последней проступи, на
+  // её высоте, как столб-ньюэл в buildSteps3d. Одна ступень — низ на кромке.
+  const lastOff = n >= 2 ? (n - 2) * depth + (riser + depth + nose) / 2 : stairDepth;
+  const zTop = Math.round(bh * 1000), zBot = Math.round((n >= 2 ? realRise : bh) * 1000);
   const Dn = _stepsDepthNorm();
   const sides = _stepsSupportSides();
   const out = [];
@@ -3564,7 +3752,7 @@ function _stairRailLines() {
     const width = alongY ? s.w : s.h;
     const c = (alongY ? s.x : s.y) + width / 2;
     const off = _stepsRailOffsetNorm(width);
-    const top = edge - dir * inset / G, bot = edge + dir * (stairDepth + ext) / G;
+    const top = edge - dir * inset / G, bot = edge + dir * lastOff / G;
     for (const sign of [-1, 1]) {
       const lat = c + sign * off;
       const a = alongY ? { x: lat, y: top } : { x: top, y: lat };
