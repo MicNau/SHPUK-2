@@ -1004,17 +1004,12 @@ body.m-mode .d-3d-brand, body.m-mode .d-3d-site { display: none; }
 }
 .d-hint-title { font-size: 22px; font-weight: 400; }
 .d-hint-text { font-size: 16px; font-weight: 400; line-height: 1.4; color: var(--text); }
-/* Кнопка «Понятно»: .d-btn рассчитана на футер панели (flex:1), в окне её надо
-   задать явно, иначе она сжимается до ширины текста. */
-/* ═══ СТАРТОВЫЙ ЭКРАН (десктоп) ═══ */
+/* ═══ СТАРТОВЫЙ ЭКРАН (телефон — styles-mobile.css) ═══ */
 .d-start {
   display: none; position: fixed; inset: 0; z-index: 400; background: #fff;
   overflow: auto; align-items: center; justify-content: center; padding: 40px;
 }
 .d-start.active { display: flex; }
-body.m-mode .d-start { display: none; }
-/* Окно-приветствие — только на телефоне; на десктопе его заменяет стартовый экран. */
-body:not(.m-mode) #d-welcome-overlay { display: none; }
 .d-start-wrap { display: flex; gap: 22px; align-items: flex-start; max-width: 1160px; width: 100%; }
 .d-start-left { flex: 0 1 594px; min-width: 0; display: flex; flex-direction: column; }
 .d-start-kicker { font-size: 17px; color: #999; margin-bottom: 26px; }
@@ -1040,8 +1035,8 @@ body:not(.m-mode) #d-welcome-overlay { display: none; }
 }
 .d-start-note { margin-top: auto; padding: 40px 0 6px 70px; font-size: 17px; color: #999; }
 
-/* Приветствие при запуске: текст длиннее подсказок — окно шире. */
-.d-welcome-box { width: 560px; }
+/* Кнопка «Понятно»: .d-btn рассчитана на футер панели (flex:1), в окне её надо
+   задать явно, иначе она сжимается до ширины текста. */
 .d-hint-box .d-btn {
   align-self: flex-end; flex: none;
   min-width: 160px; height: 48px; padding: 0 24px; font-size: 18px;

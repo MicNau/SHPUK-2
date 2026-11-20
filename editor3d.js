@@ -1021,6 +1021,7 @@ function _e3dDrawClick(np) {
   e3dSync();
   if (typeof onParamChange === 'function') onParamChange();
   if (typeof _dSyncSectionActions === 'function') _dSyncSectionActions();
+  if (typeof mAfterSetting === 'function') mAfterSetting();   // телефон: вид на весь экран
 }
 
 // Закончить начатую линию: правая кнопка, Esc или клик в последнюю точку.
@@ -1108,6 +1109,8 @@ function _e3dOnUp(ev) {
   if (pr.moved) {
     // Перетаскивание закончено — досчитываем сцену набело.
     if (drag && typeof onParamChange === 'function') onParamChange();
+    // Телефон: объект передвинут — настройки уезжают вниз, вид на весь экран.
+    if (drag && typeof mAfterSetting === 'function') mAfterSetting();
     return;                                   // без объекта это было вращение камеры
   }
 
@@ -1119,6 +1122,8 @@ function _e3dOnUp(ev) {
       return;
     }
     e3dSelect(pr.hit);
+    // Кусок фасада отмечен или снят — это настройка (телефон: вид на весь экран).
+    if (E3D_KIND[E3D.sec] === 'facade' && typeof mAfterSetting === 'function') mAfterSetting();
     // Грядка и мебель поворачиваются на 90° тем же кликом, которым выбираются
     // (как было на плане): отдельной ручки у них нет.
     if (pr.hit.kind === 'beds' || pr.hit.kind === 'point') { _e3dRotate(pr.hit); return; }
@@ -1137,6 +1142,7 @@ function _e3dRotate(hit) {
   else if (hit.kind === 'point' && typeof rotateActiveFurniture === 'function') rotateActiveFurniture(1);
   e3dSync();
   if (typeof onParamChange === 'function') onParamChange();
+  if (typeof mAfterSetting === 'function') mAfterSetting();
 }
 
 // Курсор-указатель над своим объектом — видно, что по нему можно кликнуть.
