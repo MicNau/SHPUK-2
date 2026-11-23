@@ -1425,6 +1425,7 @@ function dApplyRailingEntry() {
   }
   dCloseRailingEntry();
   _dRailingEntryChanged(prev);
+  if (typeof mAfterSetting === 'function') mAfterSetting();
   // Участок ограждения короче заданного — проход встал уже: говорим об этом.
   const got = (typeof railingEntryWidth === 'function') ? railingEntryWidth(0) : null;
   if (got && got < width - 0.01) dToast(`Проход ${fmt(Math.round(got * 100) / 100)} м — шире на этом участке не помещается`);
@@ -1434,6 +1435,7 @@ function dRemoveRailingEntry() {
   S.railingEntries = [];
   dCloseRailingEntry();
   _dRailingEntryChanged(null);
+  if (typeof mAfterSetting === 'function') mAfterSetting();
 }
 
 function _dRailingEntryChanged(prev) {
@@ -1653,23 +1655,18 @@ function dToggleSectionHint() {
   _dSyncSectionHint();
 }
 
-// Приветствие при запуске (index.html, #d-welcome-overlay) открыто сразу в
-// разметке — без мигания карточек до скрипта. Закрыли — мобильная очередь
-// подсказок показывает то, что накопила за это время.
-// Стартовый экран (десктоп, правка 2026-11-13): «НАЧАТЬ» открывает выбор дома.
+// Стартовый экран (правка 2026-11-13; с 2026-11-20 и на телефоне — вместо
+// окна-приветствия): «НАЧАТЬ» открывает выбор дома. Пока он открыт, мобильная
+// очередь подсказок ждёт (dWelcomeOpen), закрыли — показывает накопленное.
 function dStart() {
   const el = document.getElementById('d-start');
   if (el) el.classList.remove('active');
+  if (typeof mHintClosed === 'function') mHintClosed();
 }
 
 function dWelcomeOpen() {
-  const ov = document.getElementById('d-welcome-overlay');
-  return !!(ov && ov.classList.contains('active'));
-}
-function dCloseWelcome() {
-  const ov = document.getElementById('d-welcome-overlay');
-  if (ov) ov.classList.remove('active');
-  if (typeof mHintClosed === 'function') mHintClosed();
+  const el = document.getElementById('d-start');
+  return !!(el && el.classList.contains('active'));
 }
 
 function dHideEditorHint() {
@@ -4326,6 +4323,7 @@ function dApplyRectSize() {
   Object.assign(secRects(sec)[idx], res);
   dCloseRectSize();
   _secChanged(sec);
+  if (typeof mAfterSetting === 'function') mAfterSetting();
 }
 
 function dCloseRequest() {

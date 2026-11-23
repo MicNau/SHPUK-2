@@ -14,7 +14,9 @@
 //       снизу его настройки и кнопки; внизу «Назад» и «Каталог»,
 //       самой нижней — «Смета»;
 //   4 — каталог: скролл карточек товаров, внизу «Меню».
-// «Применить» в каталоге возвращает на экран 3, «Меню» — к списку разделов.
+// «Применить» в каталоге возвращает на экран 3 с развёрнутым видом, «Меню» — к
+// списку разделов. После первой настройки раздела его настройки уезжают вниз,
+// вид занимает экран; язычок «︿» внизу вида возвращает их (правка 2026-11-20).
 
 const M_BREAKPOINT = 820;       // CSS-пиксели: ниже этой ширины включается мобильный режим
 let M_ON = false;
@@ -59,7 +61,15 @@ function mBuildFrame() {
     `<button class="d-btn d-btn-back" onclick="mBack()">← Назад</button>
      <button class="d-btn d-btn-back" id="m-btn-catalog" onclick="mGoCatalog()">Каталог</button>`);
   _mMove(view, zone3d);
+  // Язычок свернуть/развернуть настройки (правка 2026-11-20) — поверх вида.
+  const tg = document.createElement('button');
+  tg.type = 'button';
+  tg.className = 'm-sec-tg';
+  tg.id = 'm-sec-tg';
+  tg.onclick = () => mSetCollapsed(!_mCollapsed);
+  zone3d.appendChild(tg);
   _mMove(sidebar, zoneSec);
+  _mWatchSettings(zoneSec);
   ws.appendChild(zone3d);
   ws.appendChild(zoneSec);
   ws.appendChild(bar);
@@ -84,6 +94,9 @@ function mTeardownFrame() {
   _mMoved.length = 0;
   document.querySelectorAll('#d-screen-3 .m-3d, #d-screen-3 .m-sec, #d-screen-3 .m-bar')
     .forEach(el => el.remove());
+  const scr = document.getElementById('d-screen-3');
+  if (scr) scr.classList.remove('m-open', 'm-collapsed');
+  _mCollapsed = false;
 }
 
 // ══════════════════════════════════════════════
@@ -136,6 +149,18 @@ function mSyncSection() {
   if (!M_ON) return;
   const scr = document.getElementById('d-screen-3');
   if (scr) scr.classList.toggle('m-open', !!dActiveItem);
+  // Новый раздел (или возврат к списку) — настройки снова на виду: сначала
+  // пользователь их видит, сворачиваются они после первой настройки.
+  if (dActiveItem !== _mCollapsedSec) {
+    _mCollapsedSec = dActiveItem;
+    if (_mCollapsed) mSetCollapsed(false, true);
+    // Подсказка раздела в углу вида — развёрнута, пока не начали настраивать.
+    if (typeof _dHintCollapsed !== 'undefined' && dActiveItem) {
+      _dHintCollapsed = false;
+      if (typeof _dSyncSectionHint === 'function') _dSyncSectionHint();
+    }
+  }
+  _mSyncCollapseBtn();
   const cat = document.getElementById('m-btn-catalog');
   if (cat) cat.disabled = !dActiveItem;
   // Открытая строка списка помечается классом: по нему CSS оставляет на экране
@@ -156,13 +181,115 @@ function mAfterSidebar() {
   if (!M_ON) return;
   mSyncSection();
   // Вид появляется вместе с первым открытым разделом — здесь же объясняем жесты.
-  if (dActiveItem) mQueueHint('view3d', 'Управление видом', M_3D_HINT);
+  if (dActiveItem) mQueueHint(M_3D_KEY, 'Управление видом', M_3D_HINT);
 }
 
-// «Применить» в каталоге возвращает к настройкам элемента (ТЗ п. 8).
+// «Применить» в каталоге возвращает на экран элемента, и вид сразу развёрнут на
+// всё место: товар применён — его надо рассмотреть (правка 2026-11-20).
 function mAfterApply() {
   if (!M_ON || dStep !== 4) return;
   mShowScreen(3);
+  mSetCollapsed(true, true);
+}
+
+// ══════════════════════════════════════════════
+// СВОРАЧИВАНИЕ НАСТРОЕК (правка 2026-11-20)
+// ══════════════════════════════════════════════
+// После первой настройки в разделе блок настроек уезжает вниз, вид занимает
+// всю площадь до «Сметы»; язычок внизу вида («︿» / «﹀») возвращает и прячет
+// их. Настройка — это кнопка или переключатель раздела, поле (по окончании
+// ввода), окно размеров или прохода (по «Применить»), а в 3D — законченное
+// перетаскивание, точка линии, поворот, выбор куска фасада (mAfterSetting
+// зовут nav-desktop.js и editor3d.js). Пока палец на экране, вид не меняет
+// размер — сворачиваем только между жестами.
+let _mCollapsed = false;
+let _mCollapsedSec = null;     // раздел, для которого действует состояние
+
+function _mSyncCollapseBtn() {
+  const tg = document.getElementById('m-sec-tg');
+  if (!tg) return;
+  tg.textContent = _mCollapsed ? '︿' : '﹀';
+  tg.setAttribute('aria-label', _mCollapsed ? 'Показать настройки' : 'Скрыть настройки');
+  tg.title = tg.getAttribute('aria-label');
+}
+
+function mSetCollapsed(on, instant) {
+  const scr = document.getElementById('d-screen-3');
+  if (!M_ON || !scr) return;
+  on = !!on && !!dActiveItem;
+  if (on === _mCollapsed) { _mSyncCollapseBtn(); return; }
+  _mCollapsed = on;
+  _mSyncCollapseBtn();
+  const parts = scr.querySelectorAll('.m-sec, .m-bar');
+  const apply = () => {
+    parts.forEach(el => el.classList.remove('m-slide-out', 'm-slide-in'));
+    const a0 = _mViewAspect();
+    scr.classList.toggle('m-collapsed', _mCollapsed);
+    if (!_mCollapsed && !instant) parts.forEach(el => el.classList.add('m-slide-in'));
+    _mKeepFraming(a0, _mViewAspect());
+    if (typeof resizeThree === 'function') { resizeThree(); setTimeout(resizeThree, 60); }
+  };
+  // Настройки уехали — подсказка в углу вида сворачивается к краю («>»):
+  // пользователь уже начал работать, а вид нужен целиком.
+  if (on && typeof _dHintCollapsed !== 'undefined' && !_dHintCollapsed) {
+    _dHintCollapsed = true;
+    if (typeof _dSyncSectionHint === 'function') _dSyncSectionHint();
+  }
+  if (on && !instant) {
+    // Уезжают вниз, потом вид забирает место.
+    parts.forEach(el => el.classList.add('m-slide-out'));
+    setTimeout(() => { if (_mCollapsed) apply(); }, 180);
+  } else apply();
+}
+
+// Пропорции зоны вида (ширина / высота); 0 — вида нет.
+function _mViewAspect() {
+  const v = document.getElementById('m-3d');
+  return v && v.offsetHeight ? v.offsetWidth / v.offsetHeight : 0;
+}
+
+// Вид вытянулся по высоте — угол обзора камеры задан по вертикали, и без
+// поправки картинка увеличилась бы в a0/a1 раз (×2,5 на телефоне): терраса и
+// дом уходили за края экрана. Сохранить ширину кадра целиком — дом мельчал
+// посреди пустого участка. Середина: камера отъезжает на (a0/a1)^0.7, картинка
+// крупнее примерно на треть и по ширине почти не обрезается. При
+// разворачивании настроек — обратно.
+const M_FRAME_POW = 0.7;
+function _mKeepFraming(a0, a1) {
+  const ts = (typeof threeState !== 'undefined') ? threeState : null;
+  if (!ts || !ts.camera || !ts.controls || !a0 || !a1) return;
+  const cam = ts.camera, tgt = ts.controls.target;
+  const off = cam.position.clone().sub(tgt);
+  const d = off.length();
+  if (!d) return;
+  const c = ts.controls;
+  const nd = Math.min(c.maxDistance || Infinity, Math.max(c.minDistance || 0, d * Math.pow(a0 / a1, M_FRAME_POW)));
+  cam.position.copy(tgt).add(off.multiplyScalar(nd / d));
+  c.update();
+}
+
+// Настройка сделана — сворачиваем (если раздел открыт и мы на его экране).
+function mAfterSetting() {
+  if (!M_ON || dStep !== 3 || !dActiveItem || _mCollapsed) return;
+  mSetCollapsed(true);
+}
+
+// Окно поверх (размеры, проход, подсказка) — настройка ещё не сделана: свернём
+// по его «Применить» (mAfterSetting из nav-desktop.js).
+function _mDialogOpen() {
+  return !!document.querySelector('.d-hint-overlay.active, .d-summary-overlay.active');
+}
+
+function _mWatchSettings(zone) {
+  const later = () => setTimeout(() => { if (!_mDialogOpen()) mAfterSetting(); }, 120);
+  zone.addEventListener('click', ev => {
+    const t = ev.target.closest('#d-sb-accordion button, #d-sb-accordion .tg');
+    if (t && !t.disabled) later();
+  });
+  // Поля и ползунки — по окончании ввода (change), а не на каждое движение.
+  zone.addEventListener('change', ev => {
+    if (ev.target.closest('#d-sb-accordion')) later();
+  });
 }
 
 // ══════════════════════════════════════════════
@@ -216,14 +343,18 @@ function mHintClosed() {
 // они идут той же очередью. Возвращает true — десктопный показ не нужен.
 function mHintTake(key, title, text) {
   if (!M_ON) return false;
-  // На экране параметров 3D-вида нет: подсказку об управлении покажем, когда он
-  // появится (mAfterSidebar).
-  if (key !== 'view3d' || dStep === 3) mQueueHint(key, title, text);
+  // Управление видом на телефоне — свой текст (палец, а не мышь). На экране
+  // параметров 3D-вида нет: подсказку покажем, когда он появится (mAfterSidebar).
+  if (key === 'view3d') { if (dStep === 3) mQueueHint(M_3D_KEY, title, M_3D_HINT); }
+  else mQueueHint(key, title, text);
   return true;
 }
 
-const M_3D_HINT = 'Одно касание — выбор и перетаскивание объекта.\n'
-                + 'Два пальца — поворот и масштаб вида.';
+// Жесты с правки 2026-11-20 другие — ключ новый, чтобы окно показалось и тем,
+// кто видел прежнее.
+const M_3D_KEY = 'view3d-2';
+const M_3D_HINT = 'Один палец — поворот вида, а на объекте раздела — выбор и перетаскивание.\n'
+                + 'Два пальца — масштаб (сведите или разведите) и сдвиг вида вправо-влево-вверх-вниз.';
 
 const M_SCREEN_HINTS = {
   1: ['Выбор дома', 'Пролистайте карточки и коснитесь дома — откроются его параметры. '
@@ -231,9 +362,10 @@ const M_SCREEN_HINTS = {
   2: ['Параметры дома', 'Задайте площадь, высоту фундамента и этажей, выберите материалы. '
     + 'Дом показывается в 3D на следующем экране.'],
   3: ['Благоустройство', 'Коснитесь элемента в списке: сверху появится 3D-вид, снизу — его '
-    + 'настройки и кнопки. «Каталог» открывает товары выбранного элемента.'],
+    + 'настройки и кнопки. После первой настройки они уезжают вниз, а вид занимает весь экран; '
+    + 'вернуть их — кнопка «︿» внизу вида. «Каталог» открывает товары выбранного элемента.'],
   4: ['Каталог', 'Пролистайте карточки товаров. «Применить» ставит товар и возвращает к '
-    + 'настройкам элемента, «Меню» — к списку разделов.'],
+    + '3D-виду, «Меню» — к списку разделов.'],
 };
 
 function mScreenHint(step) {
@@ -290,16 +422,11 @@ if (typeof document !== 'undefined') {
     window.addEventListener('resize', mSyncAppHeight);
     if (window.visualViewport) window.visualViewport.addEventListener('resize', mSyncAppHeight);
     mApplyMode();
-    // Приветствие: на телефоне — окно, на десктопе — стартовый экран (#d-start).
-    // Окно в разметке открыто: на десктопе снимаем с него active, иначе редактор
-    // считал бы, что поверх открыто окно, и не слушал клавиши. Проект по ссылке
-    // (?project=…) открывается сразу, без приветствия.
+    // Стартовый экран (#d-start) — и на десктопе, и на телефоне (правка
+    // 2026-11-20; раньше на телефоне было окно-приветствие). Проект по ссылке
+    // (?project=…) открывается сразу, без него.
     const byLink = (typeof projectKeyFromUrl === 'function') && !!projectKeyFromUrl();
-    if (!M_ON || byLink) {
-      const w = document.getElementById('d-welcome-overlay');
-      if (w) w.classList.remove('active');
-    }
-    if (M_ON || byLink) {
+    if (byLink) {
       const st = document.getElementById('d-start');
       if (st) st.classList.remove('active');
     }

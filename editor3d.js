@@ -1021,6 +1021,7 @@ function _e3dDrawClick(np) {
   e3dSync();
   if (typeof onParamChange === 'function') onParamChange();
   if (typeof _dSyncSectionActions === 'function') _dSyncSectionActions();
+  if (typeof mAfterSetting === 'function') mAfterSetting();   // телефон: вид на весь экран
 }
 
 // Закончить начатую линию: правая кнопка, Esc или клик в последнюю точку.
@@ -1040,15 +1041,19 @@ function _e3dCancelPress() {
   if (threeState) threeState.controls.enabled = true;
 }
 
-// Мобильный режим (вызывает nav-mobile.js). Жесты: одно касание — только выбор и
-// перетаскивание объекта, вид от него не крутится; два пальца — поворот и
-// масштаб вида. Мышиные кнопки не трогаем: на планшете с мышью всё как было.
+// Мобильный режим (вызывает nav-mobile.js). Жесты (правка 2026-11-20):
+// один палец — облёт камеры, а на объекте раздела — выбор и перетаскивание
+// (как левая кнопка мыши: _e3dOnDown выключает орбиту на время протяжки
+// объекта, pointerdown приходит раньше touchstart OrbitControls); два пальца —
+// масштаб щипком и сдвиг вида вправо-влево-вверх-вниз. Раньше один палец вид не
+// крутил, а два крутили и масштабировали. Мышиные кнопки не трогаем: на
+// планшете с мышью всё как было.
 function e3dSetTouch(on) {
   E3D.touch = !!on;
   const c = (typeof threeState !== 'undefined' && threeState) ? threeState.controls : null;
   if (!c || typeof THREE === 'undefined') return;
-  c.touches.ONE = on ? -1 : THREE.TOUCH.ROTATE;      // -1 — «ничего» (см. onTouchStart)
-  c.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
+  c.touches.ONE = THREE.TOUCH.ROTATE;
+  c.touches.TWO = THREE.TOUCH.DOLLY_PAN;
 }
 
 // Правая кнопка заканчивает рисуемую линию. Правой же кнопкой двигают вид
@@ -1059,7 +1064,7 @@ let _e3dRightPress = null;
 function _e3dOnDown(ev) {
   if (ev.button === 2) { _e3dRightPress = { x: ev.clientX, y: ev.clientY }; return; }
   if (ev.button !== 0 || !E3D.sec || !threeState) return;
-  // Второй палец — это жест камеры (два пальца крутят и масштабируют вид):
+  // Второй палец — это жест камеры (два пальца масштабируют и сдвигают вид):
   // начатую протяжку бросаем, иначе объект уехал бы вместе с видом.
   if (E3D.touch && ev.isPrimary === false) { _e3dCancelPress(); return; }
   const p = _e3dPointAt(ev);
@@ -1108,6 +1113,8 @@ function _e3dOnUp(ev) {
   if (pr.moved) {
     // Перетаскивание закончено — досчитываем сцену набело.
     if (drag && typeof onParamChange === 'function') onParamChange();
+    // Телефон: объект передвинут — настройки уезжают вниз, вид на весь экран.
+    if (drag && typeof mAfterSetting === 'function') mAfterSetting();
     return;                                   // без объекта это было вращение камеры
   }
 
@@ -1119,6 +1126,8 @@ function _e3dOnUp(ev) {
       return;
     }
     e3dSelect(pr.hit);
+    // Кусок фасада отмечен или снят — это настройка (телефон: вид на весь экран).
+    if (E3D_KIND[E3D.sec] === 'facade' && typeof mAfterSetting === 'function') mAfterSetting();
     // Грядка и мебель поворачиваются на 90° тем же кликом, которым выбираются
     // (как было на плане): отдельной ручки у них нет.
     if (pr.hit.kind === 'beds' || pr.hit.kind === 'point') { _e3dRotate(pr.hit); return; }
@@ -1137,6 +1146,7 @@ function _e3dRotate(hit) {
   else if (hit.kind === 'point' && typeof rotateActiveFurniture === 'function') rotateActiveFurniture(1);
   e3dSync();
   if (typeof onParamChange === 'function') onParamChange();
+  if (typeof mAfterSetting === 'function') mAfterSetting();
 }
 
 // Курсор-указатель над своим объектом — видно, что по нему можно кликнуть.
