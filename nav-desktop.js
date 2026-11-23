@@ -91,7 +91,8 @@ function _dSyncSidebarWidth() {
   // У забора в заголовке каталога стоит ещё и высота — строка длиннее названия
   // раздела, и кегль подбирается по ней, иначе заголовок обрезался бы.
   const fenceTitle = `Забор (высота ${(+S.fenceH).toFixed(2)} м)`;
-  const titleW100 = widest([...SIDEBAR_TITLES, ...D_MENU_ITEMS.map(i => i.lbl), fenceTitle], 100, 400);
+  const titleW100 = widest([...SIDEBAR_TITLES, ...D_MENU_ITEMS.map(i => i.lbl), fenceTitle,
+                            _dSectionTitle('beds')], 100, 400);
   probe.remove();
   // Ширина не должна быть меньше той, в которой заголовок читается минимальным кеглем.
   const needLeft  = titleW100 * TITLE_FZ_MIN / 100 + 2 * SIDEBAR_PAD;
@@ -783,6 +784,36 @@ const D_TERRACE_H_PARAM = `
     <div class="d-param-unit" id="d-terrace-h-hint"><span>15 см</span><span>80 см</span></div>
   </div>`;
 
+// Длина и ширина выбранного блока террасы (правка 2026-11-23, вместо окна
+// «Задать размеры»): шаг 0,25 м, как у протяжки маркеров. Поля меняют размер
+// по окончании ввода (onchange), ползунки — на ходу.
+// id — terrace-len / terrace-wid: v-terrace-h уже занят высотой террасы.
+const D_TERRACE_SIZE_PARAM = [['w', 'len', 'Длина'], ['h', 'wid', 'Ширина']].map(([k, id, lbl]) => `
+  <div class="d-param-group">
+    <div class="d-param-head">
+      <span class="d-param-label">${lbl}, м</span>
+      <input class="d-param-input" type="number" id="v-terrace-${id}" step="0.25"
+             onchange="dSetTerraceSize('${k}', this.value)">
+    </div>
+    <input class="d-param-range" type="range" id="r-terrace-${id}" step="0.25"
+           oninput="dSetTerraceSize('${k}', this.value)">
+    <div class="d-param-unit"><span>1 м</span><span>20 м</span></div>
+  </div>`).join('');
+
+// Ширина прохода в ограждении (правка 2026-11-23, вместо окна «Проход в
+// ограждении»): показывается, пока проход обозначен (_dSyncRailingEntryUI).
+const D_RAIL_ENTRY_PARAM = `
+  <div class="d-param-group" id="d-rail-entry-param" style="display:none">
+    <div class="d-param-head">
+      <span class="d-param-label">Ширина прохода, м</span>
+      <input class="d-param-input" type="number" id="v-rail-entry" min="0.6" max="4" step="0.1"
+             onchange="dSetRailingEntryWidth(this.value); dRailingEntryWidthDone()">
+    </div>
+    <input class="d-param-range" type="range" id="r-rail-entry" min="0.6" max="4" step="0.1"
+           oninput="dSetRailingEntryWidth(this.value)" onchange="dRailingEntryWidthDone()">
+    <div class="d-param-unit"><span>0,6 м</span><span>4 м</span></div>
+  </div>`;
+
 // Сечение доски — специфический фильтр каталога (ТЗ п. 5). Живёт в правой
 // панели, в блоке «Фильтры» (D_SECTION_FILTERS). Разметку наполняет
 // _dRenderPropFilters, отбор идёт на бэкенде по характеристике core_type.
@@ -841,10 +872,9 @@ const D_SECTION_FILTERS = {
 
 const D_SECTION_UI = {
   terrace: {
-    params: D_TERRACE_H_PARAM,
+    params: D_TERRACE_H_PARAM + D_TERRACE_SIZE_PARAM,
     actions: [
       { lbl: 'Ещё одна',          fn: "addRect('terrace')" },
-      { lbl: 'Задать размеры',    fn: 'dOpenRectSize()', sel: true },
       { lbl: 'Удалить выбранную', fn: 'dDeleteSelected()', sel: true },
       { lbl: 'Удалить всё',       fn: "dResetSection('terrace')" },
     ],
@@ -900,6 +930,7 @@ const D_SECTION_UI = {
     ],
   },
   railing: {
+    params: D_RAIL_ENTRY_PARAM,
     actions: [
       { lbl: 'Обозначить вход', fn: 'dRailingEntry()' },
       { lbl: 'Удалить всё',     fn: "dResetSection('railing')" },
@@ -942,6 +973,8 @@ function _dSectionUiHtml(secId) {
 function _dSyncSectionActions() {
   const has = (typeof e3dSelectedIdx === 'function') && e3dSelectedIdx() !== null;
   document.querySelectorAll('#d-sb-accordion .needs-sel').forEach(b => { b.disabled = !has; });
+  // Ползунки размеров — у выбранного блока террасы.
+  if (dActiveItem === 'terrace') _dSyncTerraceSize();
 }
 
 // Удалить выбранный в сцене объект активного раздела. Одна кнопка на все
@@ -999,7 +1032,8 @@ function _dRenderSidebar() {
   _dSyncSectionActions();
   _dSyncAllRangeFills();
   // Поля параметров рисуются заново — вернуть в них значения из состояния.
-  if (dActiveItem === 'terrace') _dSyncTerraceHeight();
+  if (dActiveItem === 'terrace') { _dSyncTerraceHeight(); _dSyncTerraceSize(); }
+  if (dActiveItem === 'railing') _dSyncRailingEntryUI();
   if (dActiveItem === 'paths') {
     const v = document.getElementById('v-paths-width'), r = document.getElementById('r-paths-width');
     if (v) v.value = S.pathWidth;
@@ -1374,68 +1408,80 @@ function dFenceGate() {
 // ── «Обозначить вход» в ограждении (TODO.md, этап 2 п.4) ──
 // Ставит разрыв на самом длинном свободном участке периметра — ПО ОДНОМУ НА КАЖДУЮ
 // независимую террасу (правка 2026-08-30): у отдельно стоящих террас свои контуры,
-// и одного общего входа им мало. Дальше пользователь двигает точки прямо на плане.
-// Повторное нажатие входы убирает.
-// С правки 2026-11-20 кнопка сначала открывает окно ширины прохода (цифрами):
-// «Применить» ставит вход заданной ширины (или меняет ширину уже стоящих,
-// сохраняя их места), «Убрать проход» — убирает. Дальше всё как прежде: точки
-// входа двигаются в сцене, ступени в проходе следуют за ним.
-const D_ENTRY_W_MIN = 0.6, D_ENTRY_W_MAX = 4;    // м
+// и одного общего входа им мало. Точки входа двигаются в сцене, ступени в
+// проходе следуют за ним.
+// Правка 2026-11-23: окно «Проход в ограждении» убрано. «Обозначить вход» ставит
+// вход шириной RAIL_ENTRY_W, и в настройках появляется ползунок «Ширина
+// прохода» (центры проходов остаются на месте). Пока вход стоит, кнопка
+// называется «Убрать вход» и убирает его.
+const D_ENTRY_W_MIN = 0.6, D_ENTRY_W_MAX = 4, D_ENTRY_W_STEP = 0.1;    // м
 
 function _dHasRailingEntry() {
   return Array.isArray(S.railingEntries) && S.railingEntries.some(e => e);
 }
 
+// Ширина первого стоящего прохода (у отдельно стоящих террас их несколько,
+// ползунок меняет все сразу).
+function _dRailingEntryW() {
+  const list = Array.isArray(S.railingEntries) ? S.railingEntries : [];
+  const li = list.findIndex(e => e);
+  const w = (li >= 0 && typeof railingEntryWidth === 'function') ? railingEntryWidth(li) : null;
+  return w || ((typeof RAIL_ENTRY_W !== 'undefined') ? RAIL_ENTRY_W : 1);
+}
+
 function dRailingEntry() {
-  const ov = document.getElementById('d-entry-overlay');
-  if (!ov) return;
-  const has = _dHasRailingEntry();
-  const cur = (has && typeof railingEntryWidth === 'function') ? railingEntryWidth(0) : null;
-  const w = cur || ((typeof RAIL_ENTRY_W !== 'undefined') ? RAIL_ENTRY_W : 1);
-  const inp = document.getElementById('d-entry-w');
-  inp.value = String(Math.round(w * 100) / 100).replace('.', ',');
-  document.getElementById('d-entry-err').textContent = '';
-  document.getElementById('d-entry-remove').style.display = has ? '' : 'none';
-  ov.classList.add('active');
-  setTimeout(() => { inp.focus(); inp.select(); }, 50);
-}
-
-function dCloseRailingEntry() {
-  const ov = document.getElementById('d-entry-overlay');
-  if (ov) ov.classList.remove('active');
-}
-
-function dApplyRailingEntry() {
-  const err = document.getElementById('d-entry-err');
-  const fmt = v => String(v).replace('.', ',');
-  const w = Number(String(document.getElementById('d-entry-w').value).trim().replace(',', '.') || NaN);
-  if (!(w >= D_ENTRY_W_MIN && w <= D_ENTRY_W_MAX)) {
-    err.textContent = `Ширина прохода — число от ${fmt(D_ENTRY_W_MIN)} до ${D_ENTRY_W_MAX} м.`;
-    return;
-  }
-  const width = Math.round(w * 100) / 100;
-  // Места ступеней в проходах ДО изменения: по ним ступени найдут свой проход.
   const prev = (typeof _railingEntryStepRects === 'function') ? _railingEntryStepRects() : null;
   if (_dHasRailingEntry()) {
-    if (typeof railingSetEntryWidth === 'function') railingSetEntryWidth(width);
+    S.railingEntries = [];
+    _dRailingEntryChanged(null);
   } else {
-    const list = (typeof railingDefaultEntries === 'function') ? railingDefaultEntries(undefined, undefined, width) : [];
-    if (!list.some(e => e)) { err.textContent = 'Сначала разметьте террасу — проход ставится на её периметре.'; return; }
+    const list = (typeof railingDefaultEntries === 'function') ? railingDefaultEntries() : [];
+    if (!list.some(e => e)) { dToast('Сначала разметьте террасу — проход ставится на её периметре'); return; }
     S.railingEntries = list;
+    _dRailingEntryChanged(prev);
   }
-  dCloseRailingEntry();
-  _dRailingEntryChanged(prev);
-  if (typeof mAfterSetting === 'function') mAfterSetting();
-  // Участок ограждения короче заданного — проход встал уже: говорим об этом.
-  const got = (typeof railingEntryWidth === 'function') ? railingEntryWidth(0) : null;
-  if (got && got < width - 0.01) dToast(`Проход ${fmt(Math.round(got * 100) / 100)} м — шире на этом участке не помещается`);
+  _dSyncRailingEntryUI();
 }
 
-function dRemoveRailingEntry() {
-  S.railingEntries = [];
-  dCloseRailingEntry();
-  _dRailingEntryChanged(null);
-  if (typeof mAfterSetting === 'function') mAfterSetting();
+// Ползунок и поле «Ширина прохода».
+function dSetRailingEntryWidth(v) {
+  if (!_dHasRailingEntry()) return;
+  const n = parseFloat(String(v).replace(',', '.'));
+  if (!isFinite(n)) return;
+  const width = Math.round(Math.min(D_ENTRY_W_MAX, Math.max(D_ENTRY_W_MIN, n)) * 100) / 100;
+  // Места ступеней в проходах ДО изменения: по ним ступени найдут свой проход.
+  const prev = (typeof _railingEntryStepRects === 'function') ? _railingEntryStepRects() : null;
+  if (typeof railingSetEntryWidth === 'function') railingSetEntryWidth(width);
+  _dRailingEntryChanged(prev);
+  _dSyncRailingEntryUI(width);
+}
+
+// Участок ограждения короче заданного — проход встал уже: говорим об этом
+// (по окончании протяжки ползунка, а не на каждый его шаг).
+function dRailingEntryWidthDone() {
+  const want = parseFloat(String((document.getElementById('r-rail-entry') || {}).value || ''));
+  const got = _dRailingEntryW();
+  if (want && got < want - 0.01) {
+    dToast(`Проход ${String(Math.round(got * 100) / 100).replace('.', ',')} м — шире на этом участке не помещается`);
+  }
+  _dSyncRailingEntryUI();
+}
+
+// Кнопка, ползунок и поле — по состоянию. want — значение, которое тянут на
+// ползунке: пока его не меняем на фактическое, иначе ползунок дёргался бы.
+function _dSyncRailingEntryUI(want) {
+  const box = document.getElementById('d-rail-entry-param');
+  if (!box) return;
+  const has = _dHasRailingEntry();
+  box.style.display = has ? '' : 'none';
+  const btn = [...document.querySelectorAll('#d-sb-accordion .d-canvas-btn')]
+    .find(b => (b.getAttribute('onclick') || '').startsWith('dRailingEntry('));
+  if (btn) btn.textContent = has ? 'Убрать вход' : 'Обозначить вход';
+  if (!has) return;
+  const v = Math.round((want != null ? want : _dRailingEntryW()) * 100) / 100;
+  const inp = document.getElementById('v-rail-entry'), rng = document.getElementById('r-rail-entry');
+  if (inp && document.activeElement !== inp) inp.value = v;
+  if (rng) { rng.value = v; _dSyncRangeFill(rng); }
 }
 
 function _dRailingEntryChanged(prev) {
@@ -1576,31 +1622,24 @@ function _dSeedSection(secId, fresh) {
 }
 
 // ── Подсказка активного раздела ──
-// Висит постоянной плашкой в углу вида, пока раздел открыт (как раньше над
-// планом): всплывающее окно «один раз за сессию» пользователь не мог вернуть,
-// а работа в сцене без напоминания о жестах неочевидна.
-const D_SECTION_HINTS = {
-  terrace: 'Тяните террасу за угловые маркеры или за тело. «ЗАДАТЬ РАЗМЕРЫ» — длина и ширина выбранного блока числами. «ЕЩЁ ОДНА» добавляет блок, «УДАЛИТЬ ВЫБРАННУЮ» убирает выбранный.',
-  pool_terrace: 'Отдельно стоящая терраса: тяните за углы или за тело. «БАССЕЙН ▭» и «БАССЕЙН ○» ставят бассейн — в настиле на его месте будет вырез; повторное нажатие убирает.',
-  steps: 'Лестницу двигают за середину, ширину меняют маркерами по краям. Разворачивается к террасе автоматически, количество ступеней считается от высоты.',
-  beds: 'Грядку перетаскивайте мышью; клик по ней разворачивает на 90°.',
-  paths: 'Дорожка рисуется кликами: каждый клик добавляет точку, линия тянется дальше. Закончить — правой кнопкой мыши, Esc или повторным кликом в последнюю точку. Клик по готовой точке выделяет её — её можно перетащить или удалить. Через дом и террасу дорожка не проходит.',
-  fence: 'Забор рисуется кликами: каждый клик добавляет точку, линия тянется дальше. Закончить — правой кнопкой мыши, Esc или повторным кликом в последнюю точку. Клик по готовой точке выделяет её. Через дом и террасу и ближе 3 м к ним забор не проходит. «КАЛИТКА» ставит готовую калитку — маркер двигают по линии.',
-  railing: 'Ограждение строится по периметру террасы само и разрывается под лестницей. Нужен разрыв без лестницы — «ОБОЗНАЧИТЬ ВХОД», затем тяните маркеры разрыва по периметру.',
-  furniture: 'Мебель появляется в сцене при выборе товара в каталоге. Перетаскивайте её мышью, клик разворачивает на 90°; на террасе она встаёт на настил.',
-  facade: 'Кликайте по стенам дома, отмечая места под отделку. Повторный клик снимает выбор. Простенок и фронтон делятся по границам окна; пояс по линии карниза отделывается вместе с соседней стеной.',
-
-  facade2: 'Кликайте по стенам дома, отмечая места под отделку. Повторный клик снимает выбор. Простенок и фронтон делятся по границам окна; пояс по линии карниза отделывается вместе с соседней стеной.',
-};
+// Тексты — в hints.js (D_SECTION_HINTS, D_HINT_REV). Висит постоянной плашкой в
+// углу вида, пока раздел открыт (как раньше над планом): всплывающее окно «один
+// раз за сессию» пользователь не мог вернуть, а работа в сцене без напоминания
+// о жестах неочевидна.
 
 // Всплывающее окно при ПЕРВОМ заходе в раздел — в дополнение к плашке в углу:
 // смену текста в углу легко не заметить, а первый заход требует прочитать жесты.
 // Помним показанные разделы в рамках сессии.
 const _dHintShown = new Set();
-// Редакции подсказок разделов. Дорожки и забор: 2 — рисование непрерывное, до
-// правой кнопки; дорожки: 3 — через дом и террасу не проходят (правки 2026-09-26).
-// Терраса: 2 — кнопка «Задать размеры» (правка 2026-10-04).
-const D_HINT_REV = { paths: 3, fence: 2, terrace: 2 };
+
+// Заголовок раздела в подсказке и правой панели. У грядки — с размером
+// (правка 2026-11-23): все грядки каталога одного габарита, 3×1 м.
+function _dSectionTitle(secId) {
+  const item = D_SIDEBAR_ITEMS.find(i => i.id === secId);
+  if (!item) return '';
+  if (secId === 'beds' && typeof BED_LEN !== 'undefined') return `${item.lbl} (${BED_LEN}х${BED_WID} метр)`;
+  return item.lbl;
+}
 
 // Текст подсказки раздела. На телефоне жесты другие («касание» вместо «клик»),
 // поэтому мобильная раскладка подменяет формулировки через mHintText.
@@ -1616,17 +1655,16 @@ function _dShowEditorHint(secId) {
   _dHintShown.add(secId);
   // На телефоне окна показываются очередью (mHintTake): при первом заходе их
   // может совпасть несколько, и они перекрывали бы друг друга.
-  const item0 = D_SIDEBAR_ITEMS.find(i => i.id === secId);
   // Номер редакции подсказки входит в ключ памяти: изменилась логика раздела —
   // подсказку надо показать заново тем, кто видел старую.
   const rev = D_HINT_REV[secId] ? '@' + D_HINT_REV[secId] : '';
   if (typeof mHintTake === 'function'
-      && mHintTake('sec:' + secId + rev, item0 ? item0.lbl : '', text)) return;
+      && mHintTake('sec:' + secId + rev, _dSectionTitle(secId), text)) return;
   const ov = document.getElementById('d-hint-overlay');
   const body = document.getElementById('d-hint-text');
   const title = document.getElementById('d-hint-title');
   if (!ov || !body) return;
-  if (title) title.textContent = item0 ? item0.lbl : '';
+  if (title) title.textContent = _dSectionTitle(secId);
   body.textContent = text;
   ov.classList.add('active');
 }
@@ -1677,11 +1715,7 @@ function dHideEditorHint() {
 }
 
 // ── Подсказка по управлению 3D — всплывающим окном при ПЕРВОМ запуске ──
-// ЛКМ по объекту своего раздела — выбор и перетаскивание, по пустому месту —
-// вращение камеры (см. editor3d.js).
-const HINT_3D_TEXT = 'Левая кнопка мыши — вращение, а на объекте раздела — выбор и перетаскивание.\n'
-                   + 'Правая кнопка — перемещение.\n'
-                   + 'Колесико — масштаб.';
+// Текст — HINT_3D_TEXT в hints.js.
 let _d3dHintShown = false;
 
 function dShow3dHint() {
@@ -1824,7 +1858,7 @@ function _dRenderPanelContent() {
   // прямо в заголовке каталога, чтобы не искать её в другом месте.
   if (panelTitle) {
     panelTitle.textContent = !item ? 'Материалы'
-      : (secId === 'fence' ? `${item.lbl} (высота ${(+S.fenceH).toFixed(2)} м)` : item.lbl);
+      : (secId === 'fence' ? `${item.lbl} (высота ${(+S.fenceH).toFixed(2)} м)` : _dSectionTitle(secId));
   }
 
   // Дефолтный раздел каталога для текущего элемента (сбрасываем явный выбор при
@@ -2552,12 +2586,65 @@ function _furnitureFacingRot(spot) {
   return ((q % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
 }
 
+// Место на террасе (правка 2026-11-23): мебель ставится на настил, если
+// терраса есть. Ищем от центра блока кольцами, центр предмета — не ближе
+// 0,5 м к кромке (иначе стул свисал бы за ограждение), место свободно от
+// других предметов, ступеней, бассейна и дома (по контуру, а не по габариту:
+// у Г-образного дома габарит накрыл бы террасу во внутреннем углу). Видное с
+// камеры место предпочтительнее. Нет террасы или места на ней — null.
+function _furnitureTerraceSpot() {
+  const rects = [];
+  for (const sec of ['terrace', 'pool_terrace']) {
+    if (!S.sections.includes(sec) || typeof secRects !== 'function') continue;
+    const list = secRects(sec) || [];
+    const act = (typeof secActiveIdx === 'function') ? secActiveIdx(sec) : null;
+    list.forEach((r, i) => { if (r && r.w > 0 && r.h > 0) rects.push({ r, pri: (sec === 'terrace' ? 0 : 2) + (i === act ? 0 : 1) }); });
+  }
+  if (!rects.length) return null;
+  // Сначала основная терраса, в ней — активный блок, затем крупные.
+  rects.sort((a, b) => a.pri - b.pri || b.r.w * b.r.h - a.r.w * a.r.h);
+  const half = FURN_SPOT_M / 2 / GRID;
+  const edge = 0.5 / GRID, gap = 0.2 / GRID;
+  const blockers = _furnitureBlockers();
+  const hb = (typeof getHousePolygonNorm === 'function' && !(typeof isEmptyLot === 'function' && isEmptyLot()))
+    ? (getHousePolygonNorm() || {}).bboxNorm : null;
+  // Габарит дома из _furnitureBlockers здесь не нужен — дом проверяем контуром.
+  const others = hb ? blockers.filter(o => !(o.x === hb.nx && o.y === hb.ny && o.w === hb.nw && o.h === hb.nh))
+                    : blockers;
+  const step = SNAP / GRID;
+  let fallback = null;
+  for (const { r } of rects) {
+    const mx = Math.min(edge, r.w / 2), my = Math.min(edge, r.h / 2);
+    const onDeck = (x, y) => x >= r.x + mx - 1e-9 && x <= r.x + r.w - mx + 1e-9
+                          && y >= r.y + my - 1e-9 && y <= r.y + r.h - my + 1e-9;
+    const free = (x, y) => {
+      if (!onDeck(x, y)) return false;
+      const f = { x: x - half, y: y - half, w: half * 2, h: half * 2 };
+      if (others.some(o => _rectsOverlap(f, o, gap))) return false;
+      return !(typeof _houseCovers === 'function' && _houseCovers(f));
+    };
+    const x0 = snapNorm(r.x + r.w / 2), y0 = snapNorm(r.y + r.h / 2);
+    const kMax = Math.ceil(Math.max(r.w, r.h) / step);
+    for (let k = 0; k <= kMax; k++) {
+      for (let a = 0; a < (k ? 12 : 1); a++) {
+        const ang = a * Math.PI / 6;
+        const x = snapNorm(x0 + Math.cos(ang) * k * step), y = snapNorm(y0 + Math.sin(ang) * k * step);
+        if (!free(x, y)) continue;
+        if (_furnitureVisible(x, y)) return { x, y };
+        if (!fallback) fallback = { x, y };
+      }
+    }
+  }
+  return fallback;
+}
+
 // Выбор товара в каталоге СТАВИТ предмет мебели (ТЗ п. 10): точек размещения
 // больше нет, «Ещё одна» не нужна — повторный клик по карточке ставит второй
-// экземпляр. Место — перед камерой, ближайшее свободное.
+// экземпляр. Место — на террасе, если она есть и на ней свободно (правка
+// 2026-11-23), иначе перед камерой, ближайшее свободное.
 function _assignFurnitureProduct(sample) {
   if (!Array.isArray(S.furniture)) S.furniture = [];
-  const spot = _furnitureFreeSpot(_furnitureCameraSpot());
+  const spot = _furnitureTerraceSpot() || _furnitureFreeSpot(_furnitureCameraSpot());
   S.furniture.push({
     x: spot.x, y: spot.y, rot: _furnitureFacingRot(spot),
     product: { id: sample.id, name: sample.name, modelUrl: sample.modelUrl || '' },
@@ -3139,7 +3226,7 @@ function dHidePhoto() {
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { dHidePhoto(); dCloseRectSize(); dCloseRailingEntry(); dCloseProduct(); }
+  if (e.key === 'Escape') { dHidePhoto(); dCloseProduct(); }
 });
 
 // URL картинки из поля каталога. Битрикс отдаёт такие поля по-разному: строкой-URL,
@@ -4268,62 +4355,53 @@ function dSyncRequestConsent() {
   if (btn) btn.disabled = !(box && box.checked);
 }
 
-// ── Размеры террасы числами (правка 2026-10-04) ──────────────────────────
-// «Задать размеры» открывает окно с длиной и шириной выбранного блока — в том
-// же порядке, что подпись под ним в сцене. Применяет resizeRectTo (canvas.js):
-// прижатая к дому кромка остаётся на месте, наложения запрещены, как при
-// перетаскивании. Не поместилось — блок не меняется, окно объясняет почему.
-const D_RECT_SIZE_MAX = 30;      // м — участок 32 × 32 м
+// ── Длина и ширина террасы ползунками (правка 2026-11-23) ──────────────────
+// Были окном «Задать размеры» (2026-10-04). Ползунки меняют ВЫБРАННЫЙ блок
+// через resizeRectTo (canvas.js): прижатая к дому кромка остаётся на месте,
+// наложения запрещены, как при перетаскивании. Не помещается — блок не
+// меняется, ползунок возвращается, подсказка говорит почему. Длина — первая
+// цифра подписи под блоком (по X плана), ширина — вторая.
+const D_RECT_SIZE_MAX = 20;      // м — потолок ползунка; участок 32 × 32 м
 
-function dOpenRectSize() {
-  const sec = dActiveItem;
-  const idx = (typeof e3dSelectedIdx === 'function') ? e3dSelectedIdx() : null;
-  const r = (sec && idx !== null) ? secRects(sec)[idx] : null;
-  const ov = document.getElementById('d-size-overlay');
-  if (!r || !ov) return;
-  const min = (RECT_MIN_M[sec] || SNAP);
-  // Поля текстовые, а не number: в русской раскладке дробь пишут через запятую,
-  // а number её не принимает. Показываем тоже с запятой.
-  const fmt = v => String(Math.round(v * 100) / 100).replace('.', ',');
-  document.getElementById('d-size-w').value = fmt(r.w * GRID);
-  document.getElementById('d-size-h').value = fmt(r.h * GRID);
-  document.getElementById('d-size-note').textContent =
-    `От ${fmt(min)} до ${D_RECT_SIZE_MAX} м, в том же порядке, что подпись под террасой.`;
-  document.getElementById('d-size-err').textContent = '';
-  ov.dataset.sec = sec;
-  ov.dataset.idx = idx;
-  ov.classList.add('active');
-  setTimeout(() => { const w = document.getElementById('d-size-w'); w.focus(); w.select(); }, 50);
-}
-
-function dCloseRectSize() {
-  const ov = document.getElementById('d-size-overlay');
-  if (ov) ov.classList.remove('active');
-}
-
-function dApplyRectSize() {
-  const ov = document.getElementById('d-size-overlay');
-  const err = document.getElementById('d-size-err');
-  if (!ov) return;
-  const sec = ov.dataset.sec, idx = +ov.dataset.idx;
-  const min = (RECT_MIN_M[sec] || SNAP);
-  const fmt = v => String(v).replace('.', ',');
-  const read = id => Number(String(document.getElementById(id).value).trim().replace(',', '.') || NaN);
-  const w = read('d-size-w'), h = read('d-size-h');
-  if (!(w >= min && w <= D_RECT_SIZE_MAX && h >= min && h <= D_RECT_SIZE_MAX)) {
-    err.textContent = `Размеры — числа от ${fmt(min)} до ${D_RECT_SIZE_MAX} м.`;
-    return;
-  }
-  // До сантиметра: точнее разметку никто не задаёт, а ровные числа легче проверять.
-  const res = resizeRectTo(sec, idx, Math.round(w * 100) / 100, Math.round(h * 100) / 100);
+function dSetTerraceSize(which, v) {
+  const sec = 'terrace';
+  const idx = secActiveIdx(sec);
+  const r = (idx !== null && idx !== undefined) ? secRects(sec)[idx] : null;
+  if (!r) return;
+  const min = RECT_MIN_M[sec] || SNAP;
+  const n = parseFloat(String(v).replace(',', '.'));
+  if (!isFinite(n)) return;
+  const m = Math.round(Math.min(D_RECT_SIZE_MAX, Math.max(min, n)) / SNAP) * SNAP;
+  const wM = which === 'w' ? m : Math.round(r.w * GRID * 100) / 100;
+  const hM = which === 'h' ? m : Math.round(r.h * GRID * 100) / 100;
+  const res = resizeRectTo(sec, idx, wM, hM);
   if (!res) {
-    err.textContent = 'Терраса таких размеров здесь не помещается: мешает дом, другой объект или граница участка.';
+    if (typeof _e3dToastOnce === 'function') _e3dToastOnce('Такой размер здесь не помещается: мешает дом, другой объект или граница участка');
+    _dSyncTerraceSize();
     return;
   }
-  Object.assign(secRects(sec)[idx], res);
-  dCloseRectSize();
+  Object.assign(r, res);
   _secChanged(sec);
-  if (typeof mAfterSetting === 'function') mAfterSetting();
+  _dSyncTerraceSize();
+}
+
+// Ползунки и поля — по выбранному блоку (выбор в сцене, перетаскивание).
+function _dSyncTerraceSize() {
+  if (dActiveItem !== 'terrace') return;
+  const idx = secActiveIdx('terrace');
+  const r = (idx !== null && idx !== undefined) ? secRects('terrace')[idx] : null;
+  const min = RECT_MIN_M.terrace || SNAP;
+  for (const [id, val] of [['len', r && r.w], ['wid', r && r.h]]) {
+    const inp = document.getElementById('v-terrace-' + id), rng = document.getElementById('r-terrace-' + id);
+    const v = r ? Math.round(val * GRID * 100) / 100 : min;
+    for (const el of [inp, rng]) {
+      if (!el) continue;
+      el.disabled = !r;
+      el.min = min; el.max = D_RECT_SIZE_MAX;
+    }
+    if (inp && document.activeElement !== inp) inp.value = v;
+    if (rng) { rng.value = v; _dSyncRangeFill(rng); }
+  }
 }
 
 function dCloseRequest() {

@@ -773,6 +773,15 @@ function _e3dDragStart(hit, np) {
   return null;
 }
 
+// Подсказка при упоре в запрет — не чаще раза в 2 с, а не на каждый кадр протяжки.
+let _e3dToastAt = 0;
+function _e3dToastOnce(msg) {
+  const now = Date.now();
+  if (now - _e3dToastAt < 2000 || typeof dToast !== 'function') return;
+  _e3dToastAt = now;
+  dToast(msg);
+}
+
 function _e3dDragMove(np) {
   const d = E3D.drag, sec = E3D.sec;
   if (!d) return;
@@ -794,12 +803,14 @@ function _e3dDragMove(np) {
   } else if (d.kind === 'steps') {
     const st = (S.stepsList || [])[d.idx];
     if (!st) return;
-    // excludeIdx = -1 — лестница снапается ко ВСЕМ террасам и стенам дома.
-    const res = snapDraggedRect(d.handle, d.start, dx, dy, -1);
+    // Перемещение снапается ко ВСЕМ террасам и стенам дома, ширина меняется
+    // ровно шагом 0,25 м (stepsDragRect, правка 2026-11-23).
+    const res = stepsDragRect(d.handle, d.start, dx, dy);
     const was = { x: st.x, y: st.y, w: st.w, h: st.h };
     st.x = res.x; st.y = res.y; st.w = res.w; st.h = res.h;
     _stepsNormalize();                       // глубину и разворот задаёт не пользователь
-    _stepsSnapToRailPost(d.handle);          // «залипание» к столбу ограждения
+    // «Залипание» к столбу ограждения — только при перемещении.
+    if (d.handle === 'move') _stepsSnapToRailPost('move');
     // Проверяем уже нормализованную лестницу: разворот и глубину ставит код, и
     // именно они решают, налезает ли она на соседей.
     if (blocked({ x: st.x, y: st.y, w: st.w, h: st.h }, 'steps', d.idx)) {
@@ -810,7 +821,13 @@ function _e3dDragMove(np) {
     const b = (S.beds || [])[d.idx];
     if (!b || d.handle !== 'move') return;
     const c = _clampBedPos(snapNorm(d.start.x + dx), snapNorm(d.start.y + dy), b.w, b.h);
-    if (blocked({ x: c.x, y: c.y, w: b.w, h: b.h }, 'beds', d.idx)) return;
+    const nr = { x: c.x, y: c.y, w: b.w, h: b.h };
+    // Ближе 1 м к дому грядка не встаёт (правка 2026-11-23) — говорим почему.
+    if (typeof bedTooCloseToHouse === 'function' && bedTooCloseToHouse(nr)) {
+      _e3dToastOnce('Грядка ставится не ближе 1 м к дому');
+      return;
+    }
+    if (blocked(nr, 'beds', d.idx)) return;
     b.x = c.x; b.y = c.y;
   } else if (d.kind === 'point') {
     const p = (S.furniture || [])[d.idx];
@@ -877,6 +894,9 @@ function _e3dDragMove(np) {
     for (const i of group) { if (pts[i]) { pts[i].x = q.x; pts[i].y = q.y; } }
   }
   e3dSync();   // сцену НЕ пересобираем: тяжёлая сборка идёт один раз, на отпускании
+  // Ползунки настроек следуют за маркерами (правка 2026-11-23).
+  if (d.kind === 'rect' && sec === 'terrace' && typeof _dSyncTerraceSize === 'function') _dSyncTerraceSize();
+  if (d.kind === 'entry' && typeof _dSyncRailingEntryUI === 'function') _dSyncRailingEntryUI();
 }
 
 // ── Рисование дорожек и забора отрезками ─────────────────────────────────

@@ -655,6 +655,28 @@ function _planDistToPolyEdge(p, poly) {
   return best;
 }
 
+// Грядка не ближе 1 м к дому (правка 2026-11-23): у стены ей не место — там
+// отмостка и капель с крыши. Расстояние — от прямоугольника до контура дома.
+const BED_HOUSE_CLEAR = 1.0;   // м
+
+function bedTooCloseToHouse(rect) {
+  if (typeof isEmptyLot === 'function' && isEmptyLot()) return false;
+  const hp = (typeof getHousePolygonNorm === 'function') ? getHousePolygonNorm() : null;
+  const poly = hp && hp.corners;
+  if (!poly || poly.length < 3 || !rect) return false;
+  const lim = BED_HOUSE_CLEAR / GRID - COLLIDE_EPS;
+  const rc = [{ x: rect.x, y: rect.y }, { x: rect.x + rect.w, y: rect.y },
+              { x: rect.x + rect.w, y: rect.y + rect.h }, { x: rect.x, y: rect.y + rect.h }];
+  // Углы грядки до стен и углы дома до сторон грядки — для двух выпуклых и
+  // невыпуклых контуров без пересечения этого достаточно; пересечение ловит
+  // _houseCovers.
+  for (const c of rc) if (_planDistToPolyEdge(c, poly) < lim) return true;
+  for (const v of poly) {
+    for (let i = 0; i < 4; i++) if (_planDistToSeg(v, rc[i], rc[(i + 1) % 4]) < lim) return true;
+  }
+  return false;
+}
+
 // Главная проверка: можно ли поставить rect объекту раздела secId (idx — его
 // собственный индекс, чтобы он не мешал сам себе).
 function rectCollides(rect, secId, idx) {
@@ -664,6 +686,7 @@ function rectCollides(rect, secId, idx) {
   // Дом не проходим ни для чего, мебель включительно: она может стоять на
   // настиле и протыкать ограждение террасы, но не стены дома.
   if (_houseCovers(rect)) return true;
+  if (secId === 'beds' && bedTooCloseToHouse(rect)) return true;
   for (const b of _collideBlockers(secId, idx)) {
     if (rect.x < b.x + b.w - COLLIDE_EPS && rect.x + rect.w - COLLIDE_EPS > b.x
         && rect.y < b.y + b.h - COLLIDE_EPS && rect.y + rect.h - COLLIDE_EPS > b.y) return true;
@@ -694,7 +717,8 @@ function _placeFree(rect, exceptSec, axes) {
   const gap = 0.2 / GRID;                        // 20 см зазора между объектами
   // Дом считается ПО ПОЛИГОНУ: терраса пристраивается к стене вплотную (для неё
   // дом не в occupied), но внутрь дома не заходит — как и всё остальное (п. 14).
-  const free = r => !occupied.some(o => _rectsOverlap(r, o, gap)) && !_houseCovers(r);
+  const free = r => !occupied.some(o => _rectsOverlap(r, o, gap)) && !_houseCovers(r)
+    && !(exceptSec === 'beds' && bedTooCloseToHouse(r));
   if (free(rect)) return rect;
   const step = 0.5 / GRID;
   for (let k = 1; k <= 40; k++) {
@@ -2358,13 +2382,46 @@ function applyStepsDrag(wx, wy, W) {
   const dx = (wx - ds.mx) / W, dy = (wy - ds.my) / W;
   const s = S.steps;
   // excludeIdx = -1 — ступени снапаются ко ВСЕМ террасным rect'ам + стенам дома.
-  const res = snapDraggedRect(stepsDrag, ds, dx, dy, -1);
+  const res = stepsDragRect(stepsDrag, ds, dx, dy);
   s.x = res.x; s.y = res.y; s.w = res.w; s.h = res.h;
   _stepsNormalize();     // глубину и разворот пользователь не задаёт
-  // «Залипание» к столбу ограждения (TODO.md 10): при перемещении двигаем лестницу
-  // целиком, при resize подтягиваем перетаскиваемую кромку.
-  _stepsSnapToRailPost(stepsDrag);
+  // «Залипание» к столбу ограждения (TODO.md 10) — только при перемещении:
+  // ширина меняется ровным шагом (stepsDragRect).
+  if (stepsDrag === 'move') _stepsSnapToRailPost('move');
   drawStepsCanvas();
+}
+
+// Протяжка лестницы (план и 3D). Перемещение — как у прямоугольников (сетка,
+// прилипание к стенам и кромкам террас). Ширина (правка 2026-11-23) — ровно
+// шагом SNAP = 0,25 м от неподвижной кромки: раньше двигалась кромка по
+// абсолютной сетке, к стенам и к столбам ограждения, и у ступеней, стоящих не
+// на сетке (в проходе ограждения, у стены дома), ширина прыгала на 0,5–0,75 м.
+function stepsDragRect(kind, ds, dx, dy) {
+  if (kind === 'move') return snapDraggedRect('move', ds, dx, dy, -1);
+  const D = _stepsDepthNorm();
+  // Ось спуска — та, по которой размер равен глубине (как в _stepsNormalize):
+  // ширина лежит поперёк неё.
+  const widthAlongX = Math.abs(ds.h - D) <= Math.abs(ds.w - D);
+  const step = SNAP / GRID;
+  const out = { x: ds.x, y: ds.y, w: ds.w, h: ds.h };
+  if (widthAlongX) {
+    const hi = (kind === 'ne' || kind === 'se');          // тянем правую кромку
+    const w0 = ds.w, d = hi ? dx : -dx;
+    let w = Math.max(step, w0 + Math.round(d / step) * step);
+    if (hi) w = Math.min(w, 1 - ds.x);
+    else    w = Math.min(w, ds.x + w0);
+    out.w = w;
+    if (!hi) out.x = ds.x + w0 - w;
+  } else {
+    const hi = (kind === 'sw' || kind === 'se');          // тянем нижнюю кромку
+    const h0 = ds.h, d = hi ? dy : -dy;
+    let h = Math.max(step, h0 + Math.round(d / step) * step);
+    if (hi) h = Math.min(h, 1 - ds.y);
+    else    h = Math.min(h, ds.y + h0);
+    out.h = h;
+    if (!hi) out.y = ds.y + h0 - h;
+  }
+  return out;
 }
 
 function attachStepsEvents(wrap) {
@@ -3414,7 +3471,7 @@ function rotateActiveBed() {
     _secChanged('beds');
     return;
   }
-  if (typeof dToast === 'function') dToast('Здесь грядку не развернуть — мешают соседние объекты');
+  if (typeof dToast === 'function') dToast('Здесь грядку не развернуть — мешают соседние объекты или дом ближе 1 м');
 }
 
 function hitBeds(wx, wy, W) {
@@ -3457,6 +3514,7 @@ function applyBedDrag(wx, wy, W) {
   const dx = (wx - ds.mx) / W, dy = (wy - ds.my) / W;
   if (Math.hypot(dx, dy) > 0.002) _bedMoved = true;   // ~6 см на плане
   const res = snapBedMove(ds, dx, dy);
+  if (bedTooCloseToHouse(res)) return;       // не ближе 1 м к дому
   const b = S.beds[bedDragIdx];
   b.x = res.x; b.y = res.y; b.w = res.w; b.h = res.h;
   drawBedsCanvas();
