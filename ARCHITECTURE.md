@@ -32,6 +32,9 @@
                           # Шаг «Параметры»: заголовок и «Назад/Дальше» приколочены,
                           # скролл только у .d-params-scroll. Правая панель материалов
                           # (.d-panel) скрыта (.hidden), пока не выбран элемент проекта.
+  hints.js                # ТЕКСТЫ ПОДСКАЗОК (десктоп и телефон): разделы, экраны,
+                          # управление видом. Правится вручную; после правки поднять
+                          # ?v= в index.html, для повторного показа — D_HINT_REV
   nav-desktop.js          # dGoTo, sidebar, canvas editors, right panel, catalog,
                           # карусель домов + прогресс-каунтер генерации превью
 
@@ -168,7 +171,8 @@ state.js → canvas.js
 → RESOURCE_API_DOMAIN (inline) → ResourceManager.js  (каталожный API; зависит от THREE)
 → webgl-guard.js (проверка WebGL, сообщения о сбоях видеокарты)
 → viewer3d-core.js → viewer3d-builders.js → viewer3d-railing.js
-→ viewer3d-entourage.js → nav-desktop.js
+→ viewer3d-entourage.js → editor3d.js → hints.js → nav-desktop.js → nav-mobile.js
+→ project-io.js
 
 viewer3d-core/builders/railing — classic scripts с общей глобальной областью
 видимости; кросс-файловые обращения только на этапе вызова (runtime), поэтому
@@ -183,12 +187,12 @@ viewer3d-core/builders/railing — classic scripts с общей глобаль�
 версию поднимать обязательно. Актуальный срез (совпадает с `index.html`):
 
 ```
-color-management.js?v=1   styles-desktop.css?v=60   styles-mobile.css?v=9
-state.js?v=78             canvas.js?v=71            shared/house-builder.js?v=92
+color-management.js?v=1   styles-desktop.css?v=61   styles-mobile.css?v=10
+state.js?v=78             canvas.js?v=72            shared/house-builder.js?v=92
 ResourceManager.js?v=16   webgl-guard.js?v=1        viewer3d-core.js?v=170
 viewer3d-builders.js?v=70 viewer3d-railing.js?v=19  viewer3d-entourage.js?v=14
-editor3d.js?v=28          nav-desktop.js?v=151      nav-mobile.js?v=11
-project-io.js?v=8         backend_API/Calculator.js?v=5
+editor3d.js?v=29          hints.js?v=1              nav-desktop.js?v=152
+nav-mobile.js?v=12        project-io.js?v=8         backend_API/Calculator.js?v=5
 ```
 
 `viewer3d-entourage.js` автоматически детектит `IS_MOBILE` (UA + `innerWidth<768`)
@@ -973,6 +977,44 @@ editor3d.js), `mHintTake` / `mHintClosed` / `mHintText`
   продуктом масштаб текстуры на балясинах.
 - В «Порядок подключения скриптов» добавлен актуальный срез `?v=N`, чтобы версии не искать
   по журналу; в решения — две строки про снап ограждения.
+
+Ветка **Mobile**: правки 2026-11-23 — ступени, грядки, мебель, ползунки, тексты подсказок.
+
+- **Ширина ступеней — ровно шагом 0,25 м** (`stepsDragRect`, canvas.js; план и
+  3D): ширина считается от неподвижной кромки. Раньше двигалась кромка по
+  абсолютной сетке, прилипала к стенам и к столбам ограждения
+  (`_stepsSnapToRailPost`), и у ступеней не на сетке (в проходе ограждения)
+  ширина прыгала на 0,5–0,75 м. Прилипание к столбам осталось только у
+  перемещения.
+- **Грядка не ближе 1 м к дому** (`bedTooCloseToHouse`, `BED_HOUSE_CLEAR`):
+  расстояние от прямоугольника до контура дома; в `rectCollides('beds')`,
+  `_placeFree` (новые грядки), протяжке на плане и в 3D (подсказка
+  `_e3dToastOnce`), повороте.
+- **Высота грядки в фильтре**: у товаров есть `dimensions.height`
+  (150/200/225/270/300 мм), но `products/filters/?tags=garden_beds` её не
+  отдаёт (цвет, тип уголка, ценовая категория). Нужна правка бэкенда; панель
+  фильтров строится по ответу сервера, так что высота появится сама.
+- **«Грядки (3х1 метр)»** — заголовок окна-подсказки и правой панели
+  (`_dSectionTitle`), размер и в тексте подсказки.
+- **Мебель встаёт на террасу** (`_furnitureTerraceSpot`): от центра блока
+  кольцами, центр предмета не ближе 0,5 м к кромке, место свободно, дом — по
+  контуру; видное с камеры место предпочтительнее. Нет террасы или места —
+  как раньше, перед камерой.
+- **Терраса: ползунки «Длина» и «Ширина»** выбранного блока (шаг 0,25 м,
+  1–20 м; `dSetTerraceSize` → `resizeRectTo`) вместо кнопки и окна «Задать
+  размеры» (`#d-size-overlay` удалено). Не помещается — ползунок возвращается,
+  подсказка. Следуют за маркерами в 3D и за выбором блока.
+- **Ограждение: ползунок «Ширина прохода»** (0,6–4 м, шаг 0,1;
+  `dSetRailingEntryWidth`) вместо окна `#d-entry-overlay` (удалено).
+  «Обозначить вход» ставит вход шириной `RAIL_ENTRY_W` и показывает ползунок;
+  пока вход есть, кнопка — «Убрать вход». Ступени в проходе подстраиваются.
+  На телефоне эта кнопка настройки не сворачивает.
+- **Тексты подсказок — в hints.js** (`D_SECTION_HINTS`, `D_HINT_REV`,
+  `HINT_3D_TEXT`, `M_3D_KEY`, `M_3D_HINT`, `M_SCREEN_HINTS`,
+  `M_SECTION_HINTS`), с инструкцией в шапке файла.
+- Cache-bust: `styles-desktop.css?v=61`, `styles-mobile.css?v=10`,
+  `canvas.js?v=72`, `editor3d.js?v=29`, `hints.js?v=1`, `nav-desktop.js?v=152`,
+  `nav-mobile.js?v=12`.
 
 Ветка **Mobile**: правки 2026-11-20 (3) — мобильная: подсказки, жесты камеры.
 
